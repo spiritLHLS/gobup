@@ -7,18 +7,48 @@
 
 ## 快速部署
 
+**GoBup 使用 HTTP Basic Auth 进行身份认证**
+
+**首次使用必须设置用户名和密码：**
+
+1. **安装脚本部署**：使用环境变量 `GOBUP_USERNAME` 和 `GOBUP_PASSWORD`
+2. **Docker 部署**：使用环境变量 `USERNAME` 和 `PASSWORD`
+3. **手动部署**：使用命令行参数 `-username` 和 `-password`
+
+**如果不设置认证信息：**
+- 首次访问会进入登录页面，要求输入用户名和密码
+- 输入的凭证将保存在浏览器本地，用于后续请求认证
+- 建议：在部署时就设置好用户名密码，避免浏览器弹窗
+
+**认证信息仅在首次启动时创建管理员账户使用，后续修改需要删除数据库重新初始化。**
+
 ### 方式一：一键安装脚本（推荐）
 
 使用一键安装脚本，自动下载并安装最新版本的服务器和Web文件：
+
+**无认证部署（首次访问需登录）：**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh -o install.sh && chmod +x install.sh && bash install.sh
 ```
 
+**带认证部署（推荐）：**
+
+```bash
+# 下载脚本
+curl -fsSL https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh -o install.sh && chmod +x install.sh
+
+# 设置用户名密码安装
+GOBUP_USERNAME=admin GOBUP_PASSWORD=your_secure_password bash install.sh
+```
+
 或使用 wget：
 
 ```bash
-wget -O install.sh https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh && chmod +x install.sh && bash install.sh
+wget -O install.sh https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh && chmod +x install.sh
+
+# 设置用户名密码安装
+GOBUP_USERNAME=root GOBUP_PASSWORD=123456 bash install.sh
 ```
 
 **支持的选项：**
@@ -28,15 +58,20 @@ wget -O install.sh https://raw.githubusercontent.com/spiritlhls/gobup/main/insta
 
 **环境变量：**
 - `INSTALL_VERSION=vYYYYMMDD-HHMMSS` - 指定安装版本
+- `GOBUP_USERNAME=admin` - 管理员用户名（推荐设置）
+- `GOBUP_PASSWORD=password` - 管理员密码（推荐设置）
 
 **示例：**
 
 ```bash
-# 完整安装（使用最新版本）
+# 完整安装（无认证，首次访问需登录）
 bash install.sh
 
-# 安装指定版本
-INSTALL_VERSION=v20250101-120000 bash install.sh
+# 完整安装并设置认证（推荐）
+GOBUP_USERNAME=admin GOBUP_PASSWORD=123456 bash install.sh
+
+# 安装指定版本并设置认证
+INSTALL_VERSION=v20250101-120000 GOBUP_USERNAME=root GOBUP_PASSWORD=secret bash install.sh
 
 # 升级到最新版本
 bash install.sh upgrade
@@ -44,6 +79,8 @@ bash install.sh upgrade
 
 **安装后访问：**
 - Web界面: http://localhost:12380
+- 如果设置了认证，使用设置的用户名密码登录
+- 如果未设置认证，首次访问会要求输入用户名密码
 - 服务管理: `systemctl status gobup`
 
 <details>
@@ -60,9 +97,7 @@ bash install.sh upgrade
 | `spiritlhls/gobup:latest` | 最新版本 | 快速部署 |
 | `spiritlhl/gobup:20251230-062908` | 特定日期版本 | 需要固定版本 |
 
-所有镜像均支持 `linux/amd64` 和 `linux/arm64` 架构。
-
-**基础运行（无密码）：**
+所有镜像均支持 `l，首次访问需登录）：**
 
 ```bash
 docker pull spiritlhl/gobup:latest
@@ -76,30 +111,18 @@ docker run -d \
   spiritlhl/gobup:latest
 ```
 
-或者使用 GitHub Container Registry：
+**完整配置运行（带认证，推荐）：**
 
 ```bash
-docker pull ghcr.io/spiritlhl/gobup:latest
+docker pull spiritlhl/gobup:latest
 
-docker run -d \
-  --name gobup \
-  -p 22380:12380 \
-  -v /path/to/recordings:/rec \
-  -v /path/to/data:/app/data \
-  --restart unless-stopped \
-  ghcr.io/spiritlhl/gobup:latest
-```
-
-**完整配置运行（有密码）：**
-
-```bash
 docker run -d \
   --name gobup \
   -p 22380:12380 \
   -v /root/recordings:/rec \
   -v /root/data:/app/data \
-  -e USERNAME=root \
-  -e PASSWORD=your_password \
+  -e USERNAME=admin \
+  -e PASSWORD=your_secure_password \
   --restart unless-stopped \
   spiritlhl/gobup:latest
 ```
@@ -144,15 +167,24 @@ docker-compose up -d
 
 <details>
 <summary>展开查看编译打包方式</summary>
+            # 管理员用户名（推荐设置）
+      - PASSWORD=your_password      # 管理员密码（推荐设置）
+```
 
-### 方式四：自己编译打包
-
-如果需要修改源码或自定义构建：
+运行：
 
 ```bash
-git clone https://github.com/spiritlhls/gobup.git
-cd gobup
-docker build -t gobup .
+# 直接运行（使用配置文件中的密码）
+docker-compose up -d
+
+# 或通过环境变量覆盖
+GOBUP_USERNAME=root GOBUP_PASSWORD=123456 docker-compose up -d
+```
+
+**环境变量说明：**
+- `USERNAME` 和 `PASSWORD`：仅在首次启动时创建管理员账户
+- 如不设置，首次访问会要求登录
+- 后续修改需删除 `./data/gobup.db` 重新初始化ker build -t gobup .
 docker run -d \
   --name gobup \
   -p 22380:12380 \
@@ -188,14 +220,29 @@ tar -xzf gobup-server-linux-amd64.tar.gz
 ./gobup-server-linux-amd64 -port 12380 -work-path /path/to/recordings
 
 # Windows
+# 解压 gobup-se（无认证）
+tar -xzf gobup-server-linux-amd64.tar.gz
+./gobup-server-linux-amd64 -port 12380 -work-path /path/to/recordings
+
+# Linux/macOS（带认证，推荐）
+./gobup-server-linux-amd64 -port 12380 -work-path /path/to/recordings \
+  -username admin -password your_p推荐设置，仅首次启动时有效） |
+| 环境变量 | `-e PASSWORD` | 初始管理员密码（推荐设置
+# Windows（无认证）
 # 解压 gobup-server-windows-amd64.zip
 gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
+
+# Windows（带认证，推荐）
+gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings ^
+  -username admin -password your_password
 ```
 
-启动后访问 `http://localhost:12380` 即可看到 Web 管理界面。
-
-</details>
-
+**命令行参数说明：**
+- `-port`: Web 服务端口（默认 12380）
+- `-work-path`: 录播文件工作目录
+- `-username`: 管理员用户名（可选，首次启动时创建）
+- `-password`: 管理员密码（可选，首次启动时创建）
+- `-data-path`: 数据目录（默认 ./data）
 ### 容器参数说明
 
 | 类型 | 参数 | 说明 |
@@ -214,6 +261,90 @@ gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
 - 所有部署方式统一访问：`http://localhost:22380`（宿主机端口）
 - 或使用服务器IP：`http://你的IP:22380`
 - 容器内部端口：`12380`（前端已嵌入，无需Nginx）
+
+## 认证配置
+
+### 认证方式说明
+
+GoBup 使用 HTTP Basic Auth 进行身份认证，保护您的管理界面和数据安全。
+
+**首次部署时强烈建议设置用户名和密码！**
+
+### 如何设置认证
+
+#### 方法一：安装脚本部署
+
+```bash
+# 使用环境变量
+GOBUP_USERNAME=admin GOBUP_PASSWORD=your_password bash install.sh
+```
+
+#### 方法二：Docker 部署
+
+```bash
+# Docker run
+docker run -d \
+  -e USERNAME=admin \
+  -e PASSWORD=your_password \
+  ...其他参数
+
+# Docker Compose
+environment:
+  - USERNAME=admin
+  - PASSWORD=your_password
+```
+
+#### 方法三：手动运行
+
+```bash
+./gobup-server -username admin -password your_password -port 12380 -work-path /path/to/recordings
+```
+
+### 常见问题
+
+**Q: 为什么一直提示要认证？**
+
+A: 可能的原因：
+1. **未设置用户名密码** - 首次部署时没有设置 USERNAME 和 PASSWORD 环境变量
+2. **浏览器未保存凭证** - 清除了浏览器缓存或使用了隐私模式
+3. **凭证错误** - 输入的用户名密码与启动时设置的不一致
+
+**Q: 如何首次登录？**
+
+A: 
+- 如果部署时设置了 USERNAME 和 PASSWORD，使用这些凭证登录
+- 如果未设置，访问时会自动跳转到登录页面，输入任意用户名密码即可（建议使用强密码）
+
+**Q: 忘记密码怎么办？**
+
+A: 
+1. 停止服务：`systemctl stop gobup` 或 `docker stop gobup`
+2. 删除数据库：`rm /app/data/gobup.db` 或 `rm ./data/gobup.db`
+3. 重新启动并设置新密码：
+   ```bash
+   # systemd
+   sudo systemctl edit gobup
+   # 添加：
+   [Service]
+   Environment="USERNAME=newadmin"
+   Environment="PASSWORD=newpassword"
+   sudo systemctl restart gobup
+   
+   # Docker
+   docker rm gobup
+   docker run -d -e USERNAME=newadmin -e PASSWORD=newpassword ...
+   ```
+
+**Q: 可以修改密码吗？**
+
+A: 当前版本暂不支持在线修改密码，需要删除数据库重新初始化（会丢失所有数据）。建议部署时就设置好强密码并妥善保管。
+
+**Q: 为什么浏览器一直弹出认证窗口？**
+
+A: 
+- 浏览器的 HTTP Basic Auth 弹窗是原生行为
+- 使用新的登录页面（已在本次更新中添加）可以避免浏览器弹窗
+- 确保前端代码已更新到最新版本
 
 ## 配置说明
 

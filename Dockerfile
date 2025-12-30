@@ -56,4 +56,5 @@ EXPOSE 12380
 
 VOLUME ["/rec", "/app/data"]
 
-CMD ["/app/gobup", "-port", "12380", "-work-path", "/rec"]
+# USERNAME 和 PASSWORD 环境变量将在运行时传递给程序
+CMD ["/bin/sh", "-c", "/app/gobup -port 12380 -work-path /rec -username \"${USERNAME:-}\" -password \"${PASSWORD:-}\""]

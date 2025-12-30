@@ -32,6 +32,20 @@
       <el-header>
         <div class="header-content">
           <h3>{{ currentTitle }}</h3>
+          <div class="header-actions">
+            <el-dropdown @command="handleCommand">
+              <span class="user-info">
+                <el-icon><User /></el-icon>
+                {{ username }}
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </span>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
         </div>
       </el-header>
       <el-main>
@@ -42,13 +56,32 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessageBox, ElMessage } from 'element-plus'
+import { ArrowDown } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const router = useRouter()
 
 const activeMenu = computed(() => route.path)
 const currentTitle = computed(() => route.meta.title || 'GoBup')
+const username = ref(localStorage.getItem('username') || 'admin')
+
+const handleCommand = (command) => {
+  if (command === 'logout') {
+    ElMessageBox.confirm('确定要退出登录吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }).then(() => {
+      localStorage.removeItem('username')
+      localStorage.removeItem('password')
+      ElMessage.success('已退出登录')
+      router.push('/login')
+    }).catch(() => {})
+  }
+}
 </script>
 
 <style scoped>
@@ -73,10 +106,36 @@ const currentTitle = computed(() => route.meta.title || 'GoBup')
   border-right: none;
   background-color: #001529;
 }
-
-.sidebar-menu :deep(.el-menu-item) {
-  color: rgba(255, 255, 255, 0.65);
+{
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
+
+.header-content h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: background-color 0.3s;
+}
+
+.user-info:hover {
+  background-color: #f5f5f5
 
 .sidebar-menu :deep(.el-menu-item:hover),
 .sidebar-menu :deep(.el-menu-item.is-active) {

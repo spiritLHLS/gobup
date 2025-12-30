@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import router from '@/router'
 
 const request = axios.create({
   baseURL: '/api',
@@ -10,9 +11,11 @@ const request = axios.create({
 request.interceptors.request.use(
   config => {
     // 添加 Basic Auth
-    const username = localStorage.getItem('username') || 'admin'
-    const password = localStorage.getItem('password') || 'admin'
-    config.headers.Authorization = 'Basic ' + btoa(username + ':' + password)
+    const username = localStorage.getItem('username')
+    const password = localStorage.getItem('password')
+    if (username && password) {
+      config.headers.Authorization = 'Basic ' + btoa(username + ':' + password)
+    }
     return config
   },
   error => {
@@ -26,6 +29,15 @@ request.interceptors.response.use(
     return response.data
   },
   error => {
+    // 处理 401 未授权错误
+    if (error.response?.status === 401) {
+      ElMessage.error('认证失败，请重新登录')
+      localStorage.removeItem('username')
+      localStorage.removeItem('password')
+      router.push('/login')
+      return Promise.reject(error)
+    }
+    
     ElMessage.error(error.response?.data?.message || error.message || '请求失败')
     return Promise.reject(error)
   }

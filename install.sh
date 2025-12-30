@@ -5,6 +5,8 @@
 VERSION="" 
 REPO="spiritlhls/gobup"
 BASE_URL=""
+GOBUP_USERNAME="${GOBUP_USERNAME:-}"
+GOBUP_PASSWORD="${GOBUP_PASSWORD:-}"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -195,6 +197,15 @@ create_systemd_service() {
     
     log_info "创建systemd服务文件..."
     
+    # 构建环境变量配置
+    local env_vars=""
+    if [ -n "$GOBUP_USERNAME" ]; then
+        env_vars="${env_vars}Environment=\"USERNAME=${GOBUP_USERNAME}\"\n"
+    fi
+    if [ -n "$GOBUP_PASSWORD" ]; then
+        env_vars="${env_vars}Environment=\"PASSWORD=${GOBUP_PASSWORD}\"\n"
+    fi
+    
     cat > "$service_file" << EOF
 [Unit]
 Description=GoBup Server - B站录播自动上传工具
@@ -207,7 +218,7 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/gobup/server
-ExecStart=/opt/gobup/server/gobup-server
+$(echo -e "$env_vars")ExecStart=/opt/gobup/server/gobup-server
 Restart=always
 RestartSec=5
 StartLimitInterval=60
@@ -324,6 +335,17 @@ show_info() {
     log_info "  安装路径: /opt/gobup"
     log_info "  部署模式: 单二进制文件（前端已嵌入）"
     echo ""
+    if [ -n "$GOBUP_USERNAME" ] && [ -n "$GOBUP_PASSWORD" ]; then
+        log_info "认证信息:"
+        log_info "  用户名: $GOBUP_USERNAME"
+        log_info "  密码: ********"
+        log_warning "请妥善保管用户名和密码！"
+        echo ""
+    else
+        log_warning "未设置认证信息，首次访问需要在登录页面输入用户名密码"
+        log_info "设置方法: GOBUP_USERNAME=admin GOBUP_PASSWORD=123456 bash install.sh"
+        echo ""
+    fi
     log_info "使用方法:"
     log_info "  启动服务: systemctl start gobup"
     log_info "  查看状态: systemctl status gobup"
@@ -345,12 +367,30 @@ GoBup 一键安装脚本
   help                 显示此帮助信息
   
 环境变量:
-  INSTALL_VERSION=v1.0.0     指定要安装的版本 (默认: 自动获取最新版本)
+  INSTALL_VERSION=v1.0.0          指定要安装的版本 (默认: 自动获取最新版本)
+  GOBUP_USERNAME=admin            管理员用户名 (默认: 无，需要首次登录时输入)
+  GOBUP_PASSWORD=your_password    管理员密码 (默认: 无，需要首次登录时输入)
 
 示例:
-  bash install.sh                           # 完整安装最新版本
-  bash install.sh upgrade                   # 升级到最新版本
-  INSTALL_VERSION=v20250101-120000 bash install.sh  # 安装指定版本
+  # 完整安装最新版本（无密码）
+  bash install.sh
+  
+  # 完整安装并设置认证
+  GOBUP_USERNAME=admin GOBUP_PASSWORD=123456 bash install.sh
+  
+  # 升级到最新版本
+  bash install.sh upgrade
+  
+  # 安装指定版本
+  INSTALL_VERSION=v20250101-120000 bash install.sh
+  
+  # 安装指定版本并设置认证
+  INSTALL_VERSION=v20250101-120000 GOBUP_USERNAME=root GOBUP_PASSWORD=secret bash install.sh
+
+注意:
+  - 认证信息仅在首次启动时创建管理员账户使用
+  - 如果不设置 USERNAME 和 PASSWORD，访问时会提示登录
+  - 后续修改认证需要删除数据库重新初始化
 EOF
 }
 

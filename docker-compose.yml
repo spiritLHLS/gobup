@@ -14,6 +14,8 @@ services:
       - ./data:/app/data
     environment:
       - TZ=Asia/Shanghai
+      - USERNAME=${GOBUP_USERNAME:-admin}  # 管理员用户名，首次启动时创建
+      - PASSWORD=${GOBUP_PASSWORD:-admin}  # 管理员密码，首次启动时创建
     networks:
       - gobup-network
 
