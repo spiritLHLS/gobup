@@ -130,8 +130,8 @@
           :total="total"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
-          @size-change="handleSearch"
-          @current-change="handleSearch"
+          @size-change="handleSizeChange"
+          @current-change="handlePageChange"
         />
       </div>
     </el-card>
@@ -256,6 +256,15 @@ const fetchHistories = async () => {
 }
 
 const handleSearch = () => {
+  searchParams.value.page = 1
+  fetchHistories()
+}
+
+const handlePageChange = () => {
+  fetchHistories()
+}
+
+const handleSizeChange = () => {
   searchParams.value.page = 1
   fetchHistories()
 }

@@ -13,11 +13,36 @@ import (
 
 func ListHistories(c *gin.Context) {
 	db := database.GetDB()
+
+	// 获取分页参数
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "10"))
+	roomId := c.Query("roomId")
+	bvId := c.Query("bvId")
+
+	// 构建查询
+	query := db.Model(&models.RecordHistory{})
+
+	// 添加搜索条件
+	if roomId != "" {
+		query = query.Where("room_id = ?", roomId)
+	}
+	if bvId != "" {
+		query = query.Where("bv_id = ?", bvId)
+	}
+
+	// 获取总数
+	var total int64
+	query.Count(&total)
+
+	// 分页查询
 	var histories []models.RecordHistory
-	db.Order("end_time DESC").Limit(100).Find(&histories)
+	offset := (page - 1) * pageSize
+	query.Order("end_time DESC").Limit(pageSize).Offset(offset).Find(&histories)
+
 	c.JSON(http.StatusOK, gin.H{
 		"list":  histories,
-		"total": len(histories),
+		"total": total,
 	})
 }
 
