@@ -129,6 +129,13 @@ class BrecImporter:
             # 转换为容器内路径
             container_path = str(video_file).replace(str(self.brec_dir), '/rec')
             
+            # 安全地转换为整数（处理空字符串的情况）
+            def safe_int(value, default=0):
+                try:
+                    return int(value) if value else default
+                except (ValueError, TypeError):
+                    return default
+            
             # 构造 BililiveRecorder webhook 事件
             event_data = {
                 "EventType": "FileClosed",
@@ -140,8 +147,8 @@ class BrecImporter:
                     "FileCloseTime": metadata.get('end_time', ''),
                     "FilePath": container_path,
                     "SessionId": metadata.get('session_id', ''),
-                    "RoomId": int(metadata.get('room_id', 0)),
-                    "ShortId": int(metadata.get('short_id', 0)),
+                    "RoomId": safe_int(metadata.get('room_id')),
+                    "ShortId": safe_int(metadata.get('short_id')),
                     "Name": metadata.get('name', ''),
                     "Title": metadata.get('title', ''),
                     "AreaNameParent": metadata.get('area_name_parent', ''),

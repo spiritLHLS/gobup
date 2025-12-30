@@ -48,7 +48,7 @@ docker ps | grep -E 'gobup|brec'
 ```bash
 # 下载脚本
 cd /root
-wget https://raw.githubusercontent.com/yourusername/gobup/main/import_brec_history.py
+wget https://cdn.spiritlhl.net/https://raw.githubusercontent.com/spiritlhls/gobup/main/import_brec_history.py
 # 或者从项目目录复制
 # cp /path/to/gobup/import_brec_history.py /root/
 
