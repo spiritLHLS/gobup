@@ -267,6 +267,21 @@ const generateQRCode = async () => {
     // 新的API返回格式: {image: base64, key: sessionKey}
     const data = await userAPI.login()
     
+    console.log('获取二维码响应:', data)
+    
+    // 检查返回的数据
+    if (data.error) {
+      ElMessage.error(data.error)
+      loginStatus.value = data.error
+      return
+    }
+    
+    if (!data.image || !data.key) {
+      ElMessage.error('二维码数据不完整')
+      loginStatus.value = '二维码数据不完整'
+      return
+    }
+    
     authKey = data.key  // 保存session key用于轮询
     qrcodeUrl.value = data.image
     
@@ -286,7 +301,8 @@ const generateQRCode = async () => {
     startPolling()
   } catch (error) {
     console.error('获取二维码失败:', error)
-    ElMessage.error('获取二维码失败')
+    loginStatus.value = '获取二维码失败: ' + (error.message || '未知错误')
+    ElMessage.error('获取二维码失败: ' + (error.message || '未知错误'))
   } finally {
     qrcodeLoading.value = false
   }

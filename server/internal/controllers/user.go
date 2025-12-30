@@ -53,12 +53,14 @@ func ListBiliUsers(c *gin.Context) {
 // LoginUser 生成B站登录二维码
 func LoginUser(c *gin.Context) {
 	// 生成TV端二维码（参考biliupforjava实现）
+	log.Printf("开始生成二维码...")
 	qrResp, err := bili.GenerateTVQRCode()
 	if err != nil {
 		log.Printf("生成二维码失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"error": "生成二维码失败: " + err.Error()})
 		return
 	}
+	log.Printf("二维码URL: %s, AuthCode: %s", qrResp.Data.URL, qrResp.Data.AuthCode)
 
 	// 生成二维码图片
 	qrc, err := qrcode.NewWith(qrResp.Data.URL,
@@ -83,9 +85,11 @@ func LoginUser(c *gin.Context) {
 	}
 
 	pngBytes := buf.Bytes()
+	log.Printf("生成的PNG大小: %d bytes", len(pngBytes))
 
 	// Base64编码
 	imageBase64 := base64.StdEncoding.EncodeToString(pngBytes)
+	log.Printf("Base64编码长度: %d", len(imageBase64))
 
 	// 使用图片的最后100个字符作为session key
 	sessionKey := imageBase64[len(imageBase64)-100:]
@@ -99,6 +103,7 @@ func LoginUser(c *gin.Context) {
 		Message:    "等待扫码",
 	}
 	loginSessions[sessionKey] = session
+	log.Printf("登录会话已创建，sessionKey: %s", sessionKey)
 
 	c.JSON(http.StatusOK, gin.H{
 		"image": imageBase64,
