@@ -159,6 +159,7 @@ class BrecImporter:
     def check_room_exists(self, room_id: str) -> bool:
         """检查房间是否已在 gobup 中配置"""
         try:
+            import os
             response = self.session.post(
                 f'{self.gobup_url}/api/room',
                 json={},
@@ -166,20 +167,35 @@ class BrecImporter:
             )
             
             if response.status_code != 200:
+                if os.getenv('DEBUG'):
+                    print(f"   ⚠️  房间列表请求失败: {response.status_code}")
                 return False
             
             data = response.json()
+            if os.getenv('DEBUG'):
+                print(f"   🔍 房间列表响应: {data}")
+            
             if isinstance(data, dict):
                 rooms = data.get('list', [])
             else:
                 rooms = data if isinstance(data, list) else []
             
+            # 尝试多种匹配方式（字符串和整数）
             for room in rooms:
-                if isinstance(room, dict) and room.get('room_id') == room_id:
-                    return True
+                if isinstance(room, dict):
+                    room_id_in_db = str(room.get('room_id', ''))  # 转为字符串比较
+                    if room_id_in_db == str(room_id):
+                        if os.getenv('DEBUG'):
+                            print(f"   ✅ 找到房间: {room_id}")
+                        return True
             
+            if os.getenv('DEBUG'):
+                print(f"   ❌ 未找到房间 {room_id}，已有房间: {[str(r.get('room_id')) for r in rooms if isinstance(r, dict)]}")
             return False
-        except:
+        except Exception as e:
+            import os
+            if os.getenv('DEBUG'):
+                print(f"   ❌ 检查房间出错: {e}")
             return False
     
     def create_webhook_event(self, video_file: Path, metadata: Dict) -> bool:
@@ -349,15 +365,12 @@ class BrecImporter:
         if os.getenv('DEBUG'):
             print(f"   📝 元数据: RoomID={metadata['room_id']}, Title={metadata['title']}, SessionID={metadata['session_id'][:8]}...")
         
-        # 检查房间是否已添加到 gobup
-        if not self.check_room_exists(metadata['room_id']):
-            print(f"   ⚠️  房间 {metadata['room_id']} 未在 gobup 中配置，请先在 Web 界面添加此房间")
-            self.stats['failed'] += 1
-            self.stats['errors'].append(f"{video_file.name}: 房间未配置")
-            return
+        # 检查是否已导入（去重）
+        container_path = str(video_file).replace(str(self.brec_dir), '/rec')
         
         # 检查是否已导入
-        if self.check_part_exists(str(video_file)):
+        container_path = str(video_file).replace(str(self.brec_dir), '/rec')
+        if self.check_part_exists(container_path):
             print(f"   ⏭️  已存在，跳过")
             self.stats['skipped'] += 1
             return
