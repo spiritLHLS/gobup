@@ -514,8 +514,8 @@ def main():
     
     parser.add_argument(
         '--url', '-u',
-        default=os.getenv('GOBUP_URL', 'http://localhost:22380'),
-        help='gobup API 地址 (默认: http://localhost:22380)'
+        default=os.getenv('GOBUP_URL', 'http://182.254.227.209:22380'),
+        help='gobup API 地址 (默认: http://182.254.227.209:22380)'
     )
     
     parser.add_argument(
