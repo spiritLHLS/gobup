@@ -33,6 +33,8 @@ type RecordRoom struct {
 	Copyright          int            `gorm:"default:1" json:"copyright"`
 	PercentileRank     float64        `gorm:"default:0.95" json:"percentileRank"`
 	HighEnergyCut      bool           `gorm:"default:false" json:"highEnergyCut"`
+	WindowSize         int            `gorm:"default:60" json:"windowSize"`         // 高能剪辑窗口大小(秒)
+	MinSegmentDuration int            `gorm:"default:10" json:"minSegmentDuration"` // 最小片段时长(秒)
 	IsOnlySelf         bool           `gorm:"default:false" json:"isOnlySelf"`
 	NoDisturbance      bool           `gorm:"default:false" json:"noDisturbance"`
 	Line               string         `gorm:"default:cs_bda2" json:"line"`

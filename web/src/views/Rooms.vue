@@ -196,7 +196,7 @@
             <el-option :value="11" label="投稿成功后复制" />
           </el-select>
           <div v-if="[2,4,5,6,10,11].includes(form.deleteType)" style="margin-top: 10px;">
-            <el-input v-model="form.moveToPath" placeholder="目标路径">
+            <el-input v-model="form.moveDir" placeholder="目标路径">
               <template #prepend>移动到</template>
             </el-input>
           </div>
@@ -276,7 +276,7 @@ const form = ref({
   dmMedalLevel: 0,
   dmKeywordBlacklist: '',
   dynamicTemplate: '',
-  moveToPath: ''
+  moveDir: ''
 })
 
 const fetchRooms = async () => {
@@ -446,7 +446,7 @@ const handleAdd = () => {
     dmMedalLevel: 0,
     dmKeywordBlacklist: '',
     dynamicTemplate: '',
-    moveToPath: ''
+    moveDir: ''
   }
   dialogVisible.value = true
 }
