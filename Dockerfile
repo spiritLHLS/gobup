@@ -13,7 +13,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.21-alpine AS backend-builder
+FROM golang:1.24-alpine AS backend-builder
 ARG TARGETARCH
 WORKDIR /app/server
 RUN apk add --no-cache git ca-certificates build-base sqlite-dev
