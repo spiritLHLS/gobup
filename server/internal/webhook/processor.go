@@ -128,42 +128,73 @@ func (p *Processor) handleFileOpened(event WebhookEvent) error {
 func (p *Processor) handleFileClosed(event WebhookEvent) error {
 	var data FileEventData
 	if err := json.Unmarshal(event.EventData, &data); err != nil {
-		log.Printf("解析 FileClosed 事件数据失败: %v", err)
+		log.Printf("[ERROR] 解析 FileClosed 事件数据失败: %v", err)
 		return err
 	}
 
-	log.Printf("录制结束: 房间%d - %s, 文件: %s", data.RoomID, data.Title, data.FilePath)
+	log.Printf("[INFO] 录制结束: 房间%d - %s, 文件: %s", data.RoomID, data.Title, data.FilePath)
 
 	db := database.GetDB()
 	roomID := fmt.Sprintf("%d", data.RoomID)
 
-	log.Printf("开始处理 FileClosed 事件: RoomID=%s, SessionID=%s", roomID, data.SessionID)
+	log.Printf("[DEBUG] 开始处理 FileClosed 事件: RoomID=%s, SessionID=%s, FilePath=%s", roomID, data.SessionID, data.FilePath)
+
+	// 首先检查文件是否已经存在（避免重复导入）
+	var existingPart models.RecordHistoryPart
+	if err := db.Where("file_path = ?", data.FilePath).First(&existingPart).Error; err == nil {
+		log.Printf("[WARN] 文件已存在，跳过: FilePath=%s, PartID=%d", data.FilePath, existingPart.ID)
+		return nil // 不返回错误，因为这是正常的跳过情况
+	}
 
 	var history models.RecordHistory
 	if err := db.Where("session_id = ?", data.SessionID).First(&history).Error; err != nil {
-		log.Printf("未找到已有历史记录，创建新记录: SessionID=%s", data.SessionID)
+		log.Printf("[INFO] 未找到已有历史记录，创建新记录: SessionID=%s", data.SessionID)
+
+		// 解析时间
+		startTime := time.Now().Add(-time.Hour)
+		if data.FileOpenTime != "" {
+			if t, err := time.Parse(time.RFC3339, data.FileOpenTime); err == nil {
+				startTime = t
+				log.Printf("[DEBUG] 使用 FileOpenTime: %v", startTime)
+			} else {
+				log.Printf("[WARN] FileOpenTime 解析失败: %v, 使用默认时间", err)
+			}
+		}
+
 		history = models.RecordHistory{
 			RoomID:    roomID,
 			SessionID: data.SessionID,
 			Title:     data.Title,
-			StartTime: time.Now().Add(-time.Hour),
+			StartTime: startTime,
+			EventID:   data.SessionID,
 		}
 		if err := db.Create(&history).Error; err != nil {
-			log.Printf("创建历史记录失败: %v", err)
+			log.Printf("[ERROR] 创建历史记录失败: %v, RoomID=%s, SessionID=%s", err, roomID, data.SessionID)
 			return err
 		}
-		log.Printf("成功创建历史记录: ID=%d", history.ID)
+		log.Printf("[INFO] 成功创建历史记录: ID=%d, SessionID=%s", history.ID, data.SessionID)
 	} else {
-		log.Printf("找到已有历史记录: ID=%d", history.ID)
+		log.Printf("[INFO] 找到已有历史记录: ID=%d, SessionID=%s", history.ID, data.SessionID)
 	}
 
-	history.EndTime = time.Now()
+	// 解析结束时间
+	endTime := time.Now()
+	if data.FileCloseTime != "" {
+		if t, err := time.Parse(time.RFC3339, data.FileCloseTime); err == nil {
+			endTime = t
+			log.Printf("[DEBUG] 使用 FileCloseTime: %v", endTime)
+		} else {
+			log.Printf("[WARN] FileCloseTime 解析失败: %v, 使用当前时间", err)
+		}
+	}
+
+	history.EndTime = endTime
 	history.Recording = false
 	if err := db.Save(&history).Error; err != nil {
-		log.Printf("更新历史记录失败: %v", err)
+		log.Printf("[ERROR] 更新历史记录失败: %v, HistoryID=%d", err, history.ID)
 		return err
 	}
-	log.Printf("成功更新历史记录")
+	log.Printf("[INFO] 成功更新历史记录: ID=%d", history.ID)
 
 	part := models.RecordHistoryPart{
 		HistoryID: history.ID,
@@ -176,15 +207,15 @@ func (p *Processor) handleFileClosed(event WebhookEvent) error {
 		FileName:  filepath.Base(data.FilePath),
 		FileSize:  data.FileSize,
 		StartTime: history.StartTime,
-		EndTime:   history.EndTime,
+		EndTime:   endTime,
 		Recording: false,
 		Upload:    false,
 	}
 	if err := db.Create(&part).Error; err != nil {
-		log.Printf("创建分P记录失败: %v", err)
+		log.Printf("[ERROR] 创建分P记录失败: %v, FilePath=%s, HistoryID=%d", err, data.FilePath, history.ID)
 		return err
 	}
-	log.Printf("成功创建分P记录: ID=%d, FilePath=%s", part.ID, part.FilePath)
+	log.Printf("[INFO] 成功创建分P记录: ID=%d, FilePath=%s, FileSize=%d", part.ID, part.FilePath, part.FileSize)
 
 	var room models.RecordRoom
 	if err := db.Where("room_id = ?", roomID).First(&room).Error; err == nil {

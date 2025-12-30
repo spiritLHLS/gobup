@@ -238,8 +238,9 @@ class BrecImporter:
                 import json
                 print(f"   📤 发送数据: {json.dumps(event_data, indent=2, ensure_ascii=False)}")
             
+            # 使用同步模式 (sync=true) 以便立即获取处理结果
             response = self.session.post(
-                f'{self.gobup_url}/api/recordWebHook',
+                f'{self.gobup_url}/api/recordWebHook?sync=true',
                 json=event_data,
                 timeout=30
             )
@@ -249,16 +250,35 @@ class BrecImporter:
                 print(f"   📥 响应内容: {response.text}")
             
             if response.status_code == 200:
-                # 给后台处理一点时间
+                try:
+                    result = response.json()
+                    # 检查响应中是否有错误信息
+                    if result.get('status') == 'error':
+                        error_msg = result.get('error', '未知错误')
+                        print(f"   ⚠️  服务器处理失败: {error_msg}")
+                        return False
+                except:
+                    pass
+                
+                # 同步模式下，给一点时间确保事务提交
                 import time
-                time.sleep(0.5)
+                time.sleep(0.3)
                 
                 # 验证是否真的导入成功（检查数据库）
                 if self.verify_import(container_path):
                     return True
                 else:
                     print(f"   ⚠️  警告: API返回成功但数据库中未找到记录")
-                    return False
+                    # 多等待一下再试一次
+                    time.sleep(1)
+                    if self.verify_import(container_path):
+                        return True
+                    else:
+                        print(f"   ❌ 确认导入失败，可能原因：")
+                        print(f"      1. 房间 {metadata.get('room_id')} 未在 gobup 中配置")
+                        print(f"      2. SessionID 冲突")
+                        print(f"      3. 数据库错误，请查看服务器日志")
+                        return False
             else:
                 print(f"⚠️  导入失败 (HTTP {response.status_code}): {response.text}")
                 return False
@@ -274,15 +294,25 @@ class BrecImporter:
         """验证文件是否真的被导入到数据库"""
         try:
             import time
+            import os
             # 多次重试，因为后台处理可能需要时间
             for i in range(3):
                 if i > 0:
+                    if os.getenv('DEBUG'):
+                        print(f"   🔄 重试验证 ({i+1}/3)...")
                     time.sleep(1)
                 
                 if self.check_part_exists_in_db(container_path):
+                    if os.getenv('DEBUG'):
+                        print(f"   ✅ 验证成功: 文件已在数据库中")
                     return True
+            
+            if os.getenv('DEBUG'):
+                print(f"   ❌ 验证失败: 文件未在数据库中找到")
             return False
-        except:
+        except Exception as e:
+            if os.getenv('DEBUG'):
+                print(f"   ❌ 验证异常: {e}")
             return False
     
     def check_part_exists_in_db(self, container_path: str) -> bool:
