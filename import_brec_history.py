@@ -95,11 +95,15 @@ class BrecImporter:
                 return False
             
             data = response.json()
-            histories = data.get('list', [])
+            # API 可能返回 {"list": [...]} 或直接返回数组 [...]
+            if isinstance(data, dict):
+                histories = data.get('list', [])
+            else:
+                histories = data if isinstance(data, list) else []
             
             # 遍历所有历史记录，检查是否有相同的文件路径
             for history in histories:
-                history_id = history.get('id')
+                history_id = history.get('id') if isinstance(history, dict) else None
                 if not history_id:
                     continue
                 
@@ -112,9 +116,14 @@ class BrecImporter:
                 
                 if parts_response.status_code == 200:
                     parts_data = parts_response.json()
-                    parts = parts_data.get('list', [])
+                    # API 可能返回 {"list": [...]} 或直接返回数组 [...]
+                    if isinstance(parts_data, dict):
+                        parts = parts_data.get('list', [])
+                    else:
+                        parts = parts_data if isinstance(parts_data, list) else []
+                    
                     for part in parts:
-                        if part.get('filePath') == container_path:
+                        if isinstance(part, dict) and part.get('filePath') == container_path:
                             return True
             
             return False
