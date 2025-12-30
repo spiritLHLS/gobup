@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_IMAGE: your-dockerhub-username/gobup
+  DOCKER_IMAGE: spiritlhl/gobup
   GHCR_IMAGE: ghcr.io/spiritlhls/gobup
 
 jobs:
@@ -245,7 +245,7 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: your-dockerhub-username/gobup
+          repository: spiritlhl/gobup
           readme-filepath: ./README.md
 
   merge-ghcr:
