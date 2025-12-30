@@ -68,6 +68,7 @@ export const userAPI = {
   login: () => request.get('/biliUser/login'),
   loginCheck: (key) => request.get('/biliUser/loginCheck', { params: { key } }),
   loginCancel: (key) => request.get('/biliUser/loginCancel', { params: { key } }),
+  loginByCookie: (cookies) => request.post('/biliUser/loginByCookie', { cookies }),
   update: (data) => request.post('/biliUser/update', data),
   refresh: (id) => request.get(`/biliUser/refresh/${id}`),
   delete: (id) => request.get(`/biliUser/delete/${id}`)

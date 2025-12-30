@@ -68,24 +68,74 @@
     <!-- 登录对话框 -->
     <el-dialog
       v-model="loginDialogVisible"
-      title="扫码登录"
-      width="400px"
+      title="添加B站用户"
+      width="500px"
       :close-on-click-modal="false"
     >
-      <div class="qrcode-container">
-        <div v-if="qrcodeLoading" class="loading">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          <p>生成二维码中...</p>
-        </div>
-        <div v-else-if="qrcodeUrl" class="qrcode">
-          <div ref="qrcodeRef" class="qrcode-image"></div>
-          <p class="tip">请使用哔哩哔哩APP扫描二维码登录</p>
-          <p class="status">{{ loginStatus }}</p>
-        </div>
-      </div>
+      <el-tabs v-model="loginMethod" class="login-tabs">
+        <!-- 扫码登录 -->
+        <el-tab-pane label="扫码登录" name="qrcode">
+          <div class="qrcode-container">
+            <div v-if="qrcodeLoading" class="loading">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <p>生成二维码中...</p>
+            </div>
+            <div v-else-if="qrcodeUrl" class="qrcode">
+              <div ref="qrcodeRef" class="qrcode-image"></div>
+              <p class="tip">请使用哔哩哔哩APP扫描二维码登录</p>
+              <p class="status">{{ loginStatus }}</p>
+            </div>
+            <div v-else class="empty">
+              <el-button type="primary" @click="generateQRCode">生成二维码</el-button>
+            </div>
+          </div>
+        </el-tab-pane>
+
+        <!-- Cookie登录 -->
+        <el-tab-pane label="Cookie登录" name="cookie">
+          <div class="cookie-container">
+            <el-form label-width="0">
+              <el-form-item>
+                <el-input
+                  v-model="cookieInput"
+                  type="textarea"
+                  :rows="6"
+                  placeholder="请粘贴完整的Cookie，格式如：&#10;SESSDATA=xxx; DedeUserID=xxx; DedeUserID__ckMd5=xxx; bili_jct=xxx"
+                  clearable
+                />
+                <div class="cookie-tips">
+                  <p>💡 Cookie获取方法：</p>
+                  <ol>
+                    <li>使用浏览器登录 <a href="https://www.bilibili.com" target="_blank">bilibili.com</a></li>
+                    <li>按F12打开开发者工具 → Network（网络）</li>
+                    <li>刷新页面，点击任意请求</li>
+                    <li>在Request Headers中找到Cookie，复制完整内容</li>
+                  </ol>
+                  <p class="warning">⚠️ 请勿将Cookie泄露给他人</p>
+                </div>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+
       <template #footer>
         <el-button @click="cancelLogin">取消</el-button>
-        <el-button type="primary" @click="handleLogin">重新生成</el-button>
+        <el-button 
+          v-if="loginMethod === 'qrcode' && qrcodeUrl" 
+          type="primary" 
+          @click="generateQRCode"
+        >
+          重新生成
+        </el-button>
+        <el-button 
+          v-if="loginMethod === 'cookie'" 
+          type="primary" 
+          @click="handleCookieLogin"
+          :loading="cookieLoginLoading"
+        >
+          确认登录
+        </el-button>
       </template>
     </el-dialog>
 
@@ -151,14 +201,25 @@ import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { userAPI } from '@/api'
 import axios from 'axios'
-import QRCode from 'qrcode'
 
 const users = ref([])
 const loading = ref(false)
 const loginDialogVisible = ref(false)
+const loginMethod = ref('qrcode')
 const qrcodeLoading = ref(false)
 const showRateLimitDialog = ref(false)
 const showWxPushDialog = ref(false)
+
+// 二维码登录相关
+const qrcodeUrl = ref('')
+const qrcodeRef = ref(null)
+const loginStatus = ref('等待扫码...')
+let authKey = ''
+let pollingTimer = null
+
+// Cookie登录相关
+const cookieInput = ref('')
+const cookieLoginLoading = ref(false)
 
 const rateLimitConfig = ref({
   enabled: false,
@@ -169,12 +230,6 @@ const wxPushForm = ref({
   userId: null,
   token: ''
 })
-
-const qrcodeUrl = ref('')
-const qrcodeRef = ref(null)
-const loginStatus = ref('等待扫码...')
-let authKey = ''
-let pollingTimer = null
 
 const fetchUsers = async () => {
   loading.value = true
@@ -188,8 +243,16 @@ const fetchUsers = async () => {
   }
 }
 
-const handleLogin = async () => {
+const handleLogin = () => {
   loginDialogVisible.value = true
+  loginMethod.value = 'qrcode'
+  cookieInput.value = ''
+  qrcodeUrl.value = ''
+  loginStatus.value = '等待扫码...'
+  stopPolling()
+}
+
+const generateQRCode = async () => {
   qrcodeLoading.value = true
   loginStatus.value = '等待扫码...'
   
@@ -198,6 +261,7 @@ const handleLogin = async () => {
     const data = await userAPI.login()
     
     authKey = data.key  // 保存session key用于轮询
+    qrcodeUrl.value = data.image
     
     await nextTick()
     
@@ -218,6 +282,32 @@ const handleLogin = async () => {
     ElMessage.error('获取二维码失败')
   } finally {
     qrcodeLoading.value = false
+  }
+}
+
+const handleCookieLogin = async () => {
+  const cookies = cookieInput.value.trim()
+  if (!cookies) {
+    ElMessage.warning('请输入Cookie')
+    return
+  }
+
+  cookieLoginLoading.value = true
+  try {
+    const result = await userAPI.loginByCookie(cookies)
+    if (result.type === 'success') {
+      ElMessage.success('登录成功')
+      loginDialogVisible.value = false
+      cookieInput.value = ''
+      fetchUsers()
+    } else {
+      ElMessage.error(result.msg || '登录失败')
+    }
+  } catch (error) {
+    console.error('Cookie登录失败:', error)
+    ElMessage.error('登录失败，请检查Cookie是否正确')
+  } finally {
+    cookieLoginLoading.value = false
   }
 }
 
@@ -262,6 +352,8 @@ const stopPolling = () => {
 const cancelLogin = () => {
   stopPolling()
   loginDialogVisible.value = false
+  cookieInput.value = ''
+  qrcodeUrl.value = ''
 }
 
 const handleDelete = async (row) => {
@@ -387,5 +479,56 @@ onMounted(() => {
   color: #1890ff;
   font-size: 14px;
   font-weight: bold;
+}
+
+.login-tabs {
+  margin-top: -10px;
+}
+
+.cookie-container {
+  padding: 10px 0;
+}
+
+.cookie-tips {
+  margin-top: 15px;
+  padding: 15px;
+  background-color: #f5f7fa;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #666;
+  line-height: 1.8;
+}
+
+.cookie-tips p {
+  margin: 8px 0;
+}
+
+.cookie-tips ol {
+  margin: 10px 0;
+  padding-left: 20px;
+}
+
+.cookie-tips ol li {
+  margin: 5px 0;
+}
+
+.cookie-tips a {
+  color: #1890ff;
+  text-decoration: none;
+}
+
+.cookie-tips a:hover {
+  text-decoration: underline;
+}
+
+.cookie-tips .warning {
+  color: #ff4d4f;
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+.empty {
+  text-align: center;
+  padding: 40px 0;
 }
 </style>

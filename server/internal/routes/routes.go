@@ -40,10 +40,14 @@ func SetupRoutes(router *gin.Engine) {
 			users := auth.Group("/biliUser")
 			{
 				users.GET("/list", controllers.ListBiliUsers)
+				users.POST("/loginByCookie", controllers.LoginByCookie)
+				users.GET("/refresh/:id", controllers.RefreshUserCookie)
 				users.GET("/login", controllers.LoginUser)
 				users.GET("/loginCheck", controllers.LoginCheck)
-users.GET("/loginCancel", controllers.LoginCancel)
-users.GET("/refresh/:id", controllers.RefreshUserCookie)
+				users.GET("/loginCancel", controllers.LoginCancel)
+				users.POST("/loginByCookie", controllers.LoginByCookie)
+				users.GET("/refresh/:id", controllers.RefreshUserCookie)
+				users.GET("/refresh/:id", controllers.RefreshUserCookie)
 				users.POST("/update", controllers.UpdateBiliUser)
 				users.GET("/delete/:id", controllers.DeleteBiliUser)
 			}

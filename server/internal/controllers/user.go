@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -333,4 +334,93 @@ func RefreshUserCookie(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "Cookie有效", "user": user})
+}
+
+// LoginByCookie 通过Cookie直接登录
+func LoginByCookie(c *gin.Context) {
+	var req struct {
+		Cookies string `json:"cookies" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "请求参数错误"})
+		return
+	}
+
+	// 去除首尾空格
+	cookieStr := strings.TrimSpace(req.Cookies)
+	if cookieStr == "" {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "Cookie不能为空"})
+		return
+	}
+
+	// 验证Cookie格式和有效性
+	valid, err := bili.ValidateCookie(cookieStr)
+	if err != nil {
+		log.Printf("验证Cookie失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "验证Cookie失败: " + err.Error()})
+		return
+	}
+
+	if !valid {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "Cookie已失效或格式错误，请重新获取"})
+		return
+	}
+
+	// 获取用户信息
+	userInfo, err := bili.GetUserInfo(cookieStr)
+	if err != nil {
+		log.Printf("获取用户信息失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "获取用户信息失败，请检查Cookie是否正确"})
+		return
+	}
+
+	// 保存用户到数据库
+	db := database.GetDB()
+	var user models.BiliBiliUser
+
+	now := time.Now()
+	expireTime := now.Add(30 * 24 * time.Hour) // 30天过期
+
+	result := db.Where("uid = ?", userInfo.Data.Mid).First(&user)
+	if result.Error != nil {
+		// 新用户
+		user = models.BiliBiliUser{
+			UID:        userInfo.Data.Mid,
+			Uname:      userInfo.Data.Uname,
+			Face:       userInfo.Data.Face,
+			Cookies:    cookieStr,
+			Login:      true,
+			Level:      userInfo.Data.Level,
+			VipType:    userInfo.Data.VipType,
+			VipStatus:  userInfo.Data.VipStatus,
+			LoginTime:  &now,
+			ExpireTime: &expireTime,
+		}
+	} else {
+		// 更新现有用户
+		user.Uname = userInfo.Data.Uname
+		user.Face = userInfo.Data.Face
+		user.Cookies = cookieStr
+		user.Login = true
+		user.Level = userInfo.Data.Level
+		user.VipType = userInfo.Data.VipType
+		user.VipStatus = userInfo.Data.VipStatus
+		user.LoginTime = &now
+		user.ExpireTime = &expireTime
+	}
+
+	if err := db.Save(&user).Error; err != nil {
+		log.Printf("保存用户失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "保存用户失败"})
+		return
+	}
+
+	log.Printf("[INFO] B站用户通过Cookie登录成功: UID=%d, Uname=%s", user.UID, user.Uname)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type": "success",
+		"msg":  "登录成功",
+		"user": user,
+	})
 }
