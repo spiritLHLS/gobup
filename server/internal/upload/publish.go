@@ -139,7 +139,7 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 
 	// 推送通知
 	if room.Wxuid != "" && containsTag(room.PushMsgTags, "投稿") {
-		s.wxPusher.NotifyPublishSuccess(room.Wxuid, room.Uname, title, history.BvID)
+		s.wxPusher.NotifyPublishSuccess(room.UploadUserID, room.Wxuid, room.Uname, title, history.BvID)
 	}
 
 	// 发送动态

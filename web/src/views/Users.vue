@@ -19,8 +19,8 @@
 
       <el-table :data="users" style="width: 100%" v-loading="loading">
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="用户名" width="150" />
-        <el-table-column prop="mid" label="UID" width="150" />
+        <el-table-column prop="uname" label="用户名" width="150" />
+        <el-table-column prop="uid" label="UID" width="150" />
         <el-table-column label="头像" width="80">
           <template #default="{ row }">
             <el-avatar :src="row.face" />
@@ -28,8 +28,15 @@
         </el-table-column>
         <el-table-column label="Cookie状态" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.cookieInfo ? 'success' : 'danger'">
-              {{ row.cookieInfo ? '有效' : '无效' }}
+            <el-tag :type="row.login ? 'success' : 'danger'">
+              {{ row.login ? '有效' : '无效' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="WxPusher" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.wxPushToken ? 'success' : 'info'">
+              {{ row.wxPushToken ? '已配置' : '未配置' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -38,8 +45,14 @@
             {{ formatTime(row.createdAt) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
+            <el-button
+              size="small"
+              @click="handleEditWxPush(row)"
+            >
+              配置推送
+            </el-button>
             <el-button
               size="small"
               type="danger"
@@ -99,6 +112,37 @@
         <el-button type="primary" @click="handleSaveRateLimit">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- WxPusher配置对话框 -->
+    <el-dialog v-model="showWxPushDialog" title="配置WxPusher推送" width="500px">
+      <el-form label-width="120px">
+        <el-form-item label="WxPusher Token">
+          <el-input
+            v-model="wxPushForm.token"
+            placeholder="请输入WxPusher AppToken"
+            clearable
+          />
+          <div style="margin-top: 8px; font-size: 12px; color: #999;">
+            在 <a href="https://wxpusher.zjiecode.com" target="_blank">WxPusher官网</a> 注册获取AppToken
+          </div>
+        </el-form-item>
+        <el-form-item label="说明">
+          <div style="font-size: 13px; color: #666; line-height: 1.6;">
+            <p>配置后，可在房间设置中填写微信UID，实现以下推送通知：</p>
+            <ul style="padding-left: 20px; margin: 5px 0;">
+              <li>开播通知</li>
+              <li>上传进度通知</li>
+              <li>投稿成功通知</li>
+              <li>上传失败提醒</li>
+            </ul>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showWxPushDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleSaveWxPush">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -114,9 +158,16 @@ const loading = ref(false)
 const loginDialogVisible = ref(false)
 const qrcodeLoading = ref(false)
 const showRateLimitDialog = ref(false)
+const showWxPushDialog = ref(false)
+
 const rateLimitConfig = ref({
   enabled: false,
   speedMBps: 10
+})
+
+const wxPushForm = ref({
+  userId: null,
+  token: ''
 })
 
 const qrcodeUrl = ref('')
@@ -248,6 +299,31 @@ const handleSaveRateLimit = async () => {
     showRateLimitDialog.value = false
   } catch (error) {
     console.error('保存限速配置失败:', error)
+    ElMessage.error('保存失败')
+  }
+}
+
+// 编辑WxPusher配置
+const handleEditWxPush = (row) => {
+  wxPushForm.value = {
+    userId: row.id,
+    token: row.wxPushToken || ''
+  }
+  showWxPushDialog.value = true
+}
+
+// 保存WxPusher配置
+const handleSaveWxPush = async () => {
+  try {
+    await userAPI.update({
+      id: wxPushForm.value.userId,
+      wxPushToken: wxPushForm.value.token
+    })
+    ElMessage.success('WxPusher配置已保存')
+    showWxPushDialog.value = false
+    fetchUsers()
+  } catch (error) {
+    console.error('保存WxPusher配置失败:', error)
     ElMessage.error('保存失败')
   }
 }

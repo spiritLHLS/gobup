@@ -59,12 +59,13 @@ docker run -d \
   -p 12380:12380 \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
-  -e WXPUSH_TOKEN=your_wxpusher_token \
   -e USERNAME=admin \
   -e PASSWORD=your_password \
   --restart unless-stopped \
   spiritlhl/gobup:latest
 ```
+
+> 注意：USERNAME 和 PASSWORD 仅用于首次启动时创建管理员账户，后续修改环境变量不会更新已存在的账户
 
 ### 方式二：使用 Docker Compose
 
@@ -86,9 +87,8 @@ services:
       - ./data:/app/data
     environment:
       - TZ=Asia/Shanghai
-      - WXPUSH_TOKEN=your_wxpusher_token  # 可选
-      - USERNAME=admin  # 可选
-      - PASSWORD=your_password  # 可选
+      - USERNAME=admin  # 可选，仅首次启动时创建管理员账户
+      - PASSWORD=your_password  # 可选，仅首次启动时创建管理员账户
 ```
 
 运行：
@@ -147,9 +147,8 @@ gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
 | 端口映射 | `-p 12380:12380` | 映射后端API端口 |
 | 存储卷 | `-v /path/to/recordings:/rec` | 挂载录制文件目录（必须与录播姬一致） |
 | 存储卷 | `-v /path/to/data:/app/data` | 挂载数据目录（数据库和配置文件） |
-| 环境变量 | `-e WXPUSH_TOKEN` | WxPusher AppToken（可选） |
-| 环境变量 | `-e USERNAME` | Web管理界面登录用户名（可选） |
-| 环境变量 | `-e PASSWORD` | Web管理界面登录密码（可选） |
+| 环境变量 | `-e USERNAME` | 初始管理员用户名（可选，仅首次启动时有效） |
+| 环境变量 | `-e PASSWORD` | 初始管理员密码（可选，仅首次启动时有效） |
 | 环境变量 | `-e TZ` | 时区设置，默认 Asia/Shanghai |
 | 重启策略 | `--restart unless-stopped` | 容器异常退出时自动重启 |
 
@@ -218,11 +217,13 @@ docker network connect bili-net gobup
 
 1. 注册WxPusher账号：https://wxpusher.zjiecode.com/
 2. 创建应用获取AppToken
-3. 启动程序时设置 `-wxpush-token` 参数或环境变量
-4. 在房间配置中填写推送UID，选择推送类型：
+3. 在 **用户管理** 页面点击"配置推送"，填写WxPusher Token
+4. 在房间配置中填写推送UID（微信UID），选择推送类型：
    - 开播提醒
    - 上传完成通知
    - 投稿成功通知
+
+> 注意：每个B站用户可以配置自己的WxPusher Token，实现个性化推送
 
 ## 使用指南
 

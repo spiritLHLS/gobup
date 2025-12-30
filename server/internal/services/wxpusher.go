@@ -5,23 +5,31 @@ import (
 	"log"
 	"time"
 
+	"github.com/gobup/server/internal/database"
+	"github.com/gobup/server/internal/models"
 	"github.com/imroc/req/v3"
 )
 
 const WxPusherAPIURL = "https://wxpusher.zjiecode.com/api/send/message"
 
 // WxPusherService WxPusher推送服务
-type WxPusherService struct {
-	AppToken string
-	Enabled  bool
-}
+type WxPusherService struct{}
 
 // NewWxPusherService 创建WxPusher服务
-func NewWxPusherService(appToken string) *WxPusherService {
-	return &WxPusherService{
-		AppToken: appToken,
-		Enabled:  appToken != "",
+func NewWxPusherService() *WxPusherService {
+	return &WxPusherService{}
+}
+
+// getUserToken 获取用户的WxPushToken
+func (s *WxPusherService) getUserToken(userID uint) (string, error) {
+	db := database.GetDB()
+	var user models.BiliBiliUser
+
+	if err := db.First(&user, userID).Error; err != nil {
+		return "", fmt.Errorf("获取用户信息失败: %w", err)
 	}
+
+	return user.WxPushToken, nil
 }
 
 // PushMessage 发送消息
@@ -36,34 +44,45 @@ type PushMessage struct {
 }
 
 // SendTextMessage 发送文本消息
-func (s *WxPusherService) SendTextMessage(uid, content string) error {
-	if !s.Enabled {
-		log.Printf("WxPusher未配置，跳过推送")
+func (s *WxPusherService) SendTextMessage(userID uint, wxuid, content string) error {
+	appToken, err := s.getUserToken(userID)
+	if err != nil {
+		log.Printf("获取用户Token失败: %v", err)
+		return err
+	}
+
+	if appToken == "" {
+		log.Printf("用户%d未配置WxPusher token，跳过推送", userID)
 		return nil
 	}
 
 	msg := PushMessage{
-		AppToken:    s.AppToken,
+		AppToken:    appToken,
 		Content:     content,
 		ContentType: 1, // 文本
-		UIDs:        []string{uid},
+		UIDs:        []string{wxuid},
 	}
 
 	return s.send(msg)
 }
 
 // SendMarkdownMessage 发送Markdown消息
-func (s *WxPusherService) SendMarkdownMessage(uid, content, summary string) error {
-	if !s.Enabled {
+func (s *WxPusherService) SendMarkdownMessage(userID uint, wxuid, content, summary string) error {
+	appToken, err := s.getUserToken(userID)
+	if err != nil {
+		return err
+	}
+
+	if appToken == "" {
 		return nil
 	}
 
 	msg := PushMessage{
-		AppToken:    s.AppToken,
+		AppToken:    appToken,
 		Content:     content,
 		Summary:     summary,
 		ContentType: 3, // Markdown
-		UIDs:        []string{uid},
+		UIDs:        []string{wxuid},
 	}
 
 	return s.send(msg)
@@ -93,7 +112,7 @@ func (s *WxPusherService) send(msg PushMessage) error {
 }
 
 // NotifyUploadStart 上传开始通知
-func (s *WxPusherService) NotifyUploadStart(uid, roomName, fileName string, fileSize int64) {
+func (s *WxPusherService) NotifyUploadStart(userID uint, wxuid, roomName, fileName string, fileSize int64) {
 	content := fmt.Sprintf(`📤 上传开始
 房间: %s
 文件: %s
@@ -102,11 +121,11 @@ func (s *WxPusherService) NotifyUploadStart(uid, roomName, fileName string, file
 		roomName, fileName, float64(fileSize)/1024/1024/1024,
 		time.Now().Format("2006-01-02 15:04:05"))
 
-	s.SendTextMessage(uid, content)
+	s.SendTextMessage(userID, wxuid, content)
 }
 
 // NotifyUploadSuccess 上传成功通知
-func (s *WxPusherService) NotifyUploadSuccess(uid, roomName, fileName string) {
+func (s *WxPusherService) NotifyUploadSuccess(userID uint, wxuid, roomName, fileName string) {
 	content := fmt.Sprintf(`✅ 上传成功
 房间: %s
 文件: %s
@@ -114,11 +133,11 @@ func (s *WxPusherService) NotifyUploadSuccess(uid, roomName, fileName string) {
 		roomName, fileName,
 		time.Now().Format("2006-01-02 15:04:05"))
 
-	s.SendTextMessage(uid, content)
+	s.SendTextMessage(userID, wxuid, content)
 }
 
 // NotifyUploadFailed 上传失败通知
-func (s *WxPusherService) NotifyUploadFailed(uid, roomName, fileName, reason string) {
+func (s *WxPusherService) NotifyUploadFailed(userID uint, wxuid, roomName, fileName, reason string) {
 	content := fmt.Sprintf(`❌ 上传失败
 房间: %s
 文件: %s
@@ -127,11 +146,11 @@ func (s *WxPusherService) NotifyUploadFailed(uid, roomName, fileName, reason str
 		roomName, fileName, reason,
 		time.Now().Format("2006-01-02 15:04:05"))
 
-	s.SendTextMessage(uid, content)
+	s.SendTextMessage(userID, wxuid, content)
 }
 
 // NotifyPublishSuccess 投稿成功通知
-func (s *WxPusherService) NotifyPublishSuccess(uid, roomName, title, bvid string) {
+func (s *WxPusherService) NotifyPublishSuccess(userID uint, wxuid, roomName, title, bvid string) {
 	content := fmt.Sprintf(`🎉 投稿成功
 房间: %s
 标题: %s
@@ -141,11 +160,11 @@ BV号: %s
 		roomName, title, bvid, bvid,
 		time.Now().Format("2006-01-02 15:04:05"))
 
-	s.SendTextMessage(uid, content)
+	s.SendTextMessage(userID, wxuid, content)
 }
 
 // NotifyLiveStart 开播通知
-func (s *WxPusherService) NotifyLiveStart(uid, uname, title, areaName string) {
+func (s *WxPusherService) NotifyLiveStart(userID uint, wxuid, uname, title, areaName string) {
 	content := fmt.Sprintf(`🔴 开始直播
 主播: %s
 标题: %s
@@ -154,5 +173,5 @@ func (s *WxPusherService) NotifyLiveStart(uid, uname, title, areaName string) {
 		uname, title, areaName,
 		time.Now().Format("2006-01-02 15:04:05"))
 
-	s.SendTextMessage(uid, content)
+	s.SendTextMessage(userID, wxuid, content)
 }

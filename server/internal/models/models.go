@@ -139,6 +139,7 @@ type BiliBiliUser struct {
 	CookieInfo   string         `gorm:"type:text" json:"cookieInfo"`
 	LoginTime    *time.Time     `json:"loginTime"`
 	ExpireTime   *time.Time     `json:"expireTime"`
+	WxPushToken  string         `json:"wxPushToken"` // 用户的WxPusher token
 }
 
 type LiveMsg struct {

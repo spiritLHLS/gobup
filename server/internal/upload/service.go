@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/gobup/server/internal/bili"
-	"github.com/gobup/server/internal/config"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/services"
@@ -27,7 +26,7 @@ type Service struct {
 
 func NewService() *Service {
 	return &Service{
-		wxPusher:        services.NewWxPusherService(config.AppConfig.WxPushToken),
+		wxPusher:        services.NewWxPusherService(),
 		templateSvc:     services.NewTemplateService(),
 		progressTracker: NewProgressTracker(),
 	}
@@ -84,7 +83,7 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 
 	// 推送上传开始通知
 	if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
-		s.wxPusher.NotifyUploadStart(room.Wxuid, room.Uname, part.FileName, part.FileSize)
+		s.wxPusher.NotifyUploadStart(room.UploadUserID, room.Wxuid, room.Uname, part.FileName, part.FileSize)
 	}
 
 	// 创建客户端
@@ -120,7 +119,7 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 	if uploadErr != nil {
 		// 推送失败通知
 		if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
-			s.wxPusher.NotifyUploadFailed(room.Wxuid, room.Uname, part.FileName, uploadErr.Error())
+			s.wxPusher.NotifyUploadFailed(room.UploadUserID, room.Wxuid, room.Uname, part.FileName, uploadErr.Error())
 		}
 		return fmt.Errorf("上传失败: %w", uploadErr)
 	}
@@ -143,7 +142,7 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 
 	// 推送成功通知
 	if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
-		s.wxPusher.NotifyUploadSuccess(room.Wxuid, room.Uname, part.FileName)
+		s.wxPusher.NotifyUploadSuccess(room.UploadUserID, room.Wxuid, room.Uname, part.FileName)
 	}
 
 	// 检查是否可以投稿

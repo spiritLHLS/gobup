@@ -3,12 +3,12 @@ package config
 import "sync"
 
 type Config struct {
-	Port        int
-	WorkPath    string
-	Username    string
-	Password    string
-	DataPath    string
-	WxPushToken string // WxPusher token
+	Port     int
+	WorkPath string
+	DataPath string
+	// 仅用于初始化管理员账号
+	InitUsername string
+	InitPassword string
 }
 
 var (
@@ -16,13 +16,12 @@ var (
 	once      sync.Once
 )
 
-func Init(port int, workPath, username, password, dataPath, wxPushToken string) {
+func Init(port int, workPath, username, password, dataPath string) {
 	once.Do(func() {
 		AppConfig.Port = port
 		AppConfig.WorkPath = workPath
-		AppConfig.Username = username
-		AppConfig.Password = password
+		AppConfig.InitUsername = username
+		AppConfig.InitPassword = password
 		AppConfig.DataPath = dataPath
-		AppConfig.WxPushToken = wxPushToken
 	})
 }
