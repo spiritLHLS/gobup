@@ -8,8 +8,7 @@ services:
     container_name: gobup
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "12380:12380"
+      - "22380:80"
     volumes:
       - ./recordings:/rec
       - ./data:/app/data

@@ -70,7 +70,7 @@ RUN echo '[supervisord]' > /etc/supervisord.conf && \
     echo 'stdout_logfile=/var/log/supervisor/nginx.log' >> /etc/supervisord.conf && \
     echo 'stderr_logfile=/var/log/supervisor/nginx_error.log' >> /etc/supervisord.conf
 
-EXPOSE 80 12380
+EXPOSE 80
 
 VOLUME ["/rec", "/app/data"]
 

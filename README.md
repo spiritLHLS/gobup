@@ -27,8 +27,7 @@ docker pull spiritlhl/gobup:latest
 
 docker run -d \
   --name gobup \
-  -p 80:80 \
-  -p 12380:12380 \
+  -p 22380:80 \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
   --restart unless-stopped \
@@ -42,8 +41,7 @@ docker pull ghcr.io/spiritlhl/gobup:latest
 
 docker run -d \
   --name gobup \
-  -p 80:80 \
-  -p 12380:12380 \
+  -p 22380:80 \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
   --restart unless-stopped \
@@ -55,12 +53,11 @@ docker run -d \
 ```bash
 docker run -d \
   --name gobup \
-  -p 80:80 \
-  -p 12380:12380 \
-  -v /path/to/recordings:/rec \
-  -v /path/to/data:/app/data \
-  -e USERNAME=admin \
-  -e PASSWORD=your_password \
+  -p 22380:80 \
+  -v /root/recordings:/rec \
+  -v /root/data:/app/data \
+  -e USERNAME=root \
+  -e PASSWORD=your_paasword \
   --restart unless-stopped \
   spiritlhl/gobup:latest
 ```
@@ -81,7 +78,6 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "12380:12380"
     volumes:
       - ./recordings:/rec
       - ./data:/app/data
@@ -107,8 +103,7 @@ cd gobup
 docker build -t gobup .
 docker run -d \
   --name gobup \
-  -p 80:80 \
-  -p 12380:12380 \
+  -p 22380:80 \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
   --restart unless-stopped \
@@ -143,8 +138,7 @@ gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
 
 | 类型 | 参数 | 说明 |
 |------|------|------|
-| 端口映射 | `-p 80:80` | 映射Web管理界面端口（Nginx） |
-| 端口映射 | `-p 12380:12380` | 映射后端API端口 |
+| 端口映射 | `-p 80:80` | 映射Web管理界面端口（Nginx反代前后端） |
 | 存储卷 | `-v /path/to/recordings:/rec` | 挂载录制文件目录（必须与录播姬一致） |
 | 存储卷 | `-v /path/to/data:/app/data` | 挂载数据目录（数据库和配置文件） |
 | 环境变量 | `-e USERNAME` | 初始管理员用户名（可选，仅首次启动时有效） |
@@ -155,8 +149,8 @@ gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
 > 重要提示：`/path/to/recordings` 必须和录播姬的录制目录保持一致
 
 访问 Web 界面：
-- 使用 Docker 镜像：`http://localhost` 或 `http://localhost:80`
-- 使用二进制文件：`http://localhost:12380`
+- 使用 Docker 容器：`http://localhost` 或 `http://localhost:80`
+- 使用二进制文件：`http://localhost:12380`（默认端口）
 
 ## 配置说明
 
