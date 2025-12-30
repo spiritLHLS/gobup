@@ -66,6 +66,7 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	// 使用模板服务渲染
 	title := s.templateSvc.RenderTitle(room.TitleTemplate, templateData)
 	desc := s.templateSvc.RenderDescription(room.DescTemplate, templateData)
+	dynamic := s.templateSvc.RenderDynamic(room.DynamicTemplate, templateData) // 动态模板
 	tags := s.templateSvc.BuildTags(room.Tags, templateData)
 	tagsStr := strings.Join(tags, ",")
 
@@ -139,6 +140,40 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	// 推送通知
 	if room.Wxuid != "" && containsTag(room.PushMsgTags, "投稿") {
 		s.wxPusher.NotifyPublishSuccess(room.Wxuid, room.Uname, title, history.BvID)
+	}
+
+	// 发送动态
+	if dynamic != "" {
+		// 替换动态中的bvid变量
+		dynamicWithBv := strings.ReplaceAll(dynamic, "${bvid}", history.BvID)
+		if err := client.SendDynamic(dynamicWithBv); err != nil {
+			log.Printf("发送动态失败: %v", err)
+		} else {
+			log.Printf("发送动态成功: %s", dynamicWithBv)
+		}
+	}
+
+	// 处理文件策略：9-投稿成功后删除, 10-投稿成功后移动
+	if room.DeleteType == 9 || room.DeleteType == 10 {
+		fileMoverSvc := services.NewFileMoverService()
+		if err := fileMoverSvc.ProcessFilesByStrategy(historyID, room.DeleteType); err != nil {
+			log.Printf("文件处理失败: %v", err)
+		}
+	}
+
+	// 如果启用高能剪辑，创建高能剪辑任务
+	if room.HighEnergyCut {
+		go func() {
+			log.Printf("开始高能剪辑: history_id=%d", historyID)
+			highEnergySvc := services.NewHighEnergyCutService()
+			outputFile, err := highEnergySvc.CutHighEnergySegments(historyID)
+			if err != nil {
+				log.Printf("高能剪辑失败: %v", err)
+				return
+			}
+			log.Printf("高能剪辑完成: %s", outputFile)
+			// TODO: 自动上传高能剪辑版本
+		}()
 	}
 
 	return nil

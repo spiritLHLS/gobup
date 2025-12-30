@@ -30,6 +30,7 @@ func SetupRoutes(router *gin.Engine) {
 				rooms.GET("/testLines", controllers.TestAllLines)
 				rooms.GET("/testSpeed", controllers.TestLineSpeed)
 				rooms.GET("/seasons/:roomId", controllers.GetSeasons)
+				rooms.GET("/verification", controllers.VerifyTemplate)
 			}
 
 			users := auth.Group("/biliUser")
@@ -79,6 +80,7 @@ func SetupRoutes(router *gin.Engine) {
 				syncTasks.POST("/retryFailed", controllers.RetryFailedSyncTasks)
 			}
 
+			// 分P操作
 			parts := auth.Group("/part")
 			{
 				parts.POST("/list/:id", controllers.ListParts)

@@ -38,7 +38,8 @@ export const roomAPI = {
   delete: (id) => request.get(`/room/delete/${id}`),
   getLines: () => request.get('/room/lines'),
   testLines: () => request.get('/room/testLines'),
-  testSpeed: (line) => request.get('/room/testSpeed', { params: { line } })
+  testSpeed: (line) => request.get('/room/testSpeed', { params: { line } }),
+  verifyTemplate: (data) => request.post('/room/verifyTemplate', data)
 }
 
 // 录制历史

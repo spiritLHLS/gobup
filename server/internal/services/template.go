@@ -69,6 +69,9 @@ func (s *TemplateService) render(template string, data map[string]interface{}) s
 	if index, ok := data["index"].(int); ok {
 		result = strings.ReplaceAll(result, "${index}", fmt.Sprintf("%d", index))
 	}
+	if fileName, ok := data["fileName"].(string); ok {
+		result = strings.ReplaceAll(result, "${fileName}", fileName)
+	}
 
 	// 替换时间变量
 	var startTime time.Time

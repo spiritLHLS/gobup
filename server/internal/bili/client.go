@@ -1,7 +1,10 @@
 package bili
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -196,6 +199,47 @@ func (c *BiliClient) IsValidCookie() bool {
 // GetCSRF 获取CSRF Token
 func (c *BiliClient) GetCSRF() string {
 	return GetCookieValue(c.Cookies, "bili_jct")
+}
+
+// SendDynamic 发送动态
+func (c *BiliClient) SendDynamic(content string) error {
+	// B站发送动态API（纯文字动态）
+	apiURL := "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create"
+
+	data := url.Values{}
+	data.Set("dynamic_id", "0")
+	data.Set("type", "4") // 4表示纯文字动态
+	data.Set("rid", "0")
+	data.Set("content", content)
+	data.Set("csrf", c.GetCSRF())
+	data.Set("csrf_token", c.GetCSRF())
+
+	req, err := http.NewRequest("POST", apiURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Cookie", c.Cookies)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("Referer", "https://t.bilibili.com/")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+
+	if code, ok := result["code"].(float64); !ok || code != 0 {
+		return fmt.Errorf("发送动态失败: %v", result)
+	}
+
+	return nil
 }
 
 // BuildCookieString 构建Cookie字符串

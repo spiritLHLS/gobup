@@ -8,45 +8,50 @@ import (
 
 // RecordRoom 直播间配置
 type RecordRoom struct {
-	ID                uint           `gorm:"primarykey" json:"id"`
-	CreatedAt         time.Time      `json:"createdAt"`
-	UpdatedAt         time.Time      `json:"updatedAt"`
-	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
-	RoomID            string         `gorm:"uniqueIndex:idx_room_id;not null" json:"roomId"`
-	Uname             string         `gorm:"index" json:"uname"`
-	Title             string         `json:"title"`
-	AreaName          string         `json:"areaName"`
-	AreaNameParent    string         `json:"areaNameParent"`
-	AreaNameChild     string         `json:"areaNameChild"`
-	HistoryID         uint           `json:"historyId"`
-	UploadUserID      uint           `gorm:"index" json:"uploadUserId"`
-	Upload            bool           `gorm:"default:true;index" json:"upload"`
-	AutoUpload        bool           `gorm:"default:true" json:"autoUpload"`
-	TitleTemplate     string         `gorm:"type:text" json:"titleTemplate"`
-	PartTitleTemplate string         `gorm:"type:text" json:"partTitleTemplate"`
-	DescTemplate      string         `gorm:"type:text" json:"descTemplate"`
-	DynamicTemplate   string         `gorm:"type:text" json:"dynamicTemplate"`
-	FileSizeLimit     int64          `gorm:"default:0" json:"fileSizeLimit"`
-	DurationLimit     int            `gorm:"default:60" json:"durationLimit"`
-	Tags              string         `json:"tags"`
-	TID               int            `gorm:"default:171" json:"tid"`
-	Copyright         int            `gorm:"default:1" json:"copyright"`
-	PercentileRank    float64        `gorm:"default:0.95" json:"percentileRank"`
-	HighEnergyCut     bool           `gorm:"default:false" json:"highEnergyCut"`
-	IsOnlySelf        bool           `gorm:"default:false" json:"isOnlySelf"`
-	NoDisturbance     bool           `gorm:"default:false" json:"noDisturbance"`
-	Line              string         `gorm:"default:upos" json:"line"`
-	CoverURL          string         `json:"coverUrl"`
-	Wxuid             string         `json:"wxuid"`
-	PushMsgTags       string         `json:"pushMsgTags"`
-	DeleteType        int            `gorm:"default:0" json:"deleteType"`
-	DeleteDay         int            `gorm:"default:0" json:"deleteDay"`
-	MoveDir           string         `json:"moveDir"`
-	SendDm            bool           `gorm:"default:false" json:"sendDm"`
-	Recording         bool           `gorm:"default:false;index" json:"recording"`
-	Streaming         bool           `gorm:"default:false;index" json:"streaming"`
-	SessionID         string         `gorm:"index" json:"sessionId"`
-	SeasonID          int64          `json:"seasonId"`
+	ID                 uint           `gorm:"primarykey" json:"id"`
+	CreatedAt          time.Time      `json:"createdAt"`
+	UpdatedAt          time.Time      `json:"updatedAt"`
+	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
+	RoomID             string         `gorm:"uniqueIndex:idx_room_id;not null" json:"roomId"`
+	Uname              string         `gorm:"index" json:"uname"`
+	Title              string         `json:"title"`
+	AreaName           string         `json:"areaName"`
+	AreaNameParent     string         `json:"areaNameParent"`
+	AreaNameChild      string         `json:"areaNameChild"`
+	HistoryID          uint           `json:"historyId"`
+	UploadUserID       uint           `gorm:"index" json:"uploadUserId"`
+	Upload             bool           `gorm:"default:true;index" json:"upload"`
+	AutoUpload         bool           `gorm:"default:true" json:"autoUpload"`
+	TitleTemplate      string         `gorm:"type:text" json:"titleTemplate"`
+	PartTitleTemplate  string         `gorm:"type:text" json:"partTitleTemplate"`
+	DescTemplate       string         `gorm:"type:text" json:"descTemplate"`
+	DynamicTemplate    string         `gorm:"type:text" json:"dynamicTemplate"`
+	FileSizeLimit      int64          `gorm:"default:0" json:"fileSizeLimit"`
+	DurationLimit      int            `gorm:"default:60" json:"durationLimit"`
+	Tags               string         `json:"tags"`
+	TID                int            `gorm:"default:171" json:"tid"`
+	Copyright          int            `gorm:"default:1" json:"copyright"`
+	PercentileRank     float64        `gorm:"default:0.95" json:"percentileRank"`
+	HighEnergyCut      bool           `gorm:"default:false" json:"highEnergyCut"`
+	IsOnlySelf         bool           `gorm:"default:false" json:"isOnlySelf"`
+	NoDisturbance      bool           `gorm:"default:false" json:"noDisturbance"`
+	Line               string         `gorm:"default:cs_bda2" json:"line"`
+	CoverURL           string         `json:"coverUrl"`
+	CoverType          string         `gorm:"default:default" json:"coverType"` // default, live, diy
+	Wxuid              string         `json:"wxuid"`
+	PushMsgTags        string         `json:"pushMsgTags"`
+	DeleteType         int            `gorm:"default:0" json:"deleteType"` // 0-不处理 1-上传前删除 2-上传前移动 3-上传后删除 4-上传后移动 5-上传前复制 6-上传后复制 7-上传完成后立即删除 8-N天后删除移动 9-投稿成功后删除 10-投稿成功后移动 11-审核通过后复制
+	DeleteDay          int            `gorm:"default:5" json:"deleteDay"`
+	MoveDir            string         `json:"moveDir"`
+	SendDm             bool           `gorm:"default:false" json:"sendDm"`
+	DmDistinct         bool           `gorm:"default:false" json:"dmDistinct"`     // 弹幕去重
+	DmUlLevel          int            `gorm:"default:0" json:"dmUlLevel"`          // 用户等级过滤
+	DmMedalLevel       int            `gorm:"default:0" json:"dmMedalLevel"`       // 粉丝勋章过滤 0-不过滤 1-佩戴粉丝勋章 2-佩戴主播粉丝勋章
+	DmKeywordBlacklist string         `gorm:"type:text" json:"dmKeywordBlacklist"` // 关键词屏蔽，一行一个
+	Recording          bool           `gorm:"default:false;index" json:"recording"`
+	Streaming          bool           `gorm:"default:false;index" json:"streaming"`
+	SessionID          string         `gorm:"index" json:"sessionId"`
+	SeasonID           int64          `json:"seasonId"`
 }
 
 // RecordHistory 录制历史
@@ -137,23 +142,26 @@ type BiliBiliUser struct {
 }
 
 type LiveMsg struct {
-	uint      `gorm:"primarykey" json:"id"`
-	CreatedAt time.Time      `json:"createdAt"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-	BvID      string         `gorm:"index" json:"bvid"`
-	RoomID    string         `gorm:"index" json:"roomId"`
-	SessionID string         `gorm:"index" json:"sessionId"`
-	Timestamp int64          `gorm:"index" json:"timestamp"` // 相对于直播开始的时间戳（毫秒）
-	Type      int            `json:"type"`                   // 1=文字弹幕
-	Message   string         `gorm:"type:text" json:"message"`
-	UserName  string         `json:"userName"`
-	UID       int64          `json:"uid"`
-	Sent      bool           `gorm:"default:false;index" json:"sent"` // 是否已发送到视频
-	CID       int64          `gorm:"index" json:"cid"`                // 发送到哪个CID
-	Progress  int            `json:"progress"`                        // 视频中的位置（毫秒）
-	Mode      int            `gorm:"default:1" json:"mode"`           // 弹幕模式: 1滚动 4底部 5顶部
-	FontSize  int            `gorm:"default:25" json:"fontSize"`      // 字号
-	Color     int            `gorm:"default:16777215" json:"color"`   // 颜色
+	uint       `gorm:"primarykey" json:"id"`
+	CreatedAt  time.Time      `json:"createdAt"`
+	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+	BvID       string         `gorm:"index" json:"bvid"`
+	RoomID     string         `gorm:"index" json:"roomId"`
+	SessionID  string         `gorm:"index" json:"sessionId"`
+	Timestamp  int64          `gorm:"index" json:"timestamp"` // 相对于直播开始的时间戳（毫秒）
+	Type       int            `json:"type"`                   // 1=文字弹幕
+	Message    string         `gorm:"type:text" json:"message"`
+	UserName   string         `json:"userName"`
+	UID        int64          `json:"uid"`
+	ULevel     int            `gorm:"default:0" json:"ulevel"`         // 用户等级
+	MedalName  string         `json:"medalName"`                       // 粉丝勋章名称
+	MedalLevel int            `gorm:"default:0" json:"medalLevel"`     // 粉丝勋章等级
+	Sent       bool           `gorm:"default:false;index" json:"sent"` // 是否已发送到视频
+	CID        int64          `gorm:"index" json:"cid"`                // 发送到哪个CID
+	Progress   int            `json:"progress"`                        // 视频中的位置（毫秒）
+	Mode       int            `gorm:"default:1" json:"mode"`           // 弹幕模式: 1滚动 4底部 5顶部
+	FontSize   int            `gorm:"default:25" json:"fontSize"`      // 字号
+	Color      int            `gorm:"default:16777215" json:"color"`   // 颜色
 }
 
 // VideoSyncTask 视频同步任务

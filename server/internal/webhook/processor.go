@@ -1,25 +1,26 @@
 package webhook
 
 import (
-"encoding/json"
-"fmt"
-"log"
-"path/filepath"
-"time"
+	"encoding/json"
+	"fmt"
+	"log"
+	"path/filepath"
+	"time"
 
-"github.com/gobup/server/internal/database"
-"github.com/gobup/server/internal/models"
-"github.com/gobup/server/internal/upload"
+	"github.com/gobup/server/internal/database"
+	"github.com/gobup/server/internal/models"
+	"github.com/gobup/server/internal/services"
+	"github.com/gobup/server/internal/upload"
 )
 
 type EventType string
 
 const (
-FileOpening    EventType = "FileOpening"
-FileOpened     EventType = "FileOpened"
-FileClosed     EventType = "FileClosed"
-SessionStarted EventType = "SessionStarted"
-SessionEnded   EventType = "SessionEnded"
+	FileOpening    EventType = "FileOpening"
+	FileOpened     EventType = "FileOpened"
+	FileClosed     EventType = "FileClosed"
+	SessionStarted EventType = "SessionStarted"
+	SessionEnded   EventType = "SessionEnded"
 )
 
 type WebhookEvent struct {
@@ -169,6 +170,14 @@ func (p *Processor) handleFileClosed(event WebhookEvent) error {
 
 	var room models.RecordRoom
 	if err := db.Where("room_id = ?", roomID).First(&room).Error; err == nil {
+		// 处理录制完成后的文件策略 (DeleteType 1, 2)
+		if room.DeleteType == 1 || room.DeleteType == 2 {
+			fileMoverSvc := services.NewFileMoverService()
+			if err := fileMoverSvc.ProcessFilesByStrategy(history.ID, room.DeleteType); err != nil {
+				log.Printf("文件处理失败: %v", err)
+			}
+		}
+
 		if room.Upload {
 			go p.uploadService.UploadPart(&part, &history, &room)
 		}
@@ -228,6 +237,14 @@ func (p *Processor) processBlrecEvent(jsonData []byte) error {
 			Upload:    false,
 		}
 		db.Create(&part)
+
+		// 处理录制完成后的文件策略 (DeleteType 1, 2)
+		if room.DeleteType == 1 || room.DeleteType == 2 {
+			fileMoverSvc := services.NewFileMoverService()
+			if err := fileMoverSvc.ProcessFilesByStrategy(history.ID, room.DeleteType); err != nil {
+				log.Printf("文件处理失败: %v", err)
+			}
+		}
 
 		if room.Upload {
 			go p.uploadService.UploadPart(&part, &history, &room)

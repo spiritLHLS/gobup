@@ -116,16 +116,102 @@
             提示：线路检测采用分批限流策略，避免触发风控。深度测速将逐条测试，耗时较长。
           </div>
         </el-form-item>
-        <el-form-item label="文件处理">
-          <el-radio-group v-model="form.deleteType">
-            <el-radio :label="0">不删除</el-radio>
-            <el-radio :label="1">上传后删除</el-radio>
-            <el-radio :label="2">审核后删除</el-radio>
+        <el-form-item label="封面配置">
+          <el-radio-group v-model="form.coverType">
+            <el-radio :label="0">不使用封面</el-radio>
+            <el-radio :label="1">使用直播首帧</el-radio>
+            <el-radio :label="2">自定义封面</el-radio>
           </el-radio-group>
+          <div v-if="form.coverType === 2" style="margin-top: 10px;">
+            <el-upload
+              :action="`/api/rooms/${form.id}/cover`"
+              :show-file-list="false"
+              :on-success="handleCoverUploadSuccess"
+              :before-upload="beforeCoverUpload"
+              accept="image/*"
+            >
+              <el-button size="small">
+                <el-icon><Upload /></el-icon>
+                上传封面
+              </el-button>
+            </el-upload>
+            <div class="help-text">支持jpg/png，建议尺寸：960x600</div>
+            <img v-if="form.coverUrl" :src="form.coverUrl" style="max-width: 200px; margin-top: 10px;" />
+          </div>
+        </el-form-item>
+        <el-form-item label="高能剪辑">
+          <el-switch v-model="form.highEnergyCut" />
+          <div class="help-text">基于弹幕密度自动剪辑高能片段（需要ffmpeg）</div>
+          <div v-if="form.highEnergyCut" style="margin-top: 10px;">
+            <el-form-item label="窗口大小(秒)" label-width="120px">
+              <el-input-number v-model="form.windowSize" :min="10" :max="300" />
+            </el-form-item>
+            <el-form-item label="阈值百分位" label-width="120px">
+              <el-input-number v-model="form.percentileRank" :min="50" :max="99" />
+              <div class="help-text">值越大，筛选越严格（75推荐）</div>
+            </el-form-item>
+            <el-form-item label="最小片段(秒)" label-width="120px">
+              <el-input-number v-model="form.minSegmentDuration" :min="5" :max="60" />
+            </el-form-item>
+          </div>
+        </el-form-item>
+        <el-form-item label="弹幕过滤">
+          <el-checkbox v-model="form.dmDistinct">去除重复弹幕</el-checkbox>
+          <div style="margin-top: 10px;">
+            <el-form-item label="最低用户等级" label-width="120px">
+              <el-input-number v-model="form.dmUlLevel" :min="0" :max="6" />
+              <div class="help-text">0表示不过滤，1-6对应B站等级</div>
+            </el-form-item>
+            <el-form-item label="粉丝勋章过滤" label-width="120px">
+              <el-select v-model="form.dmMedalLevel">
+                <el-option :value="0" label="不过滤" />
+                <el-option :value="1" label="仅佩戴粉丝勋章" />
+                <el-option :value="2" label="仅主播粉丝勋章" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="关键词屏蔽" label-width="120px">
+              <el-input 
+                v-model="form.dmKeywordBlacklist" 
+                type="textarea" 
+                :rows="3"
+                placeholder="每行一个关键词"
+              />
+              <div class="help-text">包含这些关键词的弹幕将被过滤</div>
+            </el-form-item>
+          </div>
+        </el-form-item>
+        <el-form-item label="文件处理">
+          <el-select v-model="form.deleteType" style="width: 100%">
+            <el-option :value="0" label="不删除/移动" />
+            <el-option :value="1" label="录制完成后删除" />
+            <el-option :value="2" label="录制完成后移动" />
+            <el-option :value="3" label="上传完成后删除" />
+            <el-option :value="4" label="上传完成后移动" />
+            <el-option :value="5" label="上传完成后复制" />
+            <el-option :value="6" label="上传完成后复制且30分钟后删除" />
+            <el-option :value="7" label="立即删除" />
+            <el-option :value="8" label="定时删除(每日凌晨)" />
+            <el-option :value="9" label="投稿成功后删除" />
+            <el-option :value="10" label="投稿成功后移动" />
+            <el-option :value="11" label="投稿成功后复制" />
+          </el-select>
+          <div v-if="[2,4,5,6,10,11].includes(form.deleteType)" style="margin-top: 10px;">
+            <el-input v-model="form.moveToPath" placeholder="目标路径">
+              <template #prepend>移动到</template>
+            </el-input>
+          </div>
         </el-form-item>
         <el-form-item label="分P标题模板">
           <el-input v-model="form.partTitleTemplate" />
-          <div class="help-text">支持变量: ${index} ${MM月dd日HH点mm分} ${areaName}</div>
+          <div class="help-text">支持变量: ${index} ${MM月dd日HH点mm分} ${areaName} ${fileName}</div>
+        </el-form-item>
+        <el-form-item label="动态模板">
+          <el-input v-model="form.dynamicTemplate" type="textarea" :rows="3" />
+          <div class="help-text">投稿成功后发送动态，支持变量: ${uname} ${title} ${roomId} ${bvid}</div>
+          <el-button size="small" @click="previewTemplate" style="margin-top: 5px;">
+            <el-icon><View /></el-icon>
+            预览效果
+          </el-button>
         </el-form-item>
         <el-form-item label="WxPusher UID">
           <el-input v-model="form.wxuid" placeholder="填写后将推送通知" />
@@ -178,7 +264,19 @@ const form = ref({
   deleteType: 1,
   partTitleTemplate: 'P${index}-${areaName}-${MM月dd日HH点mm分}',
   wxuid: '',
-  pushMsgTags: '开播,上传,投稿'
+  pushMsgTags: '开播,上传,投稿',
+  coverType: 0,
+  coverUrl: '',
+  highEnergyCut: false,
+  windowSize: 60,
+  percentileRank: 75,
+  minSegmentDuration: 10,
+  dmDistinct: true,
+  dmUlLevel: 0,
+  dmMedalLevel: 0,
+  dmKeywordBlacklist: '',
+  dynamicTemplate: '',
+  moveToPath: ''
 })
 
 const fetchRooms = async () => {
@@ -335,7 +433,19 @@ const handleAdd = () => {
     copyright: 1,
     line: 'CS_UPOS',
     deleteType: 1,
-    partTitleTemplate: 'P${index}-${areaName}-${MM月dd日HH点mm分}'
+    partTitleTemplate: 'P${index}-${areaName}-${MM月dd日HH点mm分}',
+    coverType: 0,
+    coverUrl: '',
+    highEnergyCut: false,
+    windowSize: 60,
+    percentileRank: 75,
+    minSegmentDuration: 10,
+    dmDistinct: true,
+    dmUlLevel: 0,
+    dmMedalLevel: 0,
+    dmKeywordBlacklist: '',
+    dynamicTemplate: '',
+    moveToPath: ''
   }
   dialogVisible.value = true
 }
@@ -425,6 +535,49 @@ const handleImport = () => {
     }
   }
   input.click()
+}
+
+const handleCoverUploadSuccess = (response) => {
+  if (response.code === 0) {
+    form.value.coverUrl = response.data.url
+    ElMessage.success('封面上传成功')
+  } else {
+    ElMessage.error(response.msg || '封面上传失败')
+  }
+}
+
+const beforeCoverUpload = (file) => {
+  const isImage = file.type.startsWith('image/')
+  if (!isImage) {
+    ElMessage.error('只能上传图片文件')
+    return false
+  }
+  const isLt2M = file.size / 1024 / 1024 < 2
+  if (!isLt2M) {
+    ElMessage.error('图片大小不能超过2MB')
+    return false
+  }
+  return true
+}
+
+const previewTemplate = async () => {
+  if (!form.value.dynamicTemplate) {
+    ElMessage.warning('请先输入动态模板')
+    return
+  }
+  
+  try {
+    const result = await roomAPI.verifyTemplate({
+      roomId: form.value.roomId,
+      template: form.value.dynamicTemplate
+    })
+    ElMessageBox.alert(result.result, '模板预览', {
+      confirmButtonText: '确定'
+    })
+  } catch (error) {
+    console.error('模板预览失败:', error)
+    ElMessage.error('模板预览失败')
+  }
 }
 
 onMounted(() => {

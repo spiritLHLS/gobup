@@ -133,6 +133,14 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 
 	log.Printf("上传完成: part_id=%d, cid=%d", part.ID, part.CID)
 
+	// 处理文件策略：3-上传后删除, 4-上传后移动, 6-上传后复制, 7-上传完成后立即删除
+	if room.DeleteType == 3 || room.DeleteType == 4 || room.DeleteType == 6 || room.DeleteType == 7 {
+		fileMoverSvc := services.NewFileMoverService()
+		if err := fileMoverSvc.ProcessFilesByStrategy(history.ID, room.DeleteType); err != nil {
+			log.Printf("文件处理失败: %v", err)
+		}
+	}
+
 	// 推送成功通知
 	if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
 		s.wxPusher.NotifyUploadSuccess(room.Wxuid, room.Uname, part.FileName)

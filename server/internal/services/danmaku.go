@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
@@ -33,6 +34,12 @@ func (s *DanmakuService) SendDanmakuForHistory(historyID uint, userID uint) erro
 		return fmt.Errorf("弹幕已发送，请勿重复操作")
 	}
 
+	// 获取房间配置
+	var room models.RecordRoom
+	if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
+		return fmt.Errorf("房间配置不存在: %w", err)
+	}
+
 	// 获取用户
 	var user models.BiliBiliUser
 	if err := db.First(&user, userID).Error; err != nil {
@@ -43,12 +50,46 @@ func (s *DanmakuService) SendDanmakuForHistory(historyID uint, userID uint) erro
 		return fmt.Errorf("用户未登录")
 	}
 
-	// 获取弹幕列表
+	// 获取弹幕列表（应用过滤规则）
 	var danmakus []models.LiveMsg
-	if err := db.Where("session_id = ? AND sent = ?", history.SessionID, false).
-		Order("timestamp ASC").
-		Find(&danmakus).Error; err != nil {
+	query := db.Where("session_id = ? AND sent = ?", history.SessionID, false).
+		Order("timestamp ASC")
+
+	// 应用弹幕过滤规则
+	if room.DmUlLevel > 0 {
+		// 用户等级过滤（佩戴勋章的不受影响）
+		query = query.Where("ulevel >= ? OR medal_level > 0", room.DmUlLevel)
+	}
+
+	if room.DmMedalLevel == 1 {
+		// 必须佩戴粉丝勋章
+		query = query.Where("medal_level > 0")
+	} else if room.DmMedalLevel == 2 {
+		// 必须佩戴主播粉丝勋章（需要额外逻辑判断）
+		// 这里简化处理，只要有勋章名称匹配即可
+		if room.Uname != "" {
+			query = query.Where("medal_name = ?", room.Uname)
+		}
+	}
+
+	// 关键词屏蔽
+	if room.DmKeywordBlacklist != "" {
+		keywords := strings.Split(room.DmKeywordBlacklist, "\n")
+		for _, keyword := range keywords {
+			keyword = strings.TrimSpace(keyword)
+			if keyword != "" {
+				query = query.Where("message NOT LIKE ?", "%"+keyword+"%")
+			}
+		}
+	}
+
+	if err := query.Find(&danmakus).Error; err != nil {
 		return fmt.Errorf("查询弹幕失败: %w", err)
+	}
+
+	// 应用去重逻辑
+	if room.DmDistinct && len(danmakus) > 0 {
+		danmakus = s.deduplicateDanmakus(danmakus)
 	}
 
 	if len(danmakus) == 0 {
@@ -186,4 +227,21 @@ func (s *DanmakuService) SendDanmakuForHistory(historyID uint, userID uint) erro
 	db.Save(&history)
 
 	return nil
+}
+
+// deduplicateDanmakus 弹幕去重
+func (s *DanmakuService) deduplicateDanmakus(danmakus []models.LiveMsg) []models.LiveMsg {
+	seen := make(map[string]bool)
+	result := make([]models.LiveMsg, 0, len(danmakus))
+
+	for _, dm := range danmakus {
+		// 使用"用户ID+内容"作为去重key
+		key := fmt.Sprintf("%d:%s", dm.UID, dm.Message)
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, dm)
+		}
+	}
+
+	return result
 }
