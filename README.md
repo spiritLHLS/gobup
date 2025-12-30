@@ -28,19 +28,18 @@ wget -O install.sh https://raw.githubusercontent.com/spiritlhls/gobup/main/insta
 
 **环境变量：**
 - `INSTALL_VERSION=vYYYYMMDD-HHMMSS` - 指定安装版本
-- `WEB_PATH=/path` - 自定义Web文件路径
 
 **示例：**
 
 ```bash
+# 完整安装（使用最新版本）
+bash install.sh
+
 # 安装指定版本
 INSTALL_VERSION=v20250101-120000 bash install.sh
 
 # 升级到最新版本
 bash install.sh upgrade
-
-# 自定义Web路径安装
-WEB_PATH=/var/www/html bash install.sh
 ```
 
 **安装后访问：**
