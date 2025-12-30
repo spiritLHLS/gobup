@@ -83,9 +83,6 @@ bash install.sh upgrade
 - 如果未设置认证，首次访问会要求输入用户名密码
 - 服务管理: `systemctl status gobup`
 
-<details>
-<summary>展开查看 Docker 部署方式</summary>
-
 ### 方式二：使用预构建 Docker 镜像
 
 使用已构建好的多架构镜像，会自动根据当前系统架构下载对应版本。
@@ -131,11 +128,6 @@ docker run -d \
 
 > 注意：USERNAME 和 PASSWORD 仅用于首次启动时创建管理员账户，后续修改环境变量不会更新已存在的账户
 
-</details>
-
-<details>
-<summary>展开查看 Docker Compose 部署</summary>
-
 ### 方式三：使用 Docker Compose
 
 创建 `docker-compose.yml`：
@@ -165,11 +157,6 @@ services:
 docker-compose up -d
 ```
 
-</details>
-
-<details>
-<summary>展开查看编译打包方式</summary>
-
 ### 方式四：从源码构建 Docker 镜像
 
 ```bash
@@ -191,11 +178,6 @@ docker run -d \
   --restart unless-stopped \
   gobup
 ```
-
-</details>
-
-<details>
-<summary>展开查看手动部署方式</summary>
 
 ### 方式五：下载发布版本手动部署
 
