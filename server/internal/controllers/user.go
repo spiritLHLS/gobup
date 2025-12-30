@@ -72,7 +72,10 @@ func LoginUser(c *gin.Context) {
 
 	buf := new(bytes.Buffer)
 	w := nopCloser{buf}
-	stdWriter := standard.NewWithWriter(w, standard.WithQRWidth(10))
+	stdWriter := standard.NewWithWriter(w,
+		standard.WithQRWidth(10),
+		standard.WithBuiltinImageEncoder(standard.PNG_FORMAT),
+	)
 	if err = qrc.Save(stdWriter); err != nil {
 		log.Printf("生成PNG失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"error": "生成PNG失败"})
