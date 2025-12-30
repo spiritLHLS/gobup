@@ -233,7 +233,7 @@ func TestAllLines(c *gin.Context) {
 	var mu sync.Mutex
 
 	// 1. 获取官方线路列表
-	client := req.C().SetTimeout(5 * time.Second).ImpersonateChrome()
+	client := req.C().SetTimeout(30 * time.Second).ImpersonateChrome()
 	resp, err := client.R().Get("https://member.bilibili.com/preupload?r=ping&file=lines.json")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取官方线路失败: " + err.Error()})
@@ -244,6 +244,20 @@ func TestAllLines(c *gin.Context) {
 	if err := json.Unmarshal(resp.Bytes(), &officialLines); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "解析线路数据失败: " + err.Error()})
 		return
+	}
+
+	// 1.5. 优先快速检测所有官方线路可用性
+	availableLines := make(map[string]bool)
+	for _, line := range officialLines {
+		testURL := line.URL
+		if strings.HasPrefix(testURL, "//") {
+			testURL = "https:" + testURL
+		}
+		// 快速HEAD请求检测可用性（2秒超时）
+		testClient := req.C().SetTimeout(2 * time.Second).ImpersonateChrome()
+		if _, err := testClient.R().Head(testURL); err == nil {
+			availableLines[line.Query] = true
+		}
 	}
 
 	// 2. 构建 query -> url 映射
@@ -282,6 +296,14 @@ func TestAllLines(c *gin.Context) {
 					queryKey = line.LineQuery[1:]
 				} else {
 					queryKey = line.LineQuery
+				}
+
+				// 先检查官方线路是否可用
+				if !availableLines[queryKey] {
+					mu.Lock()
+					result[line.Value] = "Unavailable"
+					mu.Unlock()
+					return
 				}
 
 				testURLStr, exists := queryToURL[queryKey]
@@ -362,7 +384,7 @@ func TestLineSpeed(c *gin.Context) {
 	}
 
 	// 2. 获取官方线路列表
-	client := req.C().SetTimeout(5 * time.Second).ImpersonateChrome()
+	client := req.C().SetTimeout(30 * time.Second).ImpersonateChrome()
 	resp, err := client.R().Get("https://member.bilibili.com/preupload?r=ping&file=lines.json")
 	if err != nil {
 		result["msg"] = "获取官方线路失败"

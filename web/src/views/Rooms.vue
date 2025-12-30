@@ -118,11 +118,11 @@
         </el-form-item>
         <el-form-item label="封面配置">
           <el-radio-group v-model="form.coverType">
-            <el-radio :label="0">不使用封面</el-radio>
-            <el-radio :label="1">使用直播首帧</el-radio>
-            <el-radio :label="2">自定义封面</el-radio>
+            <el-radio label="default">不使用封面</el-radio>
+            <el-radio label="live">使用直播首帧</el-radio>
+            <el-radio label="diy">自定义封面</el-radio>
           </el-radio-group>
-          <div v-if="form.coverType === 2" style="margin-top: 10px;">
+          <div v-if="form.coverType === 'diy'" style="margin-top: 10px;">
             <el-upload
               :action="`/api/rooms/${form.id}/cover`"
               :show-file-list="false"
@@ -265,7 +265,7 @@ const form = ref({
   partTitleTemplate: 'P${index}-${areaName}-${MM月dd日HH点mm分}',
   wxuid: '',
   pushMsgTags: '开播,上传,投稿',
-  coverType: 0,
+  coverType: 'default',
   coverUrl: '',
   highEnergyCut: false,
   windowSize: 60,
@@ -435,7 +435,7 @@ const handleAdd = () => {
     line: 'CS_UPOS',
     deleteType: 1,
     partTitleTemplate: 'P${index}-${areaName}-${MM月dd日HH点mm分}',
-    coverType: 0,
+    coverType: 'default',
     coverUrl: '',
     highEnergyCut: false,
     windowSize: 60,
