@@ -106,7 +106,22 @@ const handleCommand = (command) => {
   border-right: none;
   background-color: #001529;
 }
-{
+
+.sidebar-menu :deep(.el-menu-item:hover),
+.sidebar-menu :deep(.el-menu-item.is-active) {
+  color: #fff;
+  background-color: #1890ff !important;
+}
+
+.el-header {
+  background-color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+}
+
+.header-content {
   width: 100%;
   display: flex;
   justify-content: space-between;
@@ -135,26 +150,7 @@ const handleCommand = (command) => {
 }
 
 .user-info:hover {
-  background-color: #f5f5f5
-
-.sidebar-menu :deep(.el-menu-item:hover),
-.sidebar-menu :deep(.el-menu-item.is-active) {
-  color: #fff;
-  background-color: #1890ff !important;
-}
-
-.el-header {
-  background-color: #fff;
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
-  display: flex;
-  align-items: center;
-  padding: 0 20px;
-}
-
-.header-content h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 500;
+  background-color: #f5f5f5;
 }
 
 .el-main {

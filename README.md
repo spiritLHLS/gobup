@@ -97,7 +97,9 @@ bash install.sh upgrade
 | `spiritlhls/gobup:latest` | 最新版本 | 快速部署 |
 | `spiritlhl/gobup:20251230-062908` | 特定日期版本 | 需要固定版本 |
 
-所有镜像均支持 `l，首次访问需登录）：**
+所有镜像均支持 `linux/amd64` 和 `linux/arm64` 架构。
+
+**基础运行（无认证，首次访问需登录）：**
 
 ```bash
 docker pull spiritlhl/gobup:latest
@@ -167,29 +169,25 @@ docker-compose up -d
 
 <details>
 <summary>展开查看编译打包方式</summary>
-            # 管理员用户名（推荐设置）
-      - PASSWORD=your_password      # 管理员密码（推荐设置）
-```
 
-运行：
+### 方式四：从源码构建 Docker 镜像
 
 ```bash
-# 直接运行（使用配置文件中的密码）
-docker-compose up -d
+# 克隆仓库
+git clone https://github.com/spiritlhls/gobup.git
+cd gobup
 
-# 或通过环境变量覆盖
-GOBUP_USERNAME=root GOBUP_PASSWORD=123456 docker-compose up -d
-```
+# 构建镜像
+docker build -t gobup .
 
-**环境变量说明：**
-- `USERNAME` 和 `PASSWORD`：仅在首次启动时创建管理员账户
-- 如不设置，首次访问会要求登录
-- 后续修改需删除 `./data/gobup.db` 重新初始化ker build -t gobup .
+# 运行容器
 docker run -d \
   --name gobup \
   -p 22380:12380 \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
+  -e USERNAME=admin \
+  -e PASSWORD=your_password \
   --restart unless-stopped \
   gobup
 ```
@@ -215,19 +213,16 @@ docker run -d \
 解压后运行：
 
 ```bash
-# Linux/macOS
-tar -xzf gobup-server-linux-amd64.tar.gz
-./gobup-server-linux-amd64 -port 12380 -work-path /path/to/recordings
-
-# Windows
-# 解压 gobup-se（无认证）
+# Linux/macOS（无认证）
 tar -xzf gobup-server-linux-amd64.tar.gz
 ./gobup-server-linux-amd64 -port 12380 -work-path /path/to/recordings
 
 # Linux/macOS（带认证，推荐）
 ./gobup-server-linux-amd64 -port 12380 -work-path /path/to/recordings \
-  -username admin -password your_p推荐设置，仅首次启动时有效） |
-| 环境变量 | `-e PASSWORD` | 初始管理员密码（推荐设置
+  -username admin -password your_password
+```
+
+```powershell
 # Windows（无认证）
 # 解压 gobup-server-windows-amd64.zip
 gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
@@ -243,24 +238,12 @@ gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings ^
 - `-username`: 管理员用户名（可选，首次启动时创建）
 - `-password`: 管理员密码（可选，首次启动时创建）
 - `-data-path`: 数据目录（默认 ./data）
-### 容器参数说明
 
-| 类型 | 参数 | 说明 |
-|------|------|------|
-| 端口映射 | `-p 22380:12380` | 映射Web管理界面端口（前端已嵌入Go二进制） |
-| 存储卷 | `-v /path/to/recordings:/rec` | 挂载录制文件目录（必须与录播姬一致） |
-| 存储卷 | `-v /path/to/data:/app/data` | 挂载数据目录（数据库和配置文件） |
-| 环境变量 | `-e USERNAME` | 初始管理员用户名（可选，仅首次启动时有效） |
-| 环境变量 | `-e PASSWORD` | 初始管理员密码（可选，仅首次启动时有效） |
-| 环境变量 | `-e TZ` | 时区设置，默认 Asia/Shanghai |
-| 重启策略 | `--restart unless-stopped` | 容器异常退出时自动重启 |
-
-> 重要提示：`/path/to/recordings` 必须和录播姬的录制目录保持一致
-
-访问 Web 界面：
-- 所有部署方式统一访问：`http://localhost:22380`（宿主机端口）
-- 或使用服务器IP：`http://你的IP:22380`
-- 容器内部端口：`12380`（前端已嵌入，无需Nginx）
+**访问 Web 界面：**
+- 所有部署方式统一访问：`http://localhost:12380` 或 `http://localhost:22380`（Docker映射端口）
+- 或使用服务器IP：`http://你的IP:12380` 或 `http://你的IP:22380`
+- 如果设置了认证，使用设置的用户名密码登录
+- 如果未设置认证，首次访问会要求输入用户名密码
 
 ## 认证配置
 
