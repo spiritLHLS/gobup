@@ -45,17 +45,7 @@ func SetupRoutes(router *gin.Engine) {
 				users.GET("/login", controllers.LoginUser)
 				users.GET("/loginCheck", controllers.LoginCheck)
 				users.GET("/loginCancel", controllers.LoginCancel)
-				users.POST("/loginByCookie", controllers.LoginByCookie)
-				users.GET("/refresh/:id", controllers.RefreshUserCookie)
-				users.GET("/refresh/:id", controllers.RefreshUserCookie)
-				users.POST("/update", controllers.UpdateBiliUser)
-				users.GET("/delete/:id", controllers.DeleteBiliUser)
-			}
 
-			config := auth.Group("/config")
-			{
-				config.POST("/export", controllers.ExportConfig)
-				config.POST("/import", controllers.ImportConfig)
 			}
 
 			histories := auth.Group("/history")
