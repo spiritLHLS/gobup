@@ -87,13 +87,13 @@
               <el-icon class="is-loading"><Loading /></el-icon>
               <p>生成二维码中...</p>
             </div>
-            <div v-else-if="qrcodeUrl" class="qrcode">
-              <div ref="qrcodeRef" class="qrcode-image"></div>
+            <div v-else class="qrcode">
+              <img v-if="qrcodeUrl" :src="'data:image/png;base64,' + qrcodeUrl" 
+                   style="width: 256px; height: 256px;" 
+                   @error="handleImageError"
+                   @load="handleImageLoad" />
               <p class="tip">请使用哔哩哔哩APP扫描二维码登录</p>
               <p class="status">{{ loginStatus }}</p>
-            </div>
-            <div v-else class="empty">
-              <el-button type="primary" @click="generateQRCode">生成二维码</el-button>
             </div>
           </div>
         </el-tab-pane>
@@ -257,6 +257,10 @@ const handleLogin = () => {
   qrcodeUrl.value = ''
   loginStatus.value = '等待扫码...'
   stopPolling()
+  // 自动生成二维码
+  nextTick(() => {
+    generateQRCode()
+  })
 }
 
 const generateQRCode = async () => {
@@ -285,17 +289,8 @@ const generateQRCode = async () => {
     authKey = data.key  // 保存session key用于轮询
     qrcodeUrl.value = data.image
     
-    await nextTick()
-    
-    // 显示二维码图片
-    if (qrcodeRef.value) {
-      qrcodeRef.value.innerHTML = ''
-      const img = document.createElement('img')
-      img.src = 'data:image/png;base64,' + data.image
-      img.style.width = '256px'
-      img.style.height = '256px'
-      qrcodeRef.value.appendChild(img)
-    }
+    console.log('二维码已设置，Base64长度:', data.image.length)
+    console.log('authKey:', authKey)
     
     // 开始轮询登录状态
     startPolling()
@@ -377,6 +372,16 @@ const cancelLogin = () => {
   loginDialogVisible.value = false
   cookieInput.value = ''
   qrcodeUrl.value = ''
+}
+
+const handleImageError = (e) => {
+  console.error('二维码图片加载失败:', e)
+  loginStatus.value = '二维码图片加载失败，请重新生成'
+  ElMessage.error('二维码图片加载失败')
+}
+
+const handleImageLoad = () => {
+  console.log('二维码图片加载成功')
 }
 
 const handleCheckStatus = async (row) => {
