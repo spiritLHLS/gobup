@@ -41,16 +41,40 @@ class BrecImporter:
             tree = ET.parse(xml_path)
             root = tree.getroot()
             
-            # 提取所有字段
-            room_id = root.find('.//RoomId').text if root.find('.//RoomId') is not None else ''
-            short_id = root.find('.//ShortId').text if root.find('.//ShortId') is not None else ''
-            name = root.find('.//Name').text if root.find('.//Name') is not None else ''
-            title = root.find('.//Title').text if root.find('.//Title') is not None else ''
-            area_parent = root.find('.//AreaNameParent').text if root.find('.//AreaNameParent') is not None else ''
-            area_child = root.find('.//AreaNameChild').text if root.find('.//AreaNameChild') is not None else ''
-            start_time = root.find('.//StartTime').text if root.find('.//StartTime') is not None else ''
-            end_time = root.find('.//EndTime').text if root.find('.//EndTime') is not None else ''
-            session_id = root.find('.//SessionId').text if root.find('.//SessionId') is not None else ''
+            import os
+            if os.getenv('DEBUG'):
+                # 打印 XML 结构以便调试
+                print(f"   🔍 XML 根元素: {root.tag}")
+                print(f"   🔍 XML 子元素: {[child.tag for child in root]}")
+            
+            # 尝试多种可能的 XML 结构
+            # BililiveRecorder 可能使用不同的命名空间或结构
+            def get_text(element, *paths):
+                """尝试多种路径获取文本"""
+                for path in paths:
+                    node = element.find(path)
+                    if node is not None and node.text:
+                        return node.text.strip()
+                    # 尝试不区分大小写
+                    for child in element.iter():
+                        if child.tag.lower() == path.lower().replace('.//', ''):
+                            if child.text:
+                                return child.text.strip()
+                return ''
+            
+            # 提取所有字段，尝试多种可能的路径
+            room_id = get_text(root, './/RoomId', './/roomid', 'RoomId', 'roomid')
+            short_id = get_text(root, './/ShortId', './/shortid', 'ShortId', 'shortid')
+            name = get_text(root, './/Name', './/name', 'Name', 'name', './/Uname', './/uname')
+            title = get_text(root, './/Title', './/title', 'Title', 'title')
+            area_parent = get_text(root, './/AreaNameParent', './/areanameparent', 'AreaNameParent')
+            area_child = get_text(root, './/AreaNameChild', './/areanamechild', 'AreaNameChild')
+            start_time = get_text(root, './/StartTime', './/starttime', 'StartTime', 'starttime', './/FileOpenTime')
+            end_time = get_text(root, './/EndTime', './/endtime', 'EndTime', 'endtime', './/FileCloseTime')
+            session_id = get_text(root, './/SessionId', './/sessionid', 'SessionId', 'sessionid')
+            
+            if os.getenv('DEBUG'):
+                print(f"   🔍 解析结果: room_id={room_id}, title={title}, name={name}, session_id={session_id[:8] if session_id else 'None'}...")
             
             # 关键：如果 SessionId 为空，使用 StartTime 生成唯一标识
             # 同一场直播的多个文件会有相同的 StartTime，从而共享相同的 session_id
@@ -73,13 +97,13 @@ class BrecImporter:
                 'session_id': session_id,
             }
             
-            import os
-            if os.getenv('DEBUG'):
-                print(f"   🔍 XML解析: RoomID={room_id}, Title={title}, SessionID={session_id[:8]}...")
-            
             return metadata
         except Exception as e:
             print(f"⚠️  解析 XML 失败 {xml_path}: {e}")
+            import traceback
+            import os
+            if os.getenv('DEBUG'):
+                traceback.print_exc()
             return None
     
     def get_file_size(self, file_path: Path) -> int:
@@ -397,14 +421,17 @@ class BrecImporter:
         # 格式: 录制-5050-20251227-231202-161-古法精油高手.flv
         #              ^^^^^^^^ ^^^^^^
         #              日期      时间
+        # 关键：同一场直播的多个文件，时间只差几秒
+        # 例如：231202, 231202, 231204, 231207
+        # 我们只取到分钟级别（2312），这样这些文件会有相同的 session_id
         start_time = None
         datetime_match = re.search(r'(\d{8})-(\d{6})', filename)
         if datetime_match:
             date_str = datetime_match.group(1)  # 20251227
             time_str = datetime_match.group(2)  # 231202
             try:
-                # 构造 ISO 时间格式
-                start_time = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}T{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
+                # 构造 ISO 时间格式（只到分钟）
+                start_time = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}T{time_str[:2]}:{time_str[2:4]}:00"
             except:
                 pass
         
@@ -415,11 +442,11 @@ class BrecImporter:
         title_match = re.search(r'-([^-]+)$', filename)
         title = title_match.group(1) if title_match else filename
         
-        # 关键：生成 session_id，使用 room_id + 日期时间（不含毫秒）
+        # 关键：生成 session_id，使用 room_id + 日期时间（只到分钟）
         # 这样同一场直播的多个文件会有相同的 session_id
-        # 例如：录制-5050-20251227-231202-161-xxx.flv 和 录制-5050-20251227-231202-828-yyy.flv
-        # 都会提取出 20251227-231202，从而得到相同的 session_id
-        session_key = f"{room_id}_{start_time.split('.')[0]}"  # 移除毫秒部分
+        # 例如：录制-5050-20251227-231202-161-xxx.flv 和 录制-5050-20251227-231204-828-yyy.flv
+        # 都会提取出 2025-12-27T23:12:00，从而得到相同的 session_id
+        session_key = f"{room_id}_{start_time}"  # start_time 已经只到分钟了
         session_id = hashlib.md5(session_key.encode()).hexdigest()[:16]
         
         import os
