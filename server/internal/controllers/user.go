@@ -31,7 +31,9 @@ const sessionExpireTime = 5 * 60 // 5分钟过期
 func ListBiliUsers(c *gin.Context) {
 	db := database.GetDB()
 	var users []models.BiliBiliUser
+	// 过滤掉UID=-1的root管理员用户
 	db.Select("id", "created_at", "updated_at", "uid", "uname", "face", "login", "level", "vip_type", "vip_status", "login_time", "expire_time", "wx_push_token").
+		Where("uid != ?", -1).
 		Order("created_at DESC").
 		Find(&users)
 
@@ -48,16 +50,8 @@ func LoginUser(c *gin.Context) {
 		return
 	}
 
-	// 生成二维码图片
-	qrCode, err := qrcode.New(qrResp.Data.URL, qrcode.Medium)
-	if err != nil {
-		log.Printf("生成二维码图片失败: %v", err)
-		c.JSON(http.StatusOK, gin.H{"error": "生成二维码图片失败"})
-		return
-	}
-
-	qrCode.DisableBorder = true
-	pngBytes, err := qrCode.PNG(256)
+	// 生成二维码图片（使用Encode直接生成，更简单）
+	pngBytes, err := qrcode.Encode(qrResp.Data.URL, qrcode.Medium, 256)
 	if err != nil {
 		log.Printf("生成PNG失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"error": "生成PNG失败"})
@@ -334,6 +328,50 @@ func RefreshUserCookie(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "Cookie有效", "user": user})
+}
+
+// CheckUserStatus 检查用户Cookie状态
+func CheckUserStatus(c *gin.Context) {
+	id := c.Param("id")
+
+	db := database.GetDB()
+	var user models.BiliBiliUser
+
+	if err := db.First(&user, id).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "用户不存在"})
+		return
+	}
+
+	// 验证Cookie是否有效
+	valid, err := bili.ValidateCookie(user.Cookies)
+	if err != nil {
+		user.Login = false
+		db.Save(&user)
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "验证失败: " + err.Error(), "user": user})
+		return
+	}
+
+	if !valid {
+		user.Login = false
+		db.Save(&user)
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "Cookie已失效，请重新登录", "user": user})
+		return
+	}
+
+	// 获取最新用户信息
+	userInfo, err := bili.GetUserInfo(user.Cookies)
+	if err == nil {
+		user.Uname = userInfo.Data.Uname
+		user.Face = userInfo.Data.Face
+		user.Level = userInfo.Data.Level
+		user.VipType = userInfo.Data.VipType
+		user.VipStatus = userInfo.Data.VipStatus
+	}
+
+	user.Login = true
+	db.Save(&user)
+
+	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "Cookie有效，用户状态正常", "user": user})
 }
 
 // LoginByCookie 通过Cookie直接登录

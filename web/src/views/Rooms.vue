@@ -294,7 +294,8 @@ const fetchRooms = async () => {
 const fetchUsers = async () => {
   try {
     const data = await userAPI.list()
-    users.value = data || []
+    // 过滤掉 uid 为 -1 的 root 用户
+    users.value = (data || []).filter(user => user.uid !== -1)
   } catch (error) {
     console.error('获取用户列表失败:', error)
   }

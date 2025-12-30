@@ -35,11 +35,10 @@ func ExportConfig(c *gin.Context) {
 		configData["roomList"] = rooms
 	}
 
-	// 导出用户配置（不导出敏感信息）
+	// 导出用户配置
 	if params.ExportUser {
 		var users []models.BiliBiliUser
-		// 不导出Cookies等敏感信息
-		db.Select("id", "uid", "uname", "face", "level").Find(&users)
+		db.Find(&users)
 		configData["userList"] = users
 	}
 

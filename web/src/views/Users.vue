@@ -45,8 +45,15 @@
             {{ formatTime(row.createdAt) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" fixed="right">
           <template #default="{ row }">
+            <el-button
+              size="small"
+              @click="handleCheckStatus(row)"
+              :loading="row.checking"
+            >
+              检查状态
+            </el-button>
             <el-button
               size="small"
               @click="handleEditWxPush(row)"
@@ -354,6 +361,31 @@ const cancelLogin = () => {
   loginDialogVisible.value = false
   cookieInput.value = ''
   qrcodeUrl.value = ''
+}
+
+const handleCheckStatus = async (row) => {
+  row.checking = true
+  try {
+    const result = await userAPI.checkStatus(row.id)
+    if (result.type === 'success') {
+      ElMessage.success(result.msg || 'Cookie有效，用户状态正常')
+      // 更新用户信息
+      if (result.user) {
+        Object.assign(row, result.user)
+      }
+    } else {
+      ElMessage.error(result.msg || 'Cookie已失效')
+      // 更新用户登录状态
+      if (result.user) {
+        Object.assign(row, result.user)
+      }
+    }
+  } catch (error) {
+    console.error('检查状态失败:', error)
+    ElMessage.error('检查失败，请稍后重试')
+  } finally {
+    row.checking = false
+  }
 }
 
 const handleDelete = async (row) => {

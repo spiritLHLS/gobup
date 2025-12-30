@@ -71,6 +71,7 @@ export const userAPI = {
   loginByCookie: (cookies) => request.post('/biliUser/loginByCookie', { cookies }),
   update: (data) => request.post('/biliUser/update', data),
   refresh: (id) => request.get(`/biliUser/refresh/${id}`),
+  checkStatus: (id) => request.get(`/biliUser/checkStatus/${id}`),
   delete: (id) => request.get(`/biliUser/delete/${id}`)
 }
 

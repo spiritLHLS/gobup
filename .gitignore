@@ -1,3 +1,4 @@
 ./server/gobup.db
 ./web/node_modules
 ./web/dist
+example.json

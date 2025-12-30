@@ -42,6 +42,7 @@ func SetupRoutes(router *gin.Engine) {
 				users.GET("/list", controllers.ListBiliUsers)
 				users.POST("/loginByCookie", controllers.LoginByCookie)
 				users.GET("/refresh/:id", controllers.RefreshUserCookie)
+				users.GET("/checkStatus/:id", controllers.CheckUserStatus)
 				users.GET("/login", controllers.LoginUser)
 				users.GET("/loginCheck", controllers.LoginCheck)
 				users.GET("/loginCancel", controllers.LoginCancel)

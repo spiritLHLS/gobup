@@ -85,6 +85,7 @@ type RecordHistory struct {
 	DanmakuCount     int            `gorm:"default:0" json:"danmakuCount"`          // 弹幕总数
 	FilesMoved       bool           `gorm:"default:false;index" json:"filesMoved"`  // 文件是否已移动
 	SyncedAt         *time.Time     `json:"syncedAt"`                               // 最后同步时间
+	CoverURL         string         `json:"coverUrl"`                               // 封面URL
 	RoomName         string         `gorm:"-" json:"roomName"`
 	PartCount        int            `gorm:"-" json:"partCount"`
 	PartDuration     float64        `gorm:"-" json:"partDuration"`
@@ -96,7 +97,7 @@ type RecordHistory struct {
 // RecordHistoryPart 录制分P
 type RecordHistoryPart struct {
 	ID         uint      `gorm:"primarykey" json:"id"`
-	CreatedAt  time.Time `gorm:"index" json:"eventId"`
+	CreatedAt  time.Time `gorm:"index" json:"createdAt"`
 	HistoryID  uint      `gorm:"index;not null" json:"historyId"`
 	RoomID     string    `gorm:"index" json:"roomId"`
 	SessionID  string    `gorm:"index" json:"sessionId"`
