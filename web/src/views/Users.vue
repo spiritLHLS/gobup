@@ -88,10 +88,15 @@
               <p>生成二维码中...</p>
             </div>
             <div v-else class="qrcode">
-              <img v-if="qrcodeUrl" :src="'data:image/png;base64,' + qrcodeUrl" 
-                   style="width: 256px; height: 256px;" 
+              <img v-if="qrcodeUrl" 
+                   :src="'data:image/png;base64,' + qrcodeUrl" 
+                   alt="登录二维码"
+                   style="width: 256px; height: 256px; display: block; margin: 0 auto;" 
                    @error="handleImageError"
                    @load="handleImageLoad" />
+              <div v-else style="width: 256px; height: 256px; display: flex; align-items: center; justify-content: center; margin: 0 auto; border: 1px dashed #ccc;">
+                <span>等待二维码...</span>
+              </div>
               <p class="tip">请使用哔哩哔哩APP扫描二维码登录</p>
               <p class="status">{{ loginStatus }}</p>
             </div>
@@ -266,21 +271,28 @@ const handleLogin = () => {
 const generateQRCode = async () => {
   qrcodeLoading.value = true
   loginStatus.value = '等待扫码...'
+  qrcodeUrl.value = '' // 清空旧的二维码
   
   try {
     // 新的API返回格式: {image: base64, key: sessionKey}
     const data = await userAPI.login()
     
-    console.log('获取二维码响应:', data)
+    console.log('========== 二维码API响应 ==========')
+    console.log('完整响应:', data)
+    console.log('是否有error字段:', !!data.error)
+    console.log('是否有image字段:', !!data.image)
+    console.log('是否有key字段:', !!data.key)
     
     // 检查返回的数据
     if (data.error) {
+      console.error('API返回错误:', data.error)
       ElMessage.error(data.error)
       loginStatus.value = data.error
       return
     }
     
     if (!data.image || !data.key) {
+      console.error('数据不完整 - image:', !!data.image, 'key:', !!data.key)
       ElMessage.error('二维码数据不完整')
       loginStatus.value = '二维码数据不完整'
       return
@@ -289,17 +301,26 @@ const generateQRCode = async () => {
     authKey = data.key  // 保存session key用于轮询
     qrcodeUrl.value = data.image
     
-    console.log('二维码已设置，Base64长度:', data.image.length)
-    console.log('authKey:', authKey)
+    console.log('✓ 二维码已设置')
+    console.log('✓ Base64长度:', data.image.length)
+    console.log('✓ Base64前50字符:', data.image.substring(0, 50))
+    console.log('✓ authKey:', authKey)
+    console.log('✓ qrcodeUrl响应式值已更新:', qrcodeUrl.value.length)
     
     // 开始轮询登录状态
     startPolling()
   } catch (error) {
-    console.error('获取二维码失败:', error)
+    console.error('========== 获取二维码异常 ==========')
+    console.error('错误对象:', error)
+    console.error('错误消息:', error.message)
+    console.error('错误堆栈:', error.stack)
     loginStatus.value = '获取二维码失败: ' + (error.message || '未知错误')
     ElMessage.error('获取二维码失败: ' + (error.message || '未知错误'))
   } finally {
     qrcodeLoading.value = false
+    console.log('========== 二维码生成流程结束 ==========')
+    console.log('qrcodeUrl是否有值:', !!qrcodeUrl.value)
+    console.log('qrcodeLoading:', qrcodeLoading.value)
   }
 }
 
