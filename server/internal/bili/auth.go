@@ -138,6 +138,38 @@ func ValidateCookie(cookies string) (bool, error) {
 	return true, nil
 }
 
+// ExtractCookiesFromPollResponse 从轮询响应中提取Cookie
+// 参考biliupforjava的实现
+func ExtractCookiesFromPollResponse(pollResp *QRCodePollResponse) string {
+	if pollResp == nil || pollResp.Data.Code != 0 {
+		return ""
+	}
+
+	// TV端登录会在返回的数据中包含cookie信息
+	// 需要从URL中提取参数
+	if pollResp.Data.URL == "" {
+		return ""
+	}
+
+	parsedURL, err := url.Parse(pollResp.Data.URL)
+	if err != nil {
+		return ""
+	}
+
+	query := parsedURL.Query()
+
+	// 提取关键Cookie字段
+	cookies := []string{
+		fmt.Sprintf("SESSDATA=%s", query.Get("SESSDATA")),
+		fmt.Sprintf("bili_jct=%s", query.Get("bili_jct")),
+		fmt.Sprintf("DedeUserID=%s", query.Get("DedeUserID")),
+		fmt.Sprintf("DedeUserID__ckMd5=%s", query.Get("DedeUserID__ckMd5")),
+		fmt.Sprintf("sid=%s", query.Get("sid")),
+	}
+
+	return strings.Join(cookies, "; ")
+}
+
 // ParseCookies 解析Cookie字符串
 func ParseCookies(cookieStr string) map[string]string {
 	cookies := make(map[string]string)

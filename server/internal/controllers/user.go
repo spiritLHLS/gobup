@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/base64"
 	"log"
 	"net/http"
 	"time"
@@ -9,80 +10,165 @@ import (
 	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
+	"github.com/skip2/go-qrcode"
 )
 
-// QRCodeCache 二维码缓存
-var qrCodeCache = make(map[string]*bili.QRCodeResponse)
+// LoginSession 登录会话
+type LoginSession struct {
+	AuthCode   string
+	QRCodeURL  string
+	CreateTime int64
+	Status     string // pending, success, failed, expired
+	Message    string
+}
 
-// ListBiliUsers 获取用户列表
+var loginSessions = make(map[string]*LoginSession)
+
+const sessionExpireTime = 5 * 60 // 5分钟过期
+
+// ListBiliUsers 获取B站用户列表（不包括管理员）
 func ListBiliUsers(c *gin.Context) {
 	db := database.GetDB()
 	var users []models.BiliBiliUser
-	db.Select("id", "created_at", "updated_at", "uid", "uname", "face", "login", "level", "vip_type", "vip_status", "login_time", "expire_time").
+	db.Select("id", "created_at", "updated_at", "uid", "uname", "face", "login", "level", "vip_type", "vip_status", "login_time", "expire_time", "wx_push_token").
 		Order("created_at DESC").
 		Find(&users)
 
 	c.JSON(http.StatusOK, users)
 }
 
-// LoginUser 生成登录二维码
+// LoginUser 生成B站登录二维码
 func LoginUser(c *gin.Context) {
-	// 生成二维码
+	// 生成TV端二维码（参考biliupforjava实现）
 	qrResp, err := bili.GenerateTVQRCode()
 	if err != nil {
 		log.Printf("生成二维码失败: %v", err)
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "生成二维码失败: " + err.Error()})
+		c.JSON(http.StatusOK, gin.H{"error": "生成二维码失败: " + err.Error()})
 		return
 	}
 
-	// 缓存二维码信息
-	qrCodeCache[qrResp.Data.AuthCode] = qrResp
+	// 生成二维码图片
+	qrCode, err := qrcode.New(qrResp.Data.URL, qrcode.Medium)
+	if err != nil {
+		log.Printf("生成二维码图片失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"error": "生成二维码图片失败"})
+		return
+	}
+
+	qrCode.DisableBorder = true
+	pngBytes, err := qrCode.PNG(256)
+	if err != nil {
+		log.Printf("生成PNG失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"error": "生成PNG失败"})
+		return
+	}
+
+	// Base64编码
+	imageBase64 := base64.StdEncoding.EncodeToString(pngBytes)
+
+	// 使用图片的最后100个字符作为session key
+	sessionKey := imageBase64[len(imageBase64)-100:]
+
+	// 创建登录会话
+	session := &LoginSession{
+		AuthCode:   qrResp.Data.AuthCode,
+		QRCodeURL:  qrResp.Data.URL,
+		CreateTime: time.Now().Unix(),
+		Status:     "pending",
+		Message:    "等待扫码",
+	}
+	loginSessions[sessionKey] = session
 
 	c.JSON(http.StatusOK, gin.H{
-		"type":      "success",
-		"authCode":  qrResp.Data.AuthCode,
-		"qrcodeUrl": qrResp.Data.URL,
+		"image": imageBase64,
+		"key":   sessionKey,
 	})
 }
 
-// LoginReturn 轮询登录状态
-func LoginReturn(c *gin.Context) {
-	authCode := c.Query("authCode")
-	if authCode == "" {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "缺少authCode"})
+// LoginCheck 检查登录状态（轮询）
+func LoginCheck(c *gin.Context) {
+	sessionKey := c.Query("key")
+	if sessionKey == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "failed",
+			"message": "缺少key参数",
+		})
+		return
+	}
+
+	session, exists := loginSessions[sessionKey]
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "failed",
+			"message": "会话不存在或已过期",
+		})
+		return
+	}
+
+	// 检查会话是否过期
+	if time.Now().Unix()-session.CreateTime > sessionExpireTime {
+		delete(loginSessions, sessionKey)
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "expired",
+			"message": "二维码已过期，请刷新",
+		})
+		return
+	}
+
+	// 如果已有状态，直接返回
+	if session.Status != "pending" {
+		if session.Status == "success" {
+			delete(loginSessions, sessionKey)
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  session.Status,
+			"message": session.Message,
+		})
 		return
 	}
 
 	// 轮询登录状态
-	pollResp, err := bili.PollQRCodeStatus(authCode)
+	pollResp, err := bili.PollQRCodeStatus(session.AuthCode)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "轮询失败: " + err.Error()})
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "pending",
+			"message": "检查中...",
+		})
 		return
 	}
 
-	// 处理不同的状态码
 	switch pollResp.Data.Code {
 	case 0: // 登录成功
-		// 从响应中提取Cookie
-		cookieStr := extractCookiesFromResponse(pollResp)
+		// 解析Cookie
+		cookieStr := bili.ExtractCookiesFromPollResponse(pollResp)
 		if cookieStr == "" {
-			c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "获取Cookie失败"})
+			session.Status = "failed"
+			session.Message = "获取Cookie失败"
+			c.JSON(http.StatusOK, gin.H{
+				"status":  "failed",
+				"message": "获取Cookie失败",
+			})
 			return
 		}
 
 		// 获取用户信息
 		userInfo, err := bili.GetUserInfo(cookieStr)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "获取用户信息失败: " + err.Error()})
+			session.Status = "failed"
+			session.Message = "获取用户信息失败"
+			c.JSON(http.StatusOK, gin.H{
+				"status":  "failed",
+				"message": "获取用户信息失败: " + err.Error(),
+			})
 			return
 		}
 
-		// 保存用户
+		// 保存用户到数据库
 		db := database.GetDB()
 		var user models.BiliBiliUser
 
 		now := time.Now()
-		expireTime := now.Add(30 * 24 * time.Hour) // 30天过期
+		expireTime := now.Add(30 * 24 * time.Hour)
 
 		result := db.Where("uid = ?", userInfo.Data.Mid).First(&user)
 		if result.Error != nil {
@@ -115,35 +201,64 @@ func LoginReturn(c *gin.Context) {
 		}
 
 		if err := db.Save(&user).Error; err != nil {
-			c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "保存用户失败"})
+			log.Printf("保存用户失败: %v", err)
+			c.JSON(http.StatusOK, gin.H{
+				"status":  "failed",
+				"message": "保存用户失败",
+			})
 			return
 		}
 
-		// 清除缓存
-		delete(qrCodeCache, authCode)
+		log.Printf("[INFO] B站用户登录成功: UID=%d, Uname=%s", user.UID, user.Uname)
 
+		session.Status = "success"
+		session.Message = "登录成功"
 		c.JSON(http.StatusOK, gin.H{
-			"type": "success",
-			"msg":  "登录成功",
-			"user": user,
+			"status":  "success",
+			"message": "登录成功",
 		})
 
 	case 86038: // 二维码已失效
-		delete(qrCodeCache, authCode)
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "二维码已失效，请重新获取"})
+		session.Status = "expired"
+		session.Message = "二维码已过期"
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "expired",
+			"message": "二维码已过期，请刷新",
+		})
 
 	case 86090: // 已扫码未确认
-		c.JSON(http.StatusOK, gin.H{"type": "waiting", "msg": "已扫码，等待确认"})
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "scanned",
+			"message": "已扫码，请在手机上确认",
+		})
 
 	case 86101: // 未扫码
-		c.JSON(http.StatusOK, gin.H{"type": "waiting", "msg": "等待扫码"})
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "pending",
+			"message": "等待扫码",
+		})
 
 	default:
-		c.JSON(http.StatusOK, gin.H{"type": "waiting", "msg": "等待扫码"})
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "pending",
+			"message": "等待扫码",
+		})
 	}
 }
 
-// UpdateBiliUser 更新用户
+// LoginCancel 取消登录
+func LoginCancel(c *gin.Context) {
+	sessionKey := c.Query("key")
+	if sessionKey != "" {
+		delete(loginSessions, sessionKey)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "cancelled",
+		"message": "已取消",
+	})
+}
+
+// UpdateBiliUser 更新B站用户信息
 func UpdateBiliUser(c *gin.Context) {
 	var user models.BiliBiliUser
 	if err := c.ShouldBindJSON(&user); err != nil {
@@ -167,7 +282,7 @@ func UpdateBiliUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "更新成功"})
 }
 
-// DeleteBiliUser 删除用户
+// DeleteBiliUser 删除B站用户
 func DeleteBiliUser(c *gin.Context) {
 	id := c.Param("id")
 	db := database.GetDB()
@@ -218,12 +333,4 @@ func RefreshUserCookie(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "Cookie有效", "user": user})
-}
-
-// extractCookiesFromResponse 从响应中提取Cookie
-func extractCookiesFromResponse(resp *bili.QRCodePollResponse) string {
-	// 这里需要根据实际API响应解析Cookie
-	// TV端登录会在URL中返回参数，需要构建Cookie字符串
-	// 简化实现，实际需要解析URL参数
-	return resp.Data.URL // 需要进一步解析
 }

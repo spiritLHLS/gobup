@@ -66,7 +66,9 @@ export const historyAPI = {
 export const userAPI = {
   list: () => request.get('/biliUser/list'),
   login: () => request.get('/biliUser/login'),
-  loginReturn: (key) => request.get('/biliUser/loginReturn', { params: { key } }),
+  loginCheck: (key) => request.get('/biliUser/loginCheck', { params: { key } }),
+  loginCancel: (key) => request.get('/biliUser/loginCancel', { params: { key } }),
+  update: (data) => request.post('/biliUser/update', data),
   refresh: (id) => request.get(`/biliUser/refresh/${id}`),
   delete: (id) => request.get(`/biliUser/delete/${id}`)
 }

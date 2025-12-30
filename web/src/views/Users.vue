@@ -194,21 +194,21 @@ const handleLogin = async () => {
   loginStatus.value = '等待扫码...'
   
   try {
+    // 新的API返回格式: {image: base64, key: sessionKey}
     const data = await userAPI.login()
-    qrcodeUrl.value = data.url
-    authKey = data.authCode
+    
+    authKey = data.key  // 保存session key用于轮询
     
     await nextTick()
     
-    // 生成二维码
+    // 显示二维码图片
     if (qrcodeRef.value) {
       qrcodeRef.value.innerHTML = ''
-      await QRCode.toCanvas(qrcodeUrl.value, {
-        width: 200,
-        margin: 1
-      }).then(canvas => {
-        qrcodeRef.value.appendChild(canvas)
-      })
+      const img = document.createElement('img')
+      img.src = 'data:image/png;base64,' + data.image
+      img.style.width = '256px'
+      img.style.height = '256px'
+      qrcodeRef.value.appendChild(img)
     }
     
     // 开始轮询登录状态
@@ -226,19 +226,25 @@ const startPolling = () => {
   
   pollingTimer = setInterval(async () => {
     try {
-      const data = await userAPI.loginReturn(authKey)
+      // 使用新的loginCheck API
+      const data = await userAPI.loginCheck(authKey)
       
-      if (data.code === 0) {
+      loginStatus.value = data.message || '检查中...'
+      
+      if (data.status === 'success') {
         loginStatus.value = '登录成功！'
         ElMessage.success('登录成功')
         stopPolling()
         loginDialogVisible.value = false
         fetchUsers()
-      } else if (data.code === 86038) {
+      } else if (data.status === 'expired') {
         loginStatus.value = '二维码已过期，请重新获取'
         stopPolling()
-      } else if (data.code === 86090) {
-        loginStatus.value = '已扫码，等待确认...'
+      } else if (data.status === 'scanned') {
+        loginStatus.value = '已扫码，请在手机上确认'
+      } else if (data.status === 'failed') {
+        loginStatus.value = data.message || '登录失败'
+        stopPolling()
       }
     } catch (error) {
       console.error('查询登录状态失败:', error)
