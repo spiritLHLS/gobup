@@ -7,7 +7,50 @@
 
 ## 快速部署
 
-### 方式一：使用预构建 Docker 镜像
+### 方式一：一键安装脚本（推荐）
+
+使用一键安装脚本，自动下载并安装最新版本的服务器和Web文件：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh -o install.sh && chmod +x install.sh && bash install.sh
+```
+
+或使用 wget：
+
+```bash
+wget -O install.sh https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh && chmod +x install.sh && bash install.sh
+```
+
+**支持的选项：**
+- `install` - 完整安装（默认）
+- `upgrade` - 升级到最新版本
+- `help` - 显示帮助信息
+
+**环境变量：**
+- `INSTALL_VERSION=vYYYYMMDD-HHMMSS` - 指定安装版本
+- `WEB_PATH=/path` - 自定义Web文件路径
+
+**示例：**
+
+```bash
+# 安装指定版本
+INSTALL_VERSION=v20250101-120000 bash install.sh
+
+# 升级到最新版本
+bash install.sh upgrade
+
+# 自定义Web路径安装
+WEB_PATH=/var/www/html bash install.sh
+```
+
+**安装后访问：**
+- Web界面: http://localhost:12380
+- 服务管理: `systemctl status gobup`
+
+<details>
+<summary>展开查看 Docker 部署方式</summary>
+
+### 方式二：使用预构建 Docker 镜像
 
 使用已构建好的多架构镜像，会自动根据当前系统架构下载对应版本。
 
@@ -20,7 +63,7 @@
 
 所有镜像均支持 `linux/amd64` 和 `linux/arm64` 架构。
 
-#### 基础运行（无密码）
+**基础运行（无密码）：**
 
 ```bash
 docker pull spiritlhl/gobup:latest
@@ -48,7 +91,7 @@ docker run -d \
   ghcr.io/spiritlhl/gobup:latest
 ```
 
-#### 完整配置运行（有密码）
+**完整配置运行（有密码）：**
 
 ```bash
 docker run -d \
@@ -57,14 +100,19 @@ docker run -d \
   -v /root/recordings:/rec \
   -v /root/data:/app/data \
   -e USERNAME=root \
-  -e PASSWORD=your_paasword \
+  -e PASSWORD=your_password \
   --restart unless-stopped \
   spiritlhl/gobup:latest
 ```
 
 > 注意：USERNAME 和 PASSWORD 仅用于首次启动时创建管理员账户，后续修改环境变量不会更新已存在的账户
 
-### 方式二：使用 Docker Compose
+</details>
+
+<details>
+<summary>展开查看 Docker Compose 部署</summary>
+
+### 方式三：使用 Docker Compose
 
 创建 `docker-compose.yml`：
 
@@ -77,7 +125,7 @@ services:
     container_name: gobup
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "22380:80"
     volumes:
       - ./recordings:/rec
       - ./data:/app/data
@@ -93,12 +141,17 @@ services:
 docker-compose up -d
 ```
 
-### 方式三：自己编译打包
+</details>
+
+<details>
+<summary>展开查看编译打包方式</summary>
+
+### 方式四：自己编译打包
 
 如果需要修改源码或自定义构建：
 
 ```bash
-git clone https://github.com/spiritlhl/gobup.git
+git clone https://github.com/spiritlhls/gobup.git
 cd gobup
 docker build -t gobup .
 docker run -d \
@@ -110,7 +163,12 @@ docker run -d \
   gobup
 ```
 
-### 方式四：下载发布版本手动部署
+</details>
+
+<details>
+<summary>展开查看手动部署方式</summary>
+
+### 方式五：下载发布版本手动部署
 
 从 [Releases](https://github.com/spiritlhls/gobup/releases) 页面下载对应平台的二进制文件：
 
@@ -134,6 +192,8 @@ tar -xzf gobup-server-linux-amd64.tar.gz
 gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
 ```
 
+</details>
+
 ### 容器参数说明
 
 | 类型 | 参数 | 说明 |
@@ -151,6 +211,7 @@ gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
 访问 Web 界面：
 - 使用 Docker 容器：`http://localhost` 或 `http://localhost:80`
 - 使用二进制文件：`http://localhost:12380`（默认端口）
+- 使用一键脚本安装：`http://localhost:12380`
 
 ## 配置说明
 

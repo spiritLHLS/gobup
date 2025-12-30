@@ -130,3 +130,28 @@ jobs:
             ./build/web-dist.zip
         fi
 
+    - name: Update README with latest version
+      run: |
+        TAG_NAME="v${{ steps.date.outputs.date }}"
+        DATE_VERSION="${TAG_NAME#v}"
+        
+        # 更新 README 中的镜像标签说明
+        sed -i "s/\`spiritlhl\/gobup:YYYYMMDD\`/\`spiritlhl\/gobup:${DATE_VERSION}\`/g" README.md 2>/dev/null || \
+        sed -i "" "s/\`spiritlhl\/gobup:YYYYMMDD\`/\`spiritlhl\/gobup:${DATE_VERSION}\`/g" README.md
+        
+        echo "README.md 已更新到版本: $TAG_NAME"
+
+    - name: Commit and push README changes
+      run: |
+        TAG_NAME="v${{ steps.date.outputs.date }}"
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add README.md
+        
+        if git diff --cached --quiet; then
+          echo "README.md 没有变化，跳过提交"
+        else
+          git commit -m "chore: update README with version ${TAG_NAME}"
+          git push origin main
+          echo "README.md 更新已推送"
+        fi
