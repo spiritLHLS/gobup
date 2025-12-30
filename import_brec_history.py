@@ -300,11 +300,24 @@ class BrecImporter:
             # 尝试使用文件信息作为默认值
             metadata = self.create_default_metadata(video_file)
         else:
+            import os
+            if os.getenv('DEBUG'):
+                print(f"   🔍 找到 XML 文件: {xml_file}")
             metadata = self.parse_xml_metadata(xml_file)
             if not metadata:
                 self.stats['failed'] += 1
                 self.stats['errors'].append(f"{video_file.name}: 解析 XML 失败")
                 return
+            
+            # 检查关键字段是否为空，如果为空则使用默认值
+            if not metadata.get('room_id') or not metadata.get('session_id'):
+                if os.getenv('DEBUG'):
+                    print(f"   ⚠️  XML 字段不完整，使用文件名提取信息")
+                default_metadata = self.create_default_metadata(video_file)
+                # 合并元数据，优先使用 XML 中的非空值
+                for key, value in default_metadata.items():
+                    if not metadata.get(key):
+                        metadata[key] = value
         
         # 检查是否已导入
         if self.check_part_exists(str(video_file)):
@@ -326,23 +339,56 @@ class BrecImporter:
         stat = video_file.stat()
         mtime = datetime.fromtimestamp(stat.st_mtime)
         
-        # 尝试从文件名中提取房间号（假设格式包含数字）
-        room_id = '0'
+        # 从文件名中提取信息
+        # 格式: 录制-5050-20251227-231202-161-古法精油高手.flv
+        # 或: 5050-用户名/录制-5050-20251227-231202-161-标题.flv
         import re
-        match = re.search(r'(\d{4,})', video_file.stem)
-        if match:
-            room_id = match.group(1)
+        
+        # 尝试从文件名提取房间号
+        room_id = '0'
+        filename = video_file.stem  # 不含扩展名
+        
+        # 尝试多种模式
+        patterns = [
+            r'录制-(\d+)-',  # 录制-5050-...
+            r'^(\d+)-',      # 5050-...
+            r'[^\d](\d{4,})[^\d]',  # 任意位置的4位以上数字
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, filename)
+            if match:
+                room_id = match.group(1)
+                break
+        
+        # 如果还是没找到，尝试从父目录名提取
+        if room_id == '0':
+            parent_name = video_file.parent.name
+            match = re.search(r'(\d{4,})', parent_name)
+            if match:
+                room_id = match.group(1)
+        
+        # 提取标题（文件名最后的中文部分）
+        title_match = re.search(r'-([^-]+)$', filename)
+        title = title_match.group(1) if title_match else filename
+        
+        # 生成唯一的 session_id
+        session_id = f"import_{room_id}_{int(stat.st_mtime)}"
+        
+        import os
+        if os.getenv('DEBUG'):
+            print(f"   📝 从文件名提取: RoomID={room_id}, Title={title}, SessionID={session_id}")
         
         return {
             'room_id': room_id,
             'short_id': '0',
-            'name': '未知主播',
-            'title': video_file.stem,
+            'name': f'房间{room_id}',
+            'title': title,
             'area_name_parent': '',
             'area_name_child': '',
             'start_time': mtime.isoformat(),
             'end_time': mtime.isoformat(),
-            'session_id': f"import_{video_file.stem}_{int(stat.st_mtime)}",
+            'session_id': session_id,
         }
     
     def print_summary(self):
