@@ -59,7 +59,7 @@ WEB_PATH=/var/www/html bash install.sh
 | 镜像标签 | 说明 | 用途 |
 |----------|------|------|
 | `spiritlhls/gobup:latest` | 最新版本 | 快速部署 |
-| `spiritlhl/gobup:YYYYMMDD` | 特定日期版本 | 需要固定版本 |
+| `spiritlhl/gobup:20251230-062908` | 特定日期版本 | 需要固定版本 |
 
 所有镜像均支持 `linux/amd64` 和 `linux/arm64` 架构。
 
