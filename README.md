@@ -6,12 +6,10 @@
 
 ### Docker运行
 
-这是最简单的运行方式：
-
 #### 基础运行（无密码）
 
 ```bash
-docker pull your-registry/gobup:latest
+docker pull spiritlhl/gobup:latest
 
 docker run -d \
   --name gobup \
@@ -19,10 +17,10 @@ docker run -d \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
   --restart unless-stopped \
-  your-registry/gobup:latest
+  spiritlhl/gobup:latest
 ```
 
-#### 完整配置运行
+#### 完整配置运行（有密码）
 
 ```bash
 docker run -d \
@@ -34,7 +32,7 @@ docker run -d \
   -e USERNAME=admin \
   -e PASSWORD=your_password \
   --restart unless-stopped \
-  your-registry/gobup:latest
+  s pi ri t l h l/gobup:latest
 ```
 
 ### Docker Compose
@@ -45,7 +43,7 @@ docker run -d \
 version: '3'
 services:
   gobup:
-    image: your-registry/gobup:latest
+    image: spiritlhl/gobup:latest
     container_name: gobup
     ports:
       - "12380:12380"
@@ -157,144 +155,6 @@ docker network connect bili-net gobup
 5. **消息推送** - 完成后通过WxPusher推送通知（如已配置）
 
 > 关键提示：录播姬和本项目必须能访问同一个文件路径（Docker部署需映射同一宿主机目录）
-
-### 工作流程
-
-1. **录播软件录制** - 录播姬/blrec录制直播并保存视频文件
-2. **Webhook通知** - 录制完成后发送Webhook到GoBup
-3. **自动处理** - GoBup接收事件，读取房间配置
-4. **上传投稿** - 根据配置自动上传视频并投稿到B站
-5. **消息推送** - 完成后通过WxPusher推送通知（如已配置）
-
-### 用户管理
-
-#### 添加用户
-1. Web界面 -> 用户管理 -> 添加用户
-2. 点击"生成登录二维码"
-3. 使用B站App扫码登录
-
-#### 刷新Cookie
-- Cookie过期时会自动刷新
-- 也可手动点击"刷新Cookie"按钮
-
-#### 查看用户信息
-- 显示用户名、UID
-- Cookie状态和过期时间
-- 上次刷新时间
-
-### 房间管理
-
-#### 添加房间
-配置要上传的直播间信息和上传参数。
-
-#### 编辑房间
-修改房间配置，立即生效。
-
-#### 删除房间
-删除房间配置，不影响已上传的视频。
-
-### 历史记录
-
-查看所有上传历史，包括：
-- 录制时间
-- 视频标题
-- 上传状态
-- 投稿链接
-- 重新投稿功能
-
-### 配置导入导出
-
-#### 导出配置
-1. Web界面 -> 配置管理 -> 导出配置
-2. 下载JSON文件，包含所有房间和用户配置
-
-#### 导入配置
-1. Web界面 -> 配置管理 -> 导入配置
-2. 选择之前导出的JSON文件
-3. 确认导入，会覆盖现有配置
-
-## API接口
-
-### Webhook接收
-
-```http
-POST /api/recordWebHook
-Content-Type: application/json
-
-{
-  "EventType": "SessionEnded",
-  "EventData": {
-    "RoomId": 123456,
-    "Name": "主播名称",
-    "Title": "直播标题",
-    "RelativePath": "录播文件路径",
-    "FileSize": 123456789
-  }
-}
-```
-
-### 房间管理
-
-```http
-# 获取房间列表
-POST /api/room
-
-# 添加房间
-POST /api/room/add
-Content-Type: application/json
-{
-  "room_id": 123456,
-  "bili_user_id": 1,
-  "tid": 171,
-  "title": "${uname}的直播间录像",
-  ...
-}
-
-# 更新房间
-POST /api/room/update
-
-# 删除房间
-GET /api/room/delete/:id
-```
-
-### 用户管理
-
-```http
-# 获取用户列表
-GET /api/biliUser/list
-
-# 生成登录二维码
-GET /api/biliUser/login
-
-# 轮询登录状态
-GET /api/biliUser/loginReturn?key=xxx
-
-# 刷新Cookie
-GET /api/biliUser/refresh/:id
-
-# 删除用户
-GET /api/biliUser/delete/:id
-```
-
-### 历史记录
-
-```http
-# 获取历史记录
-POST /api/history/list
-
-# 重新投稿
-GET /api/history/rePublish/:id
-```
-
-### 配置管理
-
-```http
-# 导出配置
-POST /api/config/export
-
-# 导入配置
-POST /api/config/import
-```
 
 ## 模板变量
 
