@@ -128,6 +128,7 @@ func (p *Processor) handleFileOpened(event WebhookEvent) error {
 func (p *Processor) handleFileClosed(event WebhookEvent) error {
 	var data FileEventData
 	if err := json.Unmarshal(event.EventData, &data); err != nil {
+		log.Printf("解析 FileClosed 事件数据失败: %v", err)
 		return err
 	}
 
@@ -136,20 +137,33 @@ func (p *Processor) handleFileClosed(event WebhookEvent) error {
 	db := database.GetDB()
 	roomID := fmt.Sprintf("%d", data.RoomID)
 
+	log.Printf("开始处理 FileClosed 事件: RoomID=%s, SessionID=%s", roomID, data.SessionID)
+
 	var history models.RecordHistory
 	if err := db.Where("session_id = ?", data.SessionID).First(&history).Error; err != nil {
+		log.Printf("未找到已有历史记录，创建新记录: SessionID=%s", data.SessionID)
 		history = models.RecordHistory{
 			RoomID:    roomID,
 			SessionID: data.SessionID,
 			Title:     data.Title,
 			StartTime: time.Now().Add(-time.Hour),
 		}
-		db.Create(&history)
+		if err := db.Create(&history).Error; err != nil {
+			log.Printf("创建历史记录失败: %v", err)
+			return err
+		}
+		log.Printf("成功创建历史记录: ID=%d", history.ID)
+	} else {
+		log.Printf("找到已有历史记录: ID=%d", history.ID)
 	}
 
 	history.EndTime = time.Now()
 	history.Recording = false
-	db.Save(&history)
+	if err := db.Save(&history).Error; err != nil {
+		log.Printf("更新历史记录失败: %v", err)
+		return err
+	}
+	log.Printf("成功更新历史记录")
 
 	part := models.RecordHistoryPart{
 		HistoryID: history.ID,
@@ -166,7 +180,11 @@ func (p *Processor) handleFileClosed(event WebhookEvent) error {
 		Recording: false,
 		Upload:    false,
 	}
-	db.Create(&part)
+	if err := db.Create(&part).Error; err != nil {
+		log.Printf("创建分P记录失败: %v", err)
+		return err
+	}
+	log.Printf("成功创建分P记录: ID=%d, FilePath=%s", part.ID, part.FilePath)
 
 	var room models.RecordRoom
 	if err := db.Where("room_id = ?", roomID).First(&room).Error; err == nil {
