@@ -1,18 +1,12 @@
 package bili
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/imroc/req/v3"
-)
-
-const (
-	DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 )
 
 type BiliClient struct {
@@ -73,7 +67,6 @@ type PublishResponse struct {
 
 func NewBiliClient(accessKey, cookies string, mid int64) *BiliClient {
 	client := req.C().
-		SetCommonHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36").
 		SetTimeout(300 * time.Second).
 		ImpersonateChrome()
 
@@ -214,29 +207,25 @@ func (c *BiliClient) SendDynamic(content string) error {
 	data.Set("csrf", c.GetCSRF())
 	data.Set("csrf_token", c.GetCSRF())
 
-	req, err := http.NewRequest("POST", apiURL, strings.NewReader(data.Encode()))
+	var result struct {
+		Code int                    `json:"code"`
+		Msg  string                 `json:"message"`
+		Data map[string]interface{} `json:"data"`
+	}
+
+	resp, err := c.ReqClient.R().
+		SetHeader("Content-Type", "application/x-www-form-urlencoded").
+		SetHeader("Referer", "https://t.bilibili.com/").
+		SetBodyString(data.Encode()).
+		SetSuccessResult(&result).
+		Post(apiURL)
+
 	if err != nil {
 		return err
 	}
 
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Cookie", c.Cookies)
-	req.Header.Set("User-Agent", "Mozilla/5.0")
-	req.Header.Set("Referer", "https://t.bilibili.com/")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return err
-	}
-
-	if code, ok := result["code"].(float64); !ok || code != 0 {
-		return fmt.Errorf("发送动态失败: %v", result)
+	if !resp.IsSuccessState() || result.Code != 0 {
+		return fmt.Errorf("发送动态失败: code=%d, msg=%s", result.Code, result.Msg)
 	}
 
 	return nil
