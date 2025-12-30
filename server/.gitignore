@@ -5,6 +5,7 @@
 *.so
 *.dylib
 gobup
+server
 
 # Test binary
 *.test
@@ -15,6 +16,9 @@ gobup
 # Data
 data/
 *.db
+
+# Embedded frontend (generated during build)
+internal/routes/dist/
 
 # IDE
 .idea/

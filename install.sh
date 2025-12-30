@@ -95,7 +95,7 @@ detect_system() {
 }
 
 check_dependencies() {
-    local deps=("curl" "tar" "unzip")
+    local deps=("curl" "tar")
     local missing=()
     
     for dep in "${deps[@]}"; do
@@ -147,9 +147,6 @@ download_file() {
 create_directories() {
     local dirs=("/opt/gobup" "/opt/gobup/server")
     
-    local web_path="${WEB_PATH:-/opt/gobup/web}"
-    dirs+=("$web_path")
-    
     for dir in "${dirs[@]}"; do
         if [ ! -d "$dir" ]; then
             mkdir -p "$dir"
@@ -191,35 +188,7 @@ install_server() {
     fi
 }
 
-install_web() {
-    local filename="web-dist.zip"
-    local download_url="${BASE_URL}/${filename}"
-    local temp_file="/tmp/${filename}"
-    local web_path="${WEB_PATH:-/opt/gobup/web}"
-    
-    log_info "下载Web应用文件..."
-    log_info "下载链接: $download_url"
-    
-    if download_file "$download_url" "$temp_file"; then
-        log_success "下载完成: $filename"
-    else
-        log_error "下载失败: $download_url"
-        exit 1
-    fi
-    
-    log_info "解压Web应用文件..."
-    if command -v unzip &> /dev/null; then
-        if unzip -q "$temp_file" -d "$web_path/"; then
-            rm -f "$temp_file"
-            log_success "Web应用文件安装完成: $web_path"
-        else
-            log_error "解压失败"
-            exit 1
-        fi
-    else
-        log_error "未找到unzip工具，跳过Web文件安装"
-    fi
-}
+# Web 文件已嵌入到二进制文件中，无需单独安装
 
 create_systemd_service() {
     local service_file="/etc/systemd/system/gobup.service"
@@ -267,7 +236,6 @@ create_symlink() {
 
 create_readme() {
     local readme_file="/opt/gobup/README.md"
-    local web_path="${WEB_PATH:-/opt/gobup/web}"
     
     log_info "创建使用说明文件..."
     
@@ -281,8 +249,7 @@ create_readme() {
 
 ## 目录结构
 - 安装目录: /opt/gobup
-- 服务器文件: /opt/gobup/server/
-- Web文件: $web_path
+- 服务器文件: /opt/gobup/server/ (前端已嵌入)
 - 数据目录: /app/data（Docker部署）
 
 ## 服务管理命令
@@ -326,17 +293,8 @@ upgrade_server() {
         service_was_running=true
     fi
     
-    log_info "升级服务器二进制文件..."
+    log_info "升级服务器二进制文件（包含嵌入的前端）..."
     install_server
-    
-    log_info "升级Web应用文件..."
-    local web_path="${WEB_PATH:-/opt/gobup/web}"
-    if [ -d "$web_path" ]; then
-        log_info "清理旧的Web文件: $web_path"
-        rm -rf "${web_path:?}"/*
-        log_success "旧Web文件已清理"
-    fi
-    install_web
     
     if [ "$service_was_running" = true ]; then
         log_info "重新启动 gobup 服务..."
@@ -357,8 +315,6 @@ upgrade_server() {
 }
 
 show_info() {
-    local web_path="${WEB_PATH:-/opt/gobup/web}"
-    
     log_success "GoBup 安装完成!"
     echo ""
     log_info "安装信息:"
@@ -366,7 +322,7 @@ show_info() {
     log_info "  系统: $SYSTEM"
     log_info "  架构: $(detect_arch)"
     log_info "  安装路径: /opt/gobup"
-    log_info "  Web路径: $web_path"
+    log_info "  部署模式: 单二进制文件（前端已嵌入）"
     echo ""
     log_info "使用方法:"
     log_info "  启动服务: systemctl start gobup"
@@ -389,14 +345,12 @@ GoBup 一键安装脚本
   help                 显示此帮助信息
   
 环境变量:
-  WEB_PATH=/path             自定义Web文件安装路径 (默认: /opt/gobup/web)
   INSTALL_VERSION=v1.0.0     指定要安装的版本 (默认: 自动获取最新版本)
 
 示例:
   bash install.sh                           # 完整安装最新版本
   bash install.sh upgrade                   # 升级到最新版本
   INSTALL_VERSION=v20250101-120000 bash install.sh  # 安装指定版本
-  WEB_PATH=/var/www/html bash install.sh    # 自定义Web路径安装
 EOF
 }
 
@@ -420,7 +374,6 @@ main() {
             env_check
             create_directories
             install_server
-            install_web
             create_readme
             create_systemd_service
             create_symlink

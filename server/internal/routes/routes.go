@@ -1,14 +1,18 @@
 package routes
 
 import (
+	"log"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gobup/server/internal/controllers"
 	"github.com/gobup/server/internal/middleware"
 )
 
 func SetupRoutes(router *gin.Engine) {
-	router.Static("/static", "./web/dist")
-	router.StaticFile("/", "./web/dist/index.html")
+	// 设置静态文件路由（根据编译标签决定是嵌入模式还是独立模式）
+	if err := setupStaticRoutes(router); err != nil {
+		log.Printf("设置静态文件路由失败: %v", err)
+	}
 
 	api := router.Group("/api")
 	{

@@ -40,10 +40,13 @@ jobs:
         cd web
         npm ci || npm install
         npm run build
-        cd dist
-        zip -r ../../build/web-dist.zip .
 
-    - name: Build Go server binaries
+    - name: Copy frontend to embed location
+      run: |
+        mkdir -p server/internal/routes/dist
+        cp -r web/dist/* server/internal/routes/dist/
+
+    - name: Build Go server binaries with embedded frontend
       working-directory: ./server
       run: |
         export GO111MODULE=on
@@ -52,19 +55,19 @@ jobs:
         export LDFLAGS="-s -w -extldflags '-static'"
         
         # Linux AMD64
-        GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o ../build/gobup-server-linux-amd64 .
+        GOOS=linux GOARCH=amd64 go build -tags embed -ldflags="$LDFLAGS" -o ../build/gobup-server-linux-amd64 .
         
         # Linux ARM64
-        GOOS=linux GOARCH=arm64 go build -ldflags="$LDFLAGS" -o ../build/gobup-server-linux-arm64 .
+        GOOS=linux GOARCH=arm64 go build -tags embed -ldflags="$LDFLAGS" -o ../build/gobup-server-linux-arm64 .
         
         # Windows AMD64
-        GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o ../build/gobup-server-windows-amd64.exe .
+        GOOS=windows GOARCH=amd64 go build -tags embed -ldflags="$LDFLAGS" -o ../build/gobup-server-windows-amd64.exe .
         
         # macOS AMD64
-        GOOS=darwin GOARCH=amd64 go build -ldflags="$LDFLAGS" -o ../build/gobup-server-darwin-amd64 .
+        GOOS=darwin GOARCH=amd64 go build -tags embed -ldflags="$LDFLAGS" -o ../build/gobup-server-darwin-amd64 .
         
         # macOS ARM64
-        GOOS=darwin GOARCH=arm64 go build -ldflags="$LDFLAGS" -o ../build/gobup-server-darwin-arm64 .
+        GOOS=darwin GOARCH=arm64 go build -tags embed -ldflags="$LDFLAGS" -o ../build/gobup-server-darwin-arm64 .
 
     - name: Compress binaries
       run: |
@@ -95,15 +98,14 @@ jobs:
         
         RELEASE_HEADER="## Gobup 自动构建发布 - ${{ steps.date.outputs.date }}
         
-        ### 后端服务器二进制文件
-        - \`gobup-server-linux-amd64.tar.gz\` - Linux AMD64 版本
-        - \`gobup-server-linux-arm64.tar.gz\` - Linux ARM64 版本
-        - \`gobup-server-darwin-amd64.tar.gz\` - macOS AMD64 版本
-        - \`gobup-server-darwin-arm64.tar.gz\` - macOS ARM64 版本
-        - \`gobup-server-windows-amd64.zip\` - Windows AMD64 版本
+        ### 服务器二进制文件（前端已嵌入）
+        - \`gobup-server-linux-amd64.tar.gz\` - Linux AMD64 版本（单二进制文件）
+        - \`gobup-server-linux-arm64.tar.gz\` - Linux ARM64 版本（单二进制文件）
+        - \`gobup-server-darwin-amd64.tar.gz\` - macOS AMD64 版本（单二进制文件）
+        - \`gobup-server-darwin-arm64.tar.gz\` - macOS ARM64 版本（单二进制文件）
+        - \`gobup-server-windows-amd64.zip\` - Windows AMD64 版本（单二进制文件）
         
-        ### 前端静态文件
-        - \`web-dist.zip\` - Web 前端静态文件"
+        > 所有二进制文件已包含嵌入的前端页面，无需额外下载Web文件。"
         
         if [ -n "$PREVIOUS_TAG" ]; then
           gh release create "$TAG_NAME" \
@@ -115,8 +117,7 @@ jobs:
             ./build/gobup-server-linux-arm64.tar.gz \
             ./build/gobup-server-darwin-amd64.tar.gz \
             ./build/gobup-server-darwin-arm64.tar.gz \
-            ./build/gobup-server-windows-amd64.zip \
-            ./build/web-dist.zip
+            ./build/gobup-server-windows-amd64.zip
         else
           gh release create "$TAG_NAME" \
             --title "Release $TAG_NAME" \
@@ -126,8 +127,7 @@ jobs:
             ./build/gobup-server-linux-arm64.tar.gz \
             ./build/gobup-server-darwin-amd64.tar.gz \
             ./build/gobup-server-darwin-arm64.tar.gz \
-            ./build/gobup-server-windows-amd64.zip \
-            ./build/web-dist.zip
+            ./build/gobup-server-windows-amd64.zip
         fi
 
     - name: Update README with latest version

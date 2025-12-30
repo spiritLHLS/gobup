@@ -70,7 +70,7 @@ docker pull spiritlhl/gobup:latest
 
 docker run -d \
   --name gobup \
-  -p 22380:80 \
+  -p 22380:12380 \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
   --restart unless-stopped \
@@ -84,7 +84,7 @@ docker pull ghcr.io/spiritlhl/gobup:latest
 
 docker run -d \
   --name gobup \
-  -p 22380:80 \
+  -p 22380:12380 \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
   --restart unless-stopped \
@@ -96,7 +96,7 @@ docker run -d \
 ```bash
 docker run -d \
   --name gobup \
-  -p 22380:80 \
+  -p 22380:12380 \
   -v /root/recordings:/rec \
   -v /root/data:/app/data \
   -e USERNAME=root \
@@ -125,7 +125,7 @@ services:
     container_name: gobup
     restart: unless-stopped
     ports:
-      - "22380:80"
+      - "22380:12380"
     volumes:
       - ./recordings:/rec
       - ./data:/app/data
@@ -156,7 +156,7 @@ cd gobup
 docker build -t gobup .
 docker run -d \
   --name gobup \
-  -p 22380:80 \
+  -p 22380:12380 \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
   --restart unless-stopped \
@@ -172,13 +172,14 @@ docker run -d \
 
 从 [Releases](https://github.com/spiritlhls/gobup/releases) 页面下载对应平台的二进制文件：
 
-**独立部署版本（需要分别部署前后端）：**
-- `gobup-server-linux-amd64.tar.gz` - 后端 Linux AMD64 版本
-- `gobup-server-linux-arm64.tar.gz` - 后端 Linux ARM64 版本
-- `gobup-server-darwin-amd64.tar.gz` - 后端 macOS Intel 版本
-- `gobup-server-darwin-arm64.tar.gz` - 后端 macOS Apple Silicon 版本
-- `gobup-server-windows-amd64.zip` - 后端 Windows AMD64 版本
-- `web-dist.zip` - 前端静态文件
+**单二进制部署版本（前端已嵌入）：**
+- `gobup-server-linux-amd64.tar.gz` - Linux AMD64 版本
+- `gobup-server-linux-arm64.tar.gz` - Linux ARM64 版本
+- `gobup-server-darwin-amd64.tar.gz` - macOS Intel 版本
+- `gobup-server-darwin-arm64.tar.gz` - macOS Apple Silicon 版本
+- `gobup-server-windows-amd64.zip` - Windows AMD64 版本
+
+> 所有二进制文件已包含嵌入的前端页面，直接运行即可，无需额外部署前端文件。
 
 解压后运行：
 
@@ -192,13 +193,15 @@ tar -xzf gobup-server-linux-amd64.tar.gz
 gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
 ```
 
+启动后访问 `http://localhost:12380` 即可看到 Web 管理界面。
+
 </details>
 
 ### 容器参数说明
 
 | 类型 | 参数 | 说明 |
 |------|------|------|
-| 端口映射 | `-p 80:80` | 映射Web管理界面端口（Nginx反代前后端） |
+| 端口映射 | `-p 22380:12380` | 映射Web管理界面端口（前端已嵌入Go二进制） |
 | 存储卷 | `-v /path/to/recordings:/rec` | 挂载录制文件目录（必须与录播姬一致） |
 | 存储卷 | `-v /path/to/data:/app/data` | 挂载数据目录（数据库和配置文件） |
 | 环境变量 | `-e USERNAME` | 初始管理员用户名（可选，仅首次启动时有效） |
@@ -209,9 +212,9 @@ gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
 > 重要提示：`/path/to/recordings` 必须和录播姬的录制目录保持一致
 
 访问 Web 界面：
-- 使用 Docker 容器：`http://localhost` 或 `http://localhost:80`
-- 使用二进制文件：`http://localhost:12380`（默认端口）
-- 使用一键脚本安装：`http://localhost:12380`
+- 所有部署方式统一访问：`http://localhost:22380`（宿主机端口）
+- 或使用服务器IP：`http://你的IP:22380`
+- 容器内部端口：`12380`（前端已嵌入，无需Nginx）
 
 ## 配置说明
 
