@@ -1,10 +1,24 @@
 # GoBup - B站录播自动上传工具
 
-一个用Go语言实现的B站录播自动上传工具
+[![Build and Release](https://github.com/spiritlhls/gobup/actions/workflows/main.yml/badge.svg)](https://github.com/spiritlhls/gobup/actions/workflows/main.yml)
+[![Build and Push Docker Images](https://github.com/spiritlhls/gobup/actions/workflows/build_docker.yml/badge.svg)](https://github.com/spiritlhls/gobup/actions/workflows/build_docker.yml)
 
-## 快速开始
+一个用Go语言实现的B站录播自动上传工具，支持自动上传录播文件到B站，支持多账号管理、WxPusher消息推送等功能。
 
-### Docker运行
+## 快速部署
+
+### 方式一：使用预构建 Docker 镜像
+
+使用已构建好的多架构镜像，会自动根据当前系统架构下载对应版本。
+
+**镜像标签说明：**
+
+| 镜像标签 | 说明 | 用途 |
+|----------|------|------|
+| `spiritlhls/gobup:latest` | 最新版本 | 快速部署 |
+| `spiritlhl/gobup:YYYYMMDD` | 特定日期版本 | 需要固定版本 |
+
+所有镜像均支持 `linux/amd64` 和 `linux/arm64` 架构。
 
 #### 基础运行（无密码）
 
@@ -13,6 +27,7 @@ docker pull spiritlhl/gobup:latest
 
 docker run -d \
   --name gobup \
+  -p 80:80 \
   -p 12380:12380 \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
@@ -20,11 +35,27 @@ docker run -d \
   spiritlhl/gobup:latest
 ```
 
+或者使用 GitHub Container Registry：
+
+```bash
+docker pull ghcr.io/spiritlhl/gobup:latest
+
+docker run -d \
+  --name gobup \
+  -p 80:80 \
+  -p 12380:12380 \
+  -v /path/to/recordings:/rec \
+  -v /path/to/data:/app/data \
+  --restart unless-stopped \
+  ghcr.io/spiritlhl/gobup:latest
+```
+
 #### 完整配置运行（有密码）
 
 ```bash
 docker run -d \
   --name gobup \
+  -p 80:80 \
   -p 12380:12380 \
   -v /path/to/recordings:/rec \
   -v /path/to/data:/app/data \
@@ -32,29 +63,32 @@ docker run -d \
   -e USERNAME=admin \
   -e PASSWORD=your_password \
   --restart unless-stopped \
-  s pi ri t l h l/gobup:latest
+  spiritlhl/gobup:latest
 ```
 
-### Docker Compose
+### 方式二：使用 Docker Compose
 
 创建 `docker-compose.yml`：
 
 ```yaml
-version: '3'
+version: '3.8'
+
 services:
   gobup:
     image: spiritlhl/gobup:latest
     container_name: gobup
+    restart: unless-stopped
     ports:
+      - "80:80"
       - "12380:12380"
     volumes:
-      - /path/to/recordings:/rec
+      - ./recordings:/rec
       - ./data:/app/data
     environment:
-      - WXPUSH_TOKEN=your_wxpusher_token
-      - USERNAME=admin
-      - PASSWORD=your_password
-    restart: unless-stopped
+      - TZ=Asia/Shanghai
+      - WXPUSH_TOKEN=your_wxpusher_token  # 可选
+      - USERNAME=admin  # 可选
+      - PASSWORD=your_password  # 可选
 ```
 
 运行：
@@ -63,21 +97,67 @@ services:
 docker-compose up -d
 ```
 
+### 方式三：自己编译打包
+
+如果需要修改源码或自定义构建：
+
+```bash
+git clone https://github.com/spiritlhl/gobup.git
+cd gobup
+docker build -t gobup .
+docker run -d \
+  --name gobup \
+  -p 80:80 \
+  -p 12380:12380 \
+  -v /path/to/recordings:/rec \
+  -v /path/to/data:/app/data \
+  --restart unless-stopped \
+  gobup
+```
+
+### 方式四：下载发布版本手动部署
+
+从 [Releases](https://github.com/spiritlhls/gobup/releases) 页面下载对应平台的二进制文件：
+
+**独立部署版本（需要分别部署前后端）：**
+- `gobup-server-linux-amd64.tar.gz` - 后端 Linux AMD64 版本
+- `gobup-server-linux-arm64.tar.gz` - 后端 Linux ARM64 版本
+- `gobup-server-darwin-amd64.tar.gz` - 后端 macOS Intel 版本
+- `gobup-server-darwin-arm64.tar.gz` - 后端 macOS Apple Silicon 版本
+- `gobup-server-windows-amd64.zip` - 后端 Windows AMD64 版本
+- `web-dist.zip` - 前端静态文件
+
+解压后运行：
+
+```bash
+# Linux/macOS
+tar -xzf gobup-server-linux-amd64.tar.gz
+./gobup-server-linux-amd64 -port 12380 -work-path /path/to/recordings
+
+# Windows
+# 解压 gobup-server-windows-amd64.zip
+gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
+```
+
 ### 容器参数说明
 
 | 类型 | 参数 | 说明 |
 |------|------|------|
-| 端口映射 | `-p 12380:12380` | 映射Web管理界面端口 |
+| 端口映射 | `-p 80:80` | 映射Web管理界面端口（Nginx） |
+| 端口映射 | `-p 12380:12380` | 映射后端API端口 |
 | 存储卷 | `-v /path/to/recordings:/rec` | 挂载录制文件目录（必须与录播姬一致） |
 | 存储卷 | `-v /path/to/data:/app/data` | 挂载数据目录（数据库和配置文件） |
 | 环境变量 | `-e WXPUSH_TOKEN` | WxPusher AppToken（可选） |
 | 环境变量 | `-e USERNAME` | Web管理界面登录用户名（可选） |
 | 环境变量 | `-e PASSWORD` | Web管理界面登录密码（可选） |
+| 环境变量 | `-e TZ` | 时区设置，默认 Asia/Shanghai |
 | 重启策略 | `--restart unless-stopped` | 容器异常退出时自动重启 |
 
 > 重要提示：`/path/to/recordings` 必须和录播姬的录制目录保持一致
 
-访问 Web 界面：`http://localhost:12380`
+访问 Web 界面：
+- 使用 Docker 镜像：`http://localhost` 或 `http://localhost:80`
+- 使用二进制文件：`http://localhost:12380`
 
 ## 配置说明
 

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  gobup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gobup
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "12380:12380"
+    volumes:
+      - ./recordings:/rec
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - gobup-network
+
+networks:
+  gobup-network:
+    driver: bridge
