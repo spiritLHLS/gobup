@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"bytes"
 	"encoding/base64"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -11,8 +13,16 @@ import (
 	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
-	"github.com/skip2/go-qrcode"
+	"github.com/yeqown/go-qrcode/v2"
+	"github.com/yeqown/go-qrcode/writer/standard"
 )
+
+// nopCloser 包装 io.Writer 为 io.WriteCloser
+type nopCloser struct {
+	io.Writer
+}
+
+func (nopCloser) Close() error { return nil }
 
 // LoginSession 登录会话
 type LoginSession struct {
@@ -50,13 +60,26 @@ func LoginUser(c *gin.Context) {
 		return
 	}
 
-	// 生成二维码图片（使用Encode直接生成，更简单）
-	pngBytes, err := qrcode.Encode(qrResp.Data.URL, qrcode.Medium, 256)
+	// 生成二维码图片
+	qrc, err := qrcode.NewWith(qrResp.Data.URL,
+		qrcode.WithErrorCorrectionLevel(qrcode.ErrorCorrectionMedium),
+	)
 	if err != nil {
+		log.Printf("创建二维码失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"error": "创建二维码失败"})
+		return
+	}
+
+	buf := new(bytes.Buffer)
+	w := nopCloser{buf}
+	stdWriter := standard.NewWithWriter(w, standard.WithQRWidth(10))
+	if err = qrc.Save(stdWriter); err != nil {
 		log.Printf("生成PNG失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"error": "生成PNG失败"})
 		return
 	}
+
+	pngBytes := buf.Bytes()
 
 	// Base64编码
 	imageBase64 := base64.StdEncoding.EncodeToString(pngBytes)
