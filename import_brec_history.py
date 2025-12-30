@@ -166,20 +166,101 @@ class BrecImporter:
                 }
             }
             
+            # 添加调试信息
+            import os
+            if os.getenv('DEBUG'):
+                import json
+                print(f"   📤 发送数据: {json.dumps(event_data, indent=2, ensure_ascii=False)}")
+            
             response = self.session.post(
                 f'{self.gobup_url}/api/recordWebHook',
                 json=event_data,
                 timeout=30
             )
             
+            if os.getenv('DEBUG'):
+                print(f"   📥 响应状态: {response.status_code}")
+                print(f"   📥 响应内容: {response.text}")
+            
             if response.status_code == 200:
-                return True
+                # 给后台处理一点时间
+                import time
+                time.sleep(0.5)
+                
+                # 验证是否真的导入成功（检查数据库）
+                if self.verify_import(container_path):
+                    return True
+                else:
+                    print(f"   ⚠️  警告: API返回成功但数据库中未找到记录")
+                    return False
             else:
                 print(f"⚠️  导入失败 (HTTP {response.status_code}): {response.text}")
                 return False
                 
         except Exception as e:
             print(f"❌ 导入出错: {e}")
+            import traceback
+            if os.getenv('DEBUG'):
+                traceback.print_exc()
+            return False
+    
+    def verify_import(self, container_path: str) -> bool:
+        """验证文件是否真的被导入到数据库"""
+        try:
+            import time
+            # 多次重试，因为后台处理可能需要时间
+            for i in range(3):
+                if i > 0:
+                    time.sleep(1)
+                
+                if self.check_part_exists_in_db(container_path):
+                    return True
+            return False
+        except:
+            return False
+    
+    def check_part_exists_in_db(self, container_path: str) -> bool:
+        """检查文件是否在数据库中"""
+        try:
+            response = self.session.post(
+                f'{self.gobup_url}/api/history/list',
+                json={},
+                timeout=10
+            )
+            
+            if response.status_code != 200:
+                return False
+            
+            data = response.json()
+            if isinstance(data, dict):
+                histories = data.get('list', [])
+            else:
+                histories = data if isinstance(data, list) else []
+            
+            for history in histories:
+                history_id = history.get('id') if isinstance(history, dict) else None
+                if not history_id:
+                    continue
+                
+                parts_response = self.session.post(
+                    f'{self.gobup_url}/api/part/list/{history_id}',
+                    json={},
+                    timeout=10
+                )
+                
+                if parts_response.status_code == 200:
+                    parts_data = parts_response.json()
+                    if isinstance(parts_data, dict):
+                        parts = parts_data.get('list', [])
+                    else:
+                        parts = parts_data if isinstance(parts_data, list) else []
+                    
+                    for part in parts:
+                        if isinstance(part, dict) and part.get('filePath') == container_path:
+                            return True
+            
+            return False
+        except:
             return False
     
     def scan_and_import(self):
