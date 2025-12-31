@@ -2,16 +2,18 @@
 
 ## 概述
 
-`import_brec_history.py` 是一个独立的导入工具，用于从 BililiveRecorder 录制文件夹批量导入历史记录到 gobup。
+`import_brec_history_db.py` 是一个独立的导入工具，用于从 BililiveRecorder 录制文件夹批量导入历史记录到 gobup。
 
 ### 特性
 
 - ✅ 批量扫描录制文件夹
-- ✅ 自动读取 `.xml` 元数据文件
+- ✅ 自动从文件名提取元数据
 - ✅ 自动去重（基于文件路径）
 - ✅ 支持递归扫描子文件夹
-- ✅ 不修改项目代码，通过 API 导入
 - ✅ 详细的导入统计和错误报告
+- ✅ 自动合并同一场直播的多个文件
+- ⚡ 直接操作数据库，速度快、更可靠
+- ❌ 无需认证，简单易用
 
 ## 前提条件
 
@@ -28,52 +30,38 @@ sudo yum install python3
 sudo apt-get install python3
 ```
 
-### 2. 安装依赖
+### 2. 确保有数据库文件访问权限
 
 ```bash
-pip3 install requests
-```
-
-### 3. 确保 Docker 容器正在运行
-
-```bash
-# 检查容器状态
-docker ps | grep -E 'gobup|brec'
+# 检查数据库文件是否存在
+ls -la /root/data/gobup.db
 ```
 
 ## 快速开始
 
-### 基础用法
+### 方法一：数据库直接导入（推荐）
+
+**适用场景**: 有数据库文件访问权限（本地或容器内）
 
 ```bash
 # 下载脚本
+```bash
+# 下载脚本
 cd /root
-wget https://cdn.spiritlhl.net/https://raw.githubusercontent.com/spiritlhls/gobup/main/import_brec_history.py
-# 或者从项目目录复制
-# cp /path/to/gobup/import_brec_history.py /root/
+wget https://raw.githubusercontent.com/spiritlhls/gobup/main/import_brec_history_db.py
 
 # 添加执行权限
-chmod +x import_brec_history.py
+chmod +x import_brec_history_db.py
 
-# 执行导入（使用默认配置）
-python3 import_brec_history.py --dir /root/bilirecord
-```
-
-### 完整示例
-
-```bash
-python3 import_brec_history.py \
+# 执行导入
+python3 import_brec_history_db.py \
   --dir /root/bilirecord \
-  --url http://localhost:22380 \
-  --user root \
-  --pass spiritlhl
+  --db /root/data/gobup.db
 ```
 
-## 参数说明
-
-| 参数 | 简写 | 必需 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| `--dir` | `-d` | ✅ | - | BililiveRecorder 录制文件夹路径 |
+**重要提示**: 
+1. 导入前建议停止 gobup 服务或确保没有并发写入
+2. 建议先备份数据库: `cp /root/data/gobup.db /root/data/gobup.db.backup`--dir` | `-d` | ✅ | - | BililiveRecorder 录制文件夹路径 |
 | `--url` | `-u` | ❌ | `http://localhost:22380` | gobup API 地址 |
 | `--user` | - | ❌ | `root` | gobup 用户名 |
 | `--pass` | `-p` | ❌ | `spiritlhl` | gobup 密码 |
@@ -113,13 +101,15 @@ python3 import_brec_history.py --dir /root/bilirecord
 # 如果 gobup 容器配置是：
 # -v /root/bilirecord:/rec
 # 那么直接使用脚本即可
+### 数据库方式
 
-# 如果 gobup 容器配置是：
-# -v /root/recordings:/rec
-# 你需要先复制或移动文件到 recordings 目录
-# 或者修改 gobup 容器的挂载配置
 ```
+1. 扫描录制文件夹
+   └─> 查找 .flv, .mp4, .mkv 文件
 
+2. 对于每个视频文件
+   ├─> 从文件名提取元数据（房间号、标题、时间等）
+   ├─db` | - | ❌ | `/root/data/gobup.db` | gobup 数据库文件路径 |├─> 从文件名提取元数据（房间号、标题、时间
 ## 工作流程
 
 ```
@@ -139,55 +129,41 @@ python3 import_brec_history.py --dir /root/bilirecord
 ## 输出示例
 
 ```
-🔍 开始扫描目录: /root/bilirecord
-📡 gobup 地址: http://localhost:22380
+🔍 开数据库方式常见问题
+
+#### 1. 数据库文件不存在
+
+```
+❌ 错误: 数据库文件不存在: /root/data/gobup.db
+```
+
+**解决方案**:
+- 确认数据库文件路径: `ls -la /root/data/gobup.db`
+- 检查 gobup 容器挂载配置: `docker inspect gobup | grep data`
+
+#### 2. 数据库锁定
+
+# 如果 gobup 容器配置是：
+# -v /root/recordings:/rec
+# 你需始扫描目录: /root/bilirecord
+💾 数据库路径: /root/data/gobup.db
 ------------------------------------------------------------
 📹 找到 15 个视频文件
 
-📄 处理: 123456-20231230-103000.flv
+📄 处理: 录制-123456-20231230-103000-001-标题.flv
    ✅ 导入成功
-📄 处理: 123456-20231230-150000.flv
+📄 处理: 录制-123456-20231230-150000-001-标题.flv
    ⏭️  已存在，跳过
-📄 处理: 789012-20231230-200000.flv
+📄 处理: 录制-789012-20231230-200000-001-标题.flv
    ✅ 导入成功
 
 ============================================================
 📊 导入统计
 ============================================================
 总文件数: 15
-✅ 成功: 10
-⏭️  跳过: 3
-❌ 失败: 2
+✅ 成功通用问题
 
-错误详情:
-  - video1.flv: 解析 XML 失败
-  - video2.flv: 导入失败
-```
-
-## 故障排查
-
-### 1. 连接失败
-
-```
-❌ 导入出错: HTTPConnectionPool(...): Max retries exceeded
-```
-
-**解决方案**:
-- 检查 gobup 容器是否运行: `docker ps | grep gobup`
-- 检查端口映射是否正确: `-p 22380:12380`
-- 测试连接: `curl http://localhost:22380/api/recordWebHook`
-
-### 2. 认证失败
-
-```
-⚠️  导入失败 (HTTP 401): Unauthorized
-```
-
-**解决方案**:
-- 检查用户名和密码是否正确
-- 确认 gobup 容器的环境变量: `docker inspect gobup | grep -E 'USERNAME|PASSWORD'`
-
-### 3. 找不到文件
+#### 1. 找不到文件
 
 ```
 ❌ 目录不存在: /root/bilirecord
@@ -197,38 +173,88 @@ python3 import_brec_history.py --dir /root/bilirecord
 - 确认录制文件夹路径: `ls -la /root/bilirecord`
 - 检查权限: `ls -ld /root/bilirecord`
 
-### 4. 无法读取 XML
-
-```
-⚠️  解析 XML 失败
-```
+#### 2. 导入后在界面看不到
 
 **解决方案**:
-- 检查 XML 文件是否损坏
-- 脚本会为没有 XML 的文件创建默认元数据，仍可导入
+- 刷新浏览器页面
+- 检查是否真的导入成功（查看统计报告）
+- 使用调试模式查看详情: `DEBUG=1 python3 import_brec_history_db.py ...`
 
 ## 定期导入（可选）
 
 如果需要定期自动导入新录制的文件，可以使用 cron：
 
-```bash
-# 编辑 crontab
-crontab -e
-
-# 添加定时任务（每小时执行一次）
-0 * * * * cd /root && python3 import_brec_history.py --dir /root/bilirecord >> /var/log/gobup_import.log 2>&1
-```
-
-## 高级用法
+## 工作流程
+ 高级用法
 
 ### 仅导入特定房间的录制
 
 ```bash
 # 如果录制文件按房间号分文件夹存储
-python3 import_brec_history.py --dir /root/bilirecord/123456
+python3 import_brec_history
+# 添加定时任务（每小时执行一次）
+# 注意：需要先停止 gobup 再导入，导入完成后启动
+0 * * * * docker stop gobup && python3 /root/import_brec_history_db.py --dir /root/bilirecord --db /root/data/gobup.db >> /var/log/gobup_import.log 2>&1 && docker start gobup
 ```
 
-### 导入前备份数据库
+### API 方式
+
+#### 2. 认证失败
+
+```
+⚠️  导入失败 (HTTP 401): Unauthorized
+```
+
+**解决方案**:
+- 检查用户名和密码是否正确
+- 确认 gobup 容器的环境变量: `docker inspect gobup | grep -E 'USERNAME|PASSWORD'`
+
+### 通用问题_db.py --dir /root/bilirecord/123456 --db /root/data/gobup.db
+```
+
+### 导入前备份数据库（强烈推荐）
+
+```bash
+# 方法一：直接复制数据库文件
+cp /root/data/gobup.db /root/data/gobup.db.backup
+
+# 方法二：通过容器备份（如果数据库在容器内）
+docker exec gobup cp /app/data/gobup.db /app/data/gobup.db.backup
+
+# 执行导入
+python3 import_brec_history_db.py --dir /root/bilirecord --db /root/data/gobup.db
+
+# 如需恢复
+cp /root/data/gobup.db.backup /root/data/gobup.db
+# 或
+docker exec gobup cp /app/data/gobup.db.backup /app/data/gobup.db
+docker restart gobup
+```
+
+### 调试模式
+
+```bash
+# 启用详细日志输出
+DEBUG=1 python3 import_brec_history_db.py --dir /root/bilirecord --db /root/data/gobup.db
+```
+
+### 批量导入多个目录
+
+```bash
+#!/bin/bash
+# import_all.sh
+
+DB="/root/data/gobup.db"
+
+# 备份数据库
+cp $DB ${DB}.backup
+
+# 停止 gobup 服务
+docker stop gobup
+
+# 导入多个目录
+for dir in /root/bilirecord/*; do
+  if [ -d "$dir" ]; then 导入前备份数据库
 
 ```bash
 # 备份 gobup 数据库
