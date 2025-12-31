@@ -140,19 +140,31 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 			return err
 		}
 
-		_, err := u.client.ReqClient.R().
+		resp, err := u.client.ReqClient.R().
 			SetHeader("referer", lineQuery).
 			SetSuccessResult(&preResp).
 			Get(apiURL)
-		return err
+
+		if err != nil {
+			log.Printf("[UPOS] 预上传请求失败: err=%v", err)
+			return err
+		}
+
+		if !resp.IsSuccessState() {
+			log.Printf("[UPOS] 预上传HTTP错误: status=%d, body=%s", resp.GetStatusCode(), resp.String())
+			return fmt.Errorf("HTTP错误: status=%d", resp.GetStatusCode())
+		}
+
+		return nil
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("请求失败: %w", err)
 	}
 
 	if preResp.OK != 1 {
-		return nil, fmt.Errorf("预上传失败")
+		log.Printf("[UPOS] 预上传返回失败: OK=%d", preResp.OK)
+		return nil, fmt.Errorf("预上传返回失败: OK=%d", preResp.OK)
 	}
 
 	log.Printf("[UPOS] 预上传响应: endpoint=%s", preResp.Endpoint)
@@ -189,22 +201,25 @@ func (u *UposUploader) lineUpload(pre *PreUploadResp) (*LineUploadResp, error) {
 			SetSuccessResult(&lineResp).
 			Post(uploadURL)
 		if err != nil {
+			log.Printf("[UPOS] 线路上传请求失败: err=%v", err)
 			return err
 		}
 
 		if !resp.IsSuccessState() {
-			return fmt.Errorf("线路上传初始化失败: %s", resp.String())
+			log.Printf("[UPOS] 线路上传HTTP错误: status=%d, body=%s", resp.GetStatusCode(), resp.String())
+			return fmt.Errorf("HTTP错误: status=%d", resp.GetStatusCode())
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("请求失败: %w", err)
 	}
 
 	if lineResp.OK != 1 {
-		return nil, fmt.Errorf("线路上传初始化返回失败")
+		log.Printf("[UPOS] 线路上传返回失败: OK=%d", lineResp.OK)
+		return nil, fmt.Errorf("线路上传返回失败: OK=%d", lineResp.OK)
 	}
 
 	return &lineResp, nil
