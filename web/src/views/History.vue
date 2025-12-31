@@ -158,8 +158,25 @@
               <el-tag v-else type="info">{{ getPartProgress(row.id).state }}</el-tag>
             </template>
             <template v-else>
-              <el-tag v-if="row.uploadStatus === 2" type="success">已上传</el-tag>
-              <el-tag v-else-if="row.uploadStatus === 1" type="warning">上传中</el-tag>
+              <el-popover
+                v-if="row.uploadErrorMsg"
+                placement="top"
+                :width="400"
+                trigger="hover"
+              >
+                <template #reference>
+                  <el-tag type="danger">失败</el-tag>
+                </template>
+                <div>
+                  <div style="font-weight: bold; margin-bottom: 8px;">上传错误信息：</div>
+                  <div style="color: #e6a23c;">{{ row.uploadErrorMsg }}</div>
+                  <div v-if="row.uploadRetryCount" style="margin-top: 8px; font-size: 12px; color: #999;">
+                    已重试: {{ row.uploadRetryCount }} 次
+                  </div>
+                </div>
+              </el-popover>
+              <el-tag v-else-if="row.upload" type="success">已上传</el-tag>
+              <el-tag v-else-if="row.uploading" type="warning">上传中</el-tag>
               <el-tag v-else type="info">未上传</el-tag>
             </template>
           </template>
@@ -178,8 +195,14 @@
                 <span v-if="getPartProgress(row.id).stateMsg" class="state-msg">{{ getPartProgress(row.id).stateMsg }}</span>
               </div>
             </div>
-            <span v-else-if="row.uploadStatus === 2">-</span>
+            <span v-else-if="row.upload">-</span>
             <span v-else>等待上传</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="uploadLine" label="上传线路" width="140">
+          <template #default="{ row }">
+            <el-tag v-if="row.uploadLine" size="small" type="info">{{ row.uploadLine }}</el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
       </el-table>

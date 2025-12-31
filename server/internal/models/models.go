@@ -38,6 +38,7 @@ type RecordRoom struct {
 	IsOnlySelf         bool           `gorm:"default:false" json:"isOnlySelf"`
 	NoDisturbance      bool           `gorm:"default:false" json:"noDisturbance"`
 	Line               string         `gorm:"default:cs_bda2" json:"line"`
+	AvailableLines     string         `gorm:"type:text" json:"availableLines"` // 可用线路列表，逗号分隔，用于自动切换
 	CoverURL           string         `json:"coverUrl"`
 	CoverType          string         `gorm:"default:default" json:"coverType"` // default, live, diy
 	Wxuid              string         `json:"wxuid"`
@@ -98,28 +99,31 @@ type RecordHistory struct {
 
 // RecordHistoryPart 录制分P
 type RecordHistoryPart struct {
-	ID         uint      `gorm:"primarykey" json:"id"`
-	CreatedAt  time.Time `gorm:"index" json:"createdAt"`
-	HistoryID  uint      `gorm:"index;not null" json:"historyId"`
-	RoomID     string    `gorm:"index" json:"roomId"`
-	SessionID  string    `gorm:"index" json:"sessionId"`
-	Title      string    `json:"title"`
-	LiveTitle  string    `json:"liveTitle"`
-	AreaName   string    `json:"areaName"`
-	FilePath   string    `gorm:"uniqueIndex:idx_file_path" json:"filePath"`
-	FileName   string    `json:"fileName"`
-	FileSize   int64     `gorm:"default:0" json:"fileSize"`
-	Duration   int       `gorm:"default:0" json:"duration"`
-	StartTime  time.Time `gorm:"index" json:"startTime"`
-	EndTime    time.Time `json:"endTime"`
-	Recording  bool      `gorm:"default:false;index" json:"recording"`
-	Upload     bool      `gorm:"default:false;index" json:"upload"`
-	Uploading  bool      `gorm:"default:false" json:"uploading"`
-	CID        int64     `json:"cid"`
-	FileDelete bool      `gorm:"default:false" json:"fileDelete"`
-	FileMoved  bool      `gorm:"default:false" json:"fileMoved"`
-	Page       int       `gorm:"default:0" json:"page"`       // 分P序号
-	XcodeState int       `gorm:"default:0" json:"xcodeState"` // 转码状态
+	ID               uint      `gorm:"primarykey" json:"id"`
+	CreatedAt        time.Time `gorm:"index" json:"createdAt"`
+	HistoryID        uint      `gorm:"index;not null" json:"historyId"`
+	RoomID           string    `gorm:"index" json:"roomId"`
+	SessionID        string    `gorm:"index" json:"sessionId"`
+	Title            string    `json:"title"`
+	LiveTitle        string    `json:"liveTitle"`
+	AreaName         string    `json:"areaName"`
+	FilePath         string    `gorm:"uniqueIndex:idx_file_path" json:"filePath"`
+	FileName         string    `json:"fileName"`
+	FileSize         int64     `gorm:"default:0" json:"fileSize"`
+	Duration         int       `gorm:"default:0" json:"duration"`
+	StartTime        time.Time `gorm:"index" json:"startTime"`
+	EndTime          time.Time `json:"endTime"`
+	Recording        bool      `gorm:"default:false;index" json:"recording"`
+	Upload           bool      `gorm:"default:false;index" json:"upload"`
+	Uploading        bool      `gorm:"default:false" json:"uploading"`
+	CID              int64     `json:"cid"`
+	FileDelete       bool      `gorm:"default:false" json:"fileDelete"`
+	FileMoved        bool      `gorm:"default:false" json:"fileMoved"`
+	Page             int       `gorm:"default:0" json:"page"`             // 分P序号
+	XcodeState       int       `gorm:"default:0" json:"xcodeState"`       // 转码状态
+	UploadRetryCount int       `gorm:"default:0" json:"uploadRetryCount"` // 上传重试次数
+	UploadErrorMsg   string    `gorm:"type:text" json:"uploadErrorMsg"`   // 上传错误信息
+	UploadLine       string    `json:"uploadLine"`                        // 实际上传使用的线路
 }
 
 // BiliBiliUser B站用户
