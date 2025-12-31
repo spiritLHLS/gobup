@@ -92,9 +92,33 @@ var DefaultRetryConfig = RetryConfig{
 		"EOF",
 		"reset",
 		"temporary",
-		"429", // Too Many Requests
-		"503", // Service Unavailable
-		"502", // Bad Gateway
+		"429",    // Too Many Requests
+		"503",    // Service Unavailable
+		"502",    // Bad Gateway
+		"406",    // B站限流错误
+		"601",    // B站限流错误码
+		"上传视频过快", // B站限流提示
+	},
+}
+
+// RateLimitRetryConfig B站限流专用重试配置（更长的等待时间）
+var RateLimitRetryConfig = RetryConfig{
+	MaxRetries:    5,
+	InitialDelay:  15 * time.Second,  // 首次等待15秒
+	MaxDelay:      120 * time.Second, // 最多等待2分钟
+	BackoffFactor: 1.5,
+	RetryableErrors: []string{
+		"timeout",
+		"connection",
+		"EOF",
+		"reset",
+		"temporary",
+		"429",
+		"503",
+		"502",
+		"406",
+		"601",
+		"上传视频过快",
 	},
 }
 

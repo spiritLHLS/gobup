@@ -131,9 +131,12 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 	lineQuery := fmt.Sprintf("?os=upos&zone=%s&upcdn=%s", zone, upcdn)
 
 	var preResp PreUploadResp
+	var isRateLimited bool
 
 	// 使用限流器和重试机制
 	limiter := GetAPILimiter()
+
+	// 首先尝试使用默认配置
 	err := WithRetry(DefaultRetryConfig, func() error {
 		// 等待限流器允许
 		if err := limiter.WaitPreUpload(); err != nil {
@@ -151,13 +154,46 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 		}
 
 		if !resp.IsSuccessState() {
-			log.Printf("[UPOS] 预上传HTTP错误: status=%d, body=%s", resp.GetStatusCode(), resp.String())
+			body := resp.String()
+			log.Printf("[UPOS] 预上传HTTP错误: status=%d, body=%s", resp.GetStatusCode(), body)
+
+			// 检测是否为B站限流错误
+			if resp.GetStatusCode() == 406 || contains(body, "601") || contains(body, "上传视频过快") {
+				isRateLimited = true
+				log.Printf("[UPOS] 检测到B站限流，将使用更长的重试间隔")
+			}
+
 			return fmt.Errorf("HTTP错误: status=%d", resp.GetStatusCode())
 		}
 
 		return nil
 	})
 
+	// 如果检测到限流，使用限流专用重试配置再试一次
+	if err != nil && isRateLimited {
+		log.Printf("[UPOS] 使用限流重试配置重新尝试，首次等待15秒...")
+		err = WithRetry(RateLimitRetryConfig, func() error {
+			if err := limiter.WaitPreUpload(); err != nil {
+				return err
+			}
+
+			resp, err := u.client.ReqClient.R().
+				SetHeader("referer", lineQuery).
+				SetSuccessResult(&preResp).
+				Get(apiURL)
+
+			if err != nil {
+				return err
+			}
+
+			if !resp.IsSuccessState() {
+				log.Printf("[UPOS] 预上传仍然被限流: status=%d", resp.GetStatusCode())
+				return fmt.Errorf("HTTP错误: status=%d", resp.GetStatusCode())
+			}
+
+			return nil
+		})
+	}
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}
