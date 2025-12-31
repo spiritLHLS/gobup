@@ -92,16 +92,35 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 	// 根据线路选择上传器
 	var uploader interface {
 		Upload(string) (*bili.UploadResult, error)
+		SetProgressCallback(bili.ProgressCallback)
 	}
 
+	// 计算总分片数
+	fileInfo, err := os.Stat(part.FilePath)
+	if err != nil {
+		return fmt.Errorf("获取文件信息失败: %w", err)
+	}
+	var chunkTotal int
 	switch room.Line {
 	case "kodo":
+		chunkTotal = int((fileInfo.Size() + 4*1024*1024 - 1) / (4 * 1024 * 1024))
 		uploader = bili.NewKodoUploader(client)
 	case "app":
+		chunkTotal = int((fileInfo.Size() + 2*1024*1024 - 1) / (2 * 1024 * 1024))
 		uploader = bili.NewAppUploader(client)
 	default: // upos
+		chunkTotal = int((fileInfo.Size() + 5*1024*1024 - 1) / (5 * 1024 * 1024))
 		uploader = bili.NewUposUploader(client)
 	}
+
+	// 开始进度跟踪
+	page := 1 // 默认第一页
+	s.progressTracker.Start(int64(part.ID), int64(history.ID), page, chunkTotal)
+
+	// 设置进度回调
+	uploader.SetProgressCallback(func(chunkDone, chunkTotal int) {
+		s.progressTracker.UpdateChunkDone(int64(part.ID), int64(history.ID), page, chunkDone, chunkTotal)
+	})
 
 	// 执行上传，支持重试
 	var uploadResult *bili.UploadResult

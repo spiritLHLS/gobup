@@ -2,16 +2,23 @@ package bili
 
 import (
 	"fmt"
+	"log"
 )
 
 // KodoUploader 七牛云KODO上传器
 type KodoUploader struct {
-	client *BiliClient
+	client           *BiliClient
+	progressCallback ProgressCallback
 }
 
 // NewKodoUploader 创建KODO上传器
 func NewKodoUploader(client *BiliClient) *KodoUploader {
 	return &KodoUploader{client: client}
+}
+
+// SetProgressCallback 设置进度回调
+func (u *KodoUploader) SetProgressCallback(callback ProgressCallback) {
+	u.progressCallback = callback
 }
 
 // Upload 上传文件
@@ -23,21 +30,31 @@ func (u *KodoUploader) Upload(filePath string) (*UploadResult, error) {
 	defer file.Close()
 
 	// 预上传
+	log.Printf("[KODO] 开始预上传: file=%s, size=%d", fileInfo.Name, fileInfo.Size)
 	preResp, err := u.preUpload(fileInfo.Name, fileInfo.Size)
 	if err != nil {
 		return nil, fmt.Errorf("KODO预上传失败: %w", err)
 	}
+	log.Printf("[KODO] 预上传成功: biz_id=%d", preResp.BizID)
 
 	// 分片上传
 	chunkSize := int64(4 * 1024 * 1024) // 4MB
 	var ctxs []string
+	totalChunks := (fileInfo.Size + chunkSize - 1) / chunkSize
+	log.Printf("[KODO] 开始分片上传: total_chunks=%d, chunk_size=%dMB", totalChunks, chunkSize/(1024*1024))
 
+	chunkDone := 0
 	err = readFileChunks(file, chunkSize, func(chunk FileChunk) error {
 		ctx, err := u.uploadChunk(preResp, chunk.Data, int(chunk.Index))
 		if err != nil {
 			return fmt.Errorf("KODO上传分片%d失败: %w", chunk.Index, err)
 		}
 		ctxs = append(ctxs, ctx)
+		chunkDone++
+		if u.progressCallback != nil {
+			u.progressCallback(chunkDone, int(totalChunks))
+		}
+		log.Printf("[KODO] 上传进度: %d/%d (%.1f%%)", chunkDone, totalChunks, float64(chunkDone)*100/float64(totalChunks))
 		return nil
 	})
 	if err != nil {
@@ -45,9 +62,11 @@ func (u *KodoUploader) Upload(filePath string) (*UploadResult, error) {
 	}
 
 	// 完成上传
+	log.Printf("[KODO] 开始合并分片: total_chunks=%d", totalChunks)
 	if err := u.completeUpload(preResp, ctxs, fileInfo.Size); err != nil {
 		return nil, fmt.Errorf("KODO完成上传失败: %w", err)
 	}
+	log.Printf("[KODO] 上传完成: file=%s, biz_id=%d", fileInfo.Name, preResp.BizID)
 
 	return &UploadResult{
 		FileName: fileInfo.Name,

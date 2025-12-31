@@ -30,9 +30,21 @@
         <el-table-column prop="roomId" label="房间ID" width="100" />
         <el-table-column prop="title" label="标题" min-width="200" />
         <el-table-column prop="name" label="主播" width="120" />
-        <el-table-column label="上传状态" width="120">
+        <el-table-column label="上传状态" width="200">
           <template #default="{ row }">
-            <el-tag v-if="row.bvId" type="success">已发布</el-tag>
+            <div v-if="row.uploadStatus === 1 && !row.bvId && getHistoryProgress(row.id)">
+              <el-progress
+                :percentage="getHistoryUploadPercent(row.id)"
+                :status="getHistoryUploadPercent(row.id) >= 100 ? 'success' : null"
+                :stroke-width="8"
+              >
+                <span style="font-size: 12px;">{{ getHistoryUploadPercent(row.id) }}%</span>
+              </el-progress>
+              <div style="font-size: 11px; color: #999; margin-top: 2px;">
+                {{ getHistoryProgress(row.id).activeCount || 0 }} 个分P上传中
+              </div>
+            </div>
+            <el-tag v-else-if="row.bvId" type="success">已发布</el-tag>
             <el-tag v-else-if="row.uploadStatus === 2" type="warning">已上传</el-tag>
             <el-tag v-else-if="row.uploadStatus === 1" type="info">上传中</el-tag>
             <el-tag v-else type="info">未上传</el-tag>
@@ -352,6 +364,8 @@ const progressTimer = ref(null)
 const speedTracking = ref({})
 const actionsDialogVisible = ref(false)
 const currentHistory = ref(null)
+const historyProgressMap = ref({})
+const historyProgressTimer = ref(null)
 
 const fetchHistories = async () => {
   loading.value = true
@@ -359,6 +373,14 @@ const fetchHistories = async () => {
     const data = await historyAPI.list(searchParams.value)
     histories.value = data?.list || []
     total.value = data?.total || 0
+    
+    // 检查是否有上传中的记录，启动进度轮询
+    const hasUploading = histories.value.some(h => h.uploadStatus === 1 && !h.bvId)
+    if (hasUploading) {
+      startHistoryProgressPolling()
+    } else {
+      stopHistoryProgressPolling()
+    }
   } catch (error) {
     console.error('获取历史记录失败:', error)
   } finally {
@@ -859,6 +881,38 @@ const formatTime = (timeStr) => {
   return new Date(timeStr).toLocaleString('zh-CN')
 }
 
+// 线路地区映射
+const getLineRegion = (line) => {
+  const lineMap = {
+    'upos': '华北',
+    'CS_UPOS': '华北',
+    'kodo': '七牛云',
+    'app': '移动端',
+    'bda2': '华东',
+    'qn': '华东',
+    'ws': '华南',
+    'bda': '东南亚',
+    'HW_UPOS': '华为云',
+    'TX_UPOS': '腾讯云'
+  }
+  
+  // 尝试匹配线路前缀
+  for (const key in lineMap) {
+    if (line && line.toLowerCase().includes(key.toLowerCase())) {
+      return lineMap[key]
+    }
+  }
+  
+  return line || '未知'
+}
+
+// 格式化线路显示
+const formatLine = (line) => {
+  if (!line) return '-'
+  const region = getLineRegion(line)
+  return region === line ? line : `${line} (${region})`
+}
+
 // 监听对话框关闭
 watch(partsDialogVisible, (newVal) => {
   if (!newVal) {
@@ -868,12 +922,66 @@ watch(partsDialogVisible, (newVal) => {
   }
 })
 
+// 开始历史记录进度轮询
+const startHistoryProgressPolling = () => {
+  if (historyProgressTimer.value) return
+  
+  // 立即获取一次
+  fetchHistoryProgress()
+  
+  // 每2秒轮询一次
+  historyProgressTimer.value = setInterval(() => {
+    fetchHistoryProgress()
+  }, 2000)
+}
+
+// 停止历史记录进度轮询
+const stopHistoryProgressPolling = () => {
+  if (historyProgressTimer.value) {
+    clearInterval(historyProgressTimer.value)
+    historyProgressTimer.value = null
+  }
+}
+
+// 获取所有上传中的历史记录进度
+const fetchHistoryProgress = async () => {
+  const uploadingHistories = histories.value.filter(h => h.uploadStatus === 1 && !h.bvId)
+  if (uploadingHistories.length === 0) {
+    stopHistoryProgressPolling()
+    return
+  }
+  
+  for (const history of uploadingHistories) {
+    try {
+      const response = await axios.get(`/api/progress/history/${history.id}`)
+      if (response.data) {
+        historyProgressMap.value[history.id] = response.data
+      }
+    } catch (error) {
+      console.error(`获取历史记录${history.id}进度失败:`, error)
+    }
+  }
+}
+
+// 获取历史记录的进度信息
+const getHistoryProgress = (historyId) => {
+  return historyProgressMap.value[historyId]
+}
+
+// 获取历史记录的整体上传进度百分比
+const getHistoryUploadPercent = (historyId) => {
+  const progress = getHistoryProgress(historyId)
+  if (!progress) return 0
+  return progress.overallPercent || 0
+}
+
 onMounted(() => {
   fetchHistories()
 })
 
 onUnmounted(() => {
   stopProgressPolling()
+  stopHistoryProgressPolling()
 })
 </script>
 

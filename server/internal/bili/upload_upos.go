@@ -2,17 +2,27 @@ package bili
 
 import (
 	"fmt"
+	"log"
 	"path/filepath"
 )
 
+// ProgressCallback 进度回调函数
+type ProgressCallback func(chunkDone, chunkTotal int)
+
 // UposUploader UPOS上传器
 type UposUploader struct {
-	client *BiliClient
+	client           *BiliClient
+	progressCallback ProgressCallback
 }
 
 // NewUposUploader 创建UPOS上传器
 func NewUposUploader(client *BiliClient) *UposUploader {
 	return &UposUploader{client: client}
+}
+
+// SetProgressCallback 设置进度回调
+func (u *UposUploader) SetProgressCallback(callback ProgressCallback) {
+	u.progressCallback = callback
 }
 
 // Upload 上传文件
@@ -26,28 +36,44 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 	fileName := filepath.Base(filePath)
 
 	// 预上传
+	log.Printf("[UPOS] 开始预上传: file=%s, size=%d", fileName, fileInfo.Size)
 	preResp, err := u.preUpload(fileName, fileInfo.Size)
 	if err != nil {
 		return nil, fmt.Errorf("预上传失败: %w", err)
 	}
+	log.Printf("[UPOS] 预上传成功: biz_id=%d, upload_id=%s", preResp.BizID, preResp.UploadID)
 
 	// 分片上传
 	chunkSize := int64(5 * 1024 * 1024) // 5MB
 	totalParts := (fileInfo.Size + chunkSize - 1) / chunkSize
+	log.Printf("[UPOS] 开始分片上传: total_parts=%d, chunk_size=%dMB", totalParts, chunkSize/(1024*1024))
 
+	chunkDone := 0
 	err = readFileChunks(file, chunkSize, func(chunk FileChunk) error {
 		// UPOS使用从1开始的分片编号
 		partNum := int(chunk.Index + 1)
-		return u.uploadChunk(preResp, chunk.Data, partNum, int(totalParts))
+		err := u.uploadChunk(preResp, chunk.Data, partNum, int(totalParts))
+		if err != nil {
+			return err
+		}
+		chunkDone++
+		// 更新进度
+		if u.progressCallback != nil {
+			u.progressCallback(chunkDone, int(totalParts))
+		}
+		log.Printf("[UPOS] 上传进度: %d/%d (%.1f%%)", chunkDone, totalParts, float64(chunkDone)*100/float64(totalParts))
+		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("上传分片失败: %w", err)
 	}
 
 	// 完成上传
+	log.Printf("[UPOS] 开始合并分片: total_parts=%d", totalParts)
 	if err := u.completeUpload(preResp, int(totalParts)); err != nil {
 		return nil, fmt.Errorf("完成上传失败: %w", err)
 	}
+	log.Printf("[UPOS] 上传完成: file=%s, biz_id=%d", fileName, preResp.BizID)
 
 	return &UploadResult{
 		FileName: fileName,

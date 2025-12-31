@@ -12,6 +12,7 @@ import (
 	"github.com/gobup/server/internal/config"
 	"github.com/gobup/server/internal/controllers"
 	"github.com/gobup/server/internal/database"
+	"github.com/gobup/server/internal/logging"
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/routes"
 	"github.com/gobup/server/internal/scheduler"
@@ -75,6 +76,9 @@ func main() {
 
 	// 初始化配置
 	config.Init(*port, *workPath, *username, *password, *dataPath)
+
+	// 设置日志拦截器，将日志推送到WebSocket
+	logging.SetupLogInterceptor()
 
 	// 创建必要的目录
 	if config.AppConfig.WorkPath != "" {

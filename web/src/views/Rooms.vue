@@ -32,7 +32,11 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="line" label="上传线路" width="120" />
+        <el-table-column prop="line" label="上传线路" width="180">
+          <template #default="{ row }">
+            {{ formatLine(row.line) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="handleEdit(row)">编辑</el-button>
@@ -402,6 +406,38 @@ const testDeepSpeed = async () => {
   
   testingDeepSpeed.value = false
   ElMessage.success('深度测速完成')
+}
+
+// 线路地区映射
+const getLineRegion = (line) => {
+  const lineMap = {
+    'upos': '华北',
+    'CS_UPOS': '华北',
+    'kodo': '七牛云',
+    'app': '移动端',
+    'bda2': '华东',
+    'qn': '华东',
+    'ws': '华南',
+    'bda': '东南亚',
+    'HW_UPOS': '华为云',
+    'TX_UPOS': '腾讯云'
+  }
+  
+  // 尝试匹配线路前缀
+  for (const key in lineMap) {
+    if (line && line.toLowerCase().includes(key.toLowerCase())) {
+      return lineMap[key]
+    }
+  }
+  
+  return ''
+}
+
+// 格式化线路显示
+const formatLine = (line) => {
+  if (!line) return '-'
+  const region = getLineRegion(line)
+  return region ? `${line} (${region})` : line
 }
 
 const getLineStatusColor = (status) => {
