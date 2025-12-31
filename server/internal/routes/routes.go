@@ -54,7 +54,9 @@ func SetupRoutes(router *gin.Engine) {
 				histories.POST("/list", controllers.ListHistories)
 				histories.POST("/update", controllers.UpdateHistory)
 				histories.GET("/delete/:id", controllers.DeleteHistory)
-				histories.GET("/rePublish/:id", controllers.RePublishHistory)
+				histories.POST("/deleteWithFiles/:id", controllers.DeleteHistoryWithFiles)
+				histories.POST("/resetStatus/:id", controllers.ResetHistoryStatus)
+				histories.POST("/publish/:id", controllers.RePublishHistory)
 				histories.GET("/updatePublishStatus/:id", controllers.UpdatePublishStatus)
 
 				// 批量操作

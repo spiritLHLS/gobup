@@ -1,7 +1,9 @@
 package controllers
 
 import (
+	"log"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -94,6 +96,76 @@ func RetryFailedSyncTasks(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "失败任务已重置"})
+}
+
+// ResetHistoryStatus 重置历史记录状态
+func ResetHistoryStatus(c *gin.Context) {
+	historyID, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+
+	db := database.GetDB()
+
+	var history models.RecordHistory
+	if err := db.First(&history, historyID).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "历史记录不存在"})
+		return
+	}
+
+	// 重置历史记录状态
+	history.Publish = false
+	history.BvID = ""
+	history.AvID = ""
+	history.Code = -1
+	history.Message = ""
+	history.DanmakuSent = false
+	history.FilesMoved = false
+	history.VideoState = -1
+	history.VideoStateDesc = ""
+	db.Save(&history)
+
+	// 重置所有分P的上传状态
+	db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", historyID).Updates(map[string]interface{}{
+		"upload":      false,
+		"uploading":   false,
+		"cid":         0,
+		"file_delete": false,
+		"file_moved":  false,
+		"page":        0,
+		"xcode_state": 0,
+	})
+
+	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "状态已重置"})
+}
+
+// DeleteHistoryWithFiles 删除记录和文件
+func DeleteHistoryWithFiles(c *gin.Context) {
+	historyID, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+
+	db := database.GetDB()
+
+	var history models.RecordHistory
+	if err := db.First(&history, historyID).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "历史记录不存在"})
+		return
+	}
+
+	// 获取所有分P
+	var parts []models.RecordHistoryPart
+	db.Where("history_id = ?", historyID).Find(&parts)
+
+	// 删除文件
+	for _, part := range parts {
+		if part.FilePath != "" {
+			if err := os.Remove(part.FilePath); err != nil && !os.IsNotExist(err) {
+				log.Printf("删除文件失败: %s, %v", part.FilePath, err)
+			}
+		}
+	}
+
+	// 删除数据库记录
+	db.Delete(&models.RecordHistoryPart{}, "history_id = ?", historyID)
+	db.Delete(&models.RecordHistory{}, historyID)
+
+	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "记录和文件已删除"})
 }
 
 // GetDanmakuStats 获取弹幕统计

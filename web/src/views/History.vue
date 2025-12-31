@@ -85,32 +85,11 @@
             {{ formatTime(row.startTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="320" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
-            <el-dropdown size="small">
-              <el-button size="small" type="primary">
-                操作 <el-icon class="el-icon--right"><arrow-down /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item :disabled="!!row.bvId || row.uploadStatus !== 2" @click="handlePublish(row)">
-                    发布视频
-                  </el-dropdown-item>
-                  <el-dropdown-item :disabled="!row.bvId || row.danmakuSent" @click="handleSendDanmaku(row)">
-                    发送弹幕
-                  </el-dropdown-item>
-                  <el-dropdown-item :disabled="!row.bvId" @click="handleSyncVideo(row)">
-                    同步视频信息
-                  </el-dropdown-item>
-                  <el-dropdown-item :disabled="!row.publish || row.filesMoved" @click="handleMoveFiles(row)">
-                    移动文件
-                  </el-dropdown-item>
-                  <el-dropdown-item divided @click="handleDelete(row)">
-                    删除记录
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <el-button size="small" type="primary" @click="showActionsDialog(row)">
+              操作
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -209,13 +188,143 @@
         <el-button type="primary" @click="handleCleanOld">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 操作对话框 -->
+    <el-dialog 
+      v-model="actionsDialogVisible" 
+      :title="`操作 - ${currentHistory?.title || ''}`" 
+      width="600px"
+    >
+      <div class="actions-container">
+        <!-- 状态信息 -->
+        <div class="status-section">
+          <h4 class="section-title">状态信息</h4>
+          <div class="status-grid">
+            <div class="status-item">
+              <span class="status-label">上传状态：</span>
+              <el-tag v-if="currentHistory?.bvId" type="success">已发布</el-tag>
+              <el-tag v-else-if="currentHistory?.uploadPartCount > 0" type="warning">已上传{{ currentHistory.uploadPartCount }}P</el-tag>
+              <el-tag v-else type="info">未上传</el-tag>
+            </div>
+            <div class="status-item">
+              <span class="status-label">视频状态：</span>
+              <el-tag v-if="currentHistory?.videoState === 1" type="success">已通过</el-tag>
+              <el-tag v-else-if="currentHistory?.videoState === 0" type="warning">审核中</el-tag>
+              <el-tag v-else-if="currentHistory?.videoState === -2" type="danger">未通过</el-tag>
+              <el-tag v-else type="info">未知</el-tag>
+            </div>
+            <div class="status-item">
+              <span class="status-label">弹幕状态：</span>
+              <el-tag v-if="currentHistory?.danmakuSent" type="success">已发送({{ currentHistory.danmakuCount }})</el-tag>
+              <el-tag v-else type="info">未发送</el-tag>
+            </div>
+            <div class="status-item">
+              <span class="status-label">文件状态：</span>
+              <el-tag v-if="currentHistory?.filesMoved" type="success">已移动</el-tag>
+              <el-tag v-else type="info">未移动</el-tag>
+            </div>
+          </div>
+          <div v-if="currentHistory?.bvId" class="bv-link">
+            <a :href="`https://www.bilibili.com/video/${currentHistory.bvId}`" target="_blank">
+              {{ currentHistory.bvId }}
+            </a>
+          </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="actions-section">
+          <h4 class="section-title">可用操作</h4>
+          <div class="actions-grid">
+            <!-- 上传和投稿 -->
+            <el-button 
+              type="primary"
+              :disabled="!!currentHistory?.bvId"
+              @click="handlePublishInDialog"
+            >
+              <el-icon><Upload /></el-icon>
+              投稿视频
+            </el-button>
+
+            <!-- 发送弹幕 -->
+            <el-button 
+              type="success"
+              :disabled="!currentHistory?.bvId || currentHistory?.danmakuSent"
+              @click="handleSendDanmakuInDialog"
+            >
+              <el-icon><ChatDotRound /></el-icon>
+              发送弹幕
+            </el-button>
+
+            <!-- 同步信息 -->
+            <el-button 
+              type="info"
+              :disabled="!currentHistory?.bvId"
+              @click="handleSyncVideoInDialog"
+            >
+              <el-icon><Refresh /></el-icon>
+              同步信息
+            </el-button>
+
+            <!-- 移动文件 -->
+            <el-button 
+              type="warning"
+              :disabled="!currentHistory?.publish || currentHistory?.filesMoved"
+              @click="handleMoveFilesInDialog"
+            >
+              <el-icon><FolderOpened /></el-icon>
+              移动文件
+            </el-button>
+
+            <!-- 重置状态 -->
+            <el-button 
+              plain
+              @click="handleResetStatus"
+            >
+              <el-icon><RefreshLeft /></el-icon>
+              重置状态
+            </el-button>
+
+            <!-- 删除记录 -->
+            <el-button 
+              type="danger"
+              plain
+              @click="handleDeleteOnly"
+            >
+              <el-icon><Delete /></el-icon>
+              仅删除记录
+            </el-button>
+
+            <!-- 删除记录和文件 -->
+            <el-button 
+              type="danger"
+              @click="handleDeleteWithFiles"
+            >
+              <el-icon><DeleteFilled /></el-icon>
+              删除记录和文件
+            </el-button>
+          </div>
+        </div>
+      </div>
+      
+      <template #footer>
+        <el-button @click="actionsDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { 
+  Upload, 
+  ChatDotRound, 
+  Refresh, 
+  FolderOpened, 
+  RefreshLeft, 
+  Delete, 
+  DeleteFilled 
+} from '@element-plus/icons-vue'
 import { historyAPI } from '@/api'
 import axios from 'axios'
 
@@ -241,6 +350,8 @@ const currentHistoryId = ref(null)
 const uploadProgress = ref(null)
 const progressTimer = ref(null)
 const speedTracking = ref({})
+const actionsDialogVisible = ref(false)
+const currentHistory = ref(null)
 
 const fetchHistories = async () => {
   loading.value = true
@@ -269,17 +380,142 @@ const handleSizeChange = () => {
   fetchHistories()
 }
 
-const handlePublish = async (row) => {
+// 显示操作对话框
+const showActionsDialog = (row) => {
+  currentHistory.value = row
+  actionsDialogVisible.value = true
+}
+
+// 在对话框中投稿
+const handlePublishInDialog = async () => {
+  await handlePublish(currentHistory.value)
+  actionsDialogVisible.value = false
+  fetchHistories()
+}
+
+// 在对话框中发送弹幕
+const handleSendDanmakuInDialog = async () => {
+  await handleSendDanmaku(currentHistory.value)
+  actionsDialogVisible.value = false
+  fetchHistories()
+}
+
+// 在对话框中同步视频
+const handleSyncVideoInDialog = async () => {
+  await handleSyncVideo(currentHistory.value)
+  actionsDialogVisible.value = false
+  fetchHistories()
+}
+
+// 在对话框中移动文件
+const handleMoveFilesInDialog = async () => {
+  await handleMoveFiles(currentHistory.value)
+  actionsDialogVisible.value = false
+  fetchHistories()
+}
+
+// 重置状态
+const handleResetStatus = async () => {
   try {
-    await ElMessageBox.confirm('确定要发布这个视频到B站吗？', '提示', {
-      type: 'warning'
-    })
-    await historyAPI.publish(row.id)
-    ElMessage.success('发布任务已提交')
+    await ElMessageBox.confirm(
+      '此操作将重置该记录及其所有分P为未上传、未发布的初始状态，并清除BVID关联。确定要重置吗？',
+      '重置状态',
+      { type: 'warning' }
+    )
+    
+    const loadingInstance = ElLoading.service({ text: '重置中...' })
+    try {
+      await axios.post(`/api/history/resetStatus/${currentHistory.value.id}`)
+      ElMessage.success('状态已重置')
+      actionsDialogVisible.value = false
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('重置失败:', error)
+      ElMessage.error(error.response?.data?.msg || '重置失败')
+    }
+  }
+}
+
+// 仅删除记录
+const handleDeleteOnly = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '此操作将仅删除数据库记录，不会删除文件。确定要删除吗？',
+      '删除记录',
+      { type: 'warning' }
+    )
+    
+    await axios.get(`/api/history/delete/${currentHistory.value.id}`)
+    ElMessage.success('记录已删除')
+    actionsDialogVisible.value = false
     fetchHistories()
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('发布失败:', error)
+      console.error('删除失败:', error)
+      ElMessage.error(error.response?.data?.msg || '删除失败')
+    }
+  }
+}
+
+// 删除记录和文件
+const handleDeleteWithFiles = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '此操作将删除数据库记录和所有相关文件，不可恢复。确定要删除吗？',
+      '删除记录和文件',
+      { type: 'error', confirmButtonText: '确定删除' }
+    )
+    
+    const loadingInstance = ElLoading.service({ text: '删除中...' })
+    try {
+      await axios.post(`/api/history/deleteWithFiles/${currentHistory.value.id}`)
+      ElMessage.success('记录和文件已删除')
+      actionsDialogVisible.value = false
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除失败:', error)
+      ElMessage.error(error.response?.data?.msg || '删除失败')
+    }
+  }
+}
+
+const handlePublish = async (row) => {
+  try {
+    await ElMessageBox.confirm('确定要投稿这个视频到B站吗？', '投稿确认', {
+      type: 'warning'
+    })
+    
+    // 获取用户列表
+    const userResponse = await axios.get('/api/biliUser/list')
+    const users = userResponse.data || []
+    
+    if (users.length === 0) {
+      ElMessage.warning('请先添加B站用户')
+      return
+    }
+    
+    const userId = users[0].id
+    
+    const loadingInstance = ElLoading.service({ text: '投稿中，请稍候...' })
+    try {
+      await axios.post(`/api/history/publish/${row.id}`, { userId })
+      ElMessage.success('投稿任务已提交')
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('投稿失败:', error)
+      ElMessage.error(error.response?.data?.msg || '投稿失败')
     }
   }
 }
@@ -735,5 +971,84 @@ onUnmounted(() => {
 
 :deep(.el-table__row):hover {
   background: rgba(24, 144, 255, 0.04);
+}
+
+/* Actions Dialog Styles */
+.actions-container {
+  padding: 10px 0;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 15px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e4e7ed;
+}
+
+.status-section {
+  margin-bottom: 25px;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+.status-label {
+  font-size: 13px;
+  color: #606266;
+  margin-right: 8px;
+}
+
+.bv-link {
+  margin-top: 12px;
+  padding: 10px;
+  background: #ecf5ff;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.bv-link a {
+  color: #409eff;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.bv-link a:hover {
+  text-decoration: underline;
+}
+
+.actions-section {
+  margin-bottom: 10px;
+}
+
+.actions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.actions-grid .el-button {
+  width: 100%;
+  justify-content: center;
+}
+
+@media (max-width: 768px) {
+  .status-grid,
+  .actions-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -191,18 +191,17 @@ func CleanOldHistories(c *gin.Context) {
 	cutoffTime := time.Now().AddDate(0, 0, -req.Days)
 
 	// 只删除未上传、未发布的旧记录
-	result := db.Where("end_time < ? AND upload_status = 0 AND publish = false", cutoffTime).
+	result := db.Where("end_time < ? AND publish = false", cutoffTime).
 		Delete(&models.RecordHistory{})
 
 	c.JSON(http.StatusOK, gin.H{
 		"type":         "success",
 		"msg":          "清理完成",
 		"deletedCount": result.RowsAffected,
-		"days":         req.Days,
 	})
 }
 
-// BatchDelete 批量删除记录
+// BatchDelete 批量删除历史记录
 func BatchDelete(c *gin.Context) {
 	type BatchDeleteReq struct {
 		IDs []uint `json:"ids" binding:"required"`
