@@ -45,7 +45,7 @@ type LoginSession struct {
 
 var loginSessions = make(map[string]*LoginSession)
 
-const sessionExpireTime = 5 * 60 // 5分钟过期
+const sessionExpireTime = 3 * 60 // 3分钟过期（参考Python项目的180秒轮询时长）
 
 // ListBiliUsers 获取B站用户列表（不包括管理员）
 func ListBiliUsers(c *gin.Context) {

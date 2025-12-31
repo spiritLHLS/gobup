@@ -477,5 +477,6 @@ gobup/
 
 - [FQrabbit/biliupforjava](https://github.com/FQrabbit/biliupforjava) - 功能参考
 - [mwxmmy/biliupforjava](https://github.com/mwxmmy/biliupforjava) - 原始项目
+- [spiritLHLS/LotteryAutoScript_Station](https://github.com/spiritLHLS/LotteryAutoScript_Station) - 相关项目
 - [BililiveRecorder](https://rec.danmuji.org/) - 录播姬
 - [blrec](https://github.com/acgnhiki/blrec) - 录播工具
