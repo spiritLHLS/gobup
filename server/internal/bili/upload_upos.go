@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 )
 
 // ProgressCallback 进度回调函数
@@ -34,25 +35,49 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 	defer file.Close()
 
 	fileName := filepath.Base(filePath)
+	fileSize := fileInfo.Size
+	chunkSize := int64(5 * 1024 * 1024) // 5MB
+	totalParts := (fileSize + chunkSize - 1) / chunkSize
 
-	// 预上传
-	log.Printf("[UPOS] 开始预上传: file=%s, size=%d", fileName, fileInfo.Size)
-	preResp, err := u.preUpload(fileName, fileInfo.Size)
+	// 1. 预上传
+	log.Printf("[UPOS] 开始预上传: file=%s, size=%d", fileName, fileSize)
+	preResp, err := u.preUpload(fileName, fileSize)
 	if err != nil {
 		return nil, fmt.Errorf("预上传失败: %w", err)
 	}
-	log.Printf("[UPOS] 预上传成功: biz_id=%d, upload_id=%s", preResp.BizID, preResp.UploadID)
+	log.Printf("[UPOS] 预上传成功: biz_id=%d, endpoint=%s", preResp.BizID, preResp.Endpoint)
 
-	// 分片上传
-	chunkSize := int64(5 * 1024 * 1024) // 5MB
-	totalParts := (fileInfo.Size + chunkSize - 1) / chunkSize
+	// 2. 检查并选择正确的endpoint（根据线路选择）
+	zone, upcdn := parseLineParams(u.client.Line)
+	if zone != "" && upcdn != "" {
+		// 如果返回的endpoint不包含指定的upcdn，从endpoints列表中选择
+		if !strings.Contains(preResp.Endpoint, "upcdn"+upcdn) {
+			log.Printf("[UPOS] 默认endpoint不匹配，尝试从备选线路选择: target_upcdn=%s", upcdn)
+			for _, endpoint := range preResp.Endpoints {
+				if strings.Contains(endpoint, "upcdn"+upcdn) {
+					preResp.Endpoint = endpoint
+					log.Printf("[UPOS] 已切换endpoint: %s", endpoint)
+					break
+				}
+			}
+		}
+	}
+
+	// 3. 线路上传（初始化分片上传，获取upload_id）
+	log.Printf("[UPOS] 开始线路上传初始化")
+	lineResp, err := u.lineUpload(preResp)
+	if err != nil {
+		return nil, fmt.Errorf("线路上传初始化失败: %w", err)
+	}
+	log.Printf("[UPOS] 线路上传初始化成功: upload_id=%s", lineResp.UploadID)
+
+	// 4. 分片上传
 	log.Printf("[UPOS] 开始分片上传: total_parts=%d, chunk_size=%dMB", totalParts, chunkSize/(1024*1024))
-
 	chunkDone := 0
 	err = readFileChunks(file, chunkSize, func(chunk FileChunk) error {
 		// UPOS使用从1开始的分片编号
 		partNum := int(chunk.Index + 1)
-		err := u.uploadChunk(preResp, chunk.Data, partNum, int(totalParts))
+		err := u.uploadChunk(preResp, lineResp, chunk.Data, partNum, int(totalParts), fileSize)
 		if err != nil {
 			return err
 		}
@@ -68,9 +93,9 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 		return nil, fmt.Errorf("上传分片失败: %w", err)
 	}
 
-	// 完成上传
+	// 5. 完成上传
 	log.Printf("[UPOS] 开始合并分片: total_parts=%d", totalParts)
-	if err := u.completeUpload(preResp, int(totalParts)); err != nil {
+	if err := u.completeUpload(preResp, lineResp, int(totalParts)); err != nil {
 		return nil, fmt.Errorf("完成上传失败: %w", err)
 	}
 	log.Printf("[UPOS] 上传完成: file=%s, biz_id=%d", fileName, preResp.BizID)
@@ -82,6 +107,11 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 }
 
 func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadResp, error) {
+	// 解析线路参数
+	zone, upcdn := parseLineParams(u.client.Line)
+
+	log.Printf("[UPOS] 线路配置: line=%s, zone=%s, upcdn=%s", u.client.Line, zone, upcdn)
+
 	params := map[string]string{
 		"name":          filename,
 		"size":          fmt.Sprintf("%d", filesize),
@@ -90,7 +120,8 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 		"ssl":           "0",
 		"version":       "2.14.0",
 		"build":         "2140000",
-		"upcdn":         "ws",
+		"zone":          zone,
+		"upcdn":         upcdn,
 		"probe_version": "20221109",
 	}
 
@@ -120,22 +151,100 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 		return nil, fmt.Errorf("预上传失败")
 	}
 
+	log.Printf("[UPOS] 预上传响应: endpoint=%s", preResp.Endpoint)
+
 	return &preResp, nil
 }
 
-func (u *UposUploader) uploadChunk(pre *PreUploadResp, chunk []byte, partNum, totalParts int) error {
-	params := map[string]string{
-		"partNumber": fmt.Sprintf("%d", partNum),
-		"uploadId":   pre.UploadID,
-		"chunk":      fmt.Sprintf("%d", partNum-1),
-		"chunks":     fmt.Sprintf("%d", totalParts),
-		"size":       fmt.Sprintf("%d", len(chunk)),
-		"start":      fmt.Sprintf("%d", (partNum-1)*len(chunk)),
-		"end":        fmt.Sprintf("%d", partNum*len(chunk)-1),
-		"total":      fmt.Sprintf("%d", len(chunk)*totalParts),
+func (u *UposUploader) lineUpload(pre *PreUploadResp) (*LineUploadResp, error) {
+	// 构建URL: https:{endpoint}{upos_uri}?uploads&output=json
+	// upos_uri 格式类似: /ugcbup/xxx.mp4
+	uposURI := pre.UposURI
+	if uposURI == "" || uposURI == "/" {
+		// 如果没有upos_uri，尝试从endpoint构建
+		return nil, fmt.Errorf("upos_uri为空")
 	}
 
-	uploadURL := pre.Endpoint + "?" + buildQueryString(params)
+	// 确保endpoint以https:开头
+	endpoint := pre.Endpoint
+	if !strings.HasPrefix(endpoint, "http") {
+		endpoint = "https:" + endpoint
+	}
+
+	// 移除endpoint末尾的斜杠
+	endpoint = strings.TrimSuffix(endpoint, "/")
+
+	uploadURL := endpoint + uposURI + "?uploads&output=json"
+
+	var lineResp LineUploadResp
+
+	// 使用限流器和重试机制
+	limiter := GetAPILimiter()
+	err := WithRetry(DefaultRetryConfig, func() error {
+		if err := limiter.WaitGeneral(); err != nil {
+			return err
+		}
+
+		resp, err := u.client.ReqClient.R().
+			SetHeader("X-Upos-Auth", pre.Auth).
+			SetSuccessResult(&lineResp).
+			Post(uploadURL)
+		if err != nil {
+			return err
+		}
+
+		if !resp.IsSuccessState() {
+			return fmt.Errorf("线路上传初始化失败: %s", resp.String())
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if lineResp.OK != 1 {
+		return nil, fmt.Errorf("线路上传初始化返回失败")
+	}
+
+	return &lineResp, nil
+}
+
+func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chunk []byte, partNum, totalParts int, fileSize int64) error {
+	chunkSize := int64(len(chunk))
+	start := (int64(partNum) - 1) * (fileSize / int64(totalParts))
+	if partNum == 1 {
+		start = 0
+	} else {
+		start = (int64(partNum - 1)) * chunkSize
+	}
+	end := start + chunkSize - 1
+
+	params := map[string]string{
+		"partNumber": fmt.Sprintf("%d", partNum),
+		"uploadId":   line.UploadID, // 使用lineUpload返回的upload_id
+		"chunk":      fmt.Sprintf("%d", partNum-1),
+		"chunks":     fmt.Sprintf("%d", totalParts),
+		"size":       fmt.Sprintf("%d", chunkSize),
+		"start":      fmt.Sprintf("%d", start),
+		"end":        fmt.Sprintf("%d", end),
+		"total":      fmt.Sprintf("%d", fileSize),
+	}
+
+	// 确保endpoint格式正确
+	endpoint := pre.Endpoint
+	if !strings.HasPrefix(endpoint, "http") {
+		endpoint = "https:" + endpoint
+	}
+	endpoint = strings.TrimSuffix(endpoint, "/")
+
+	// 构建完整URL
+	uposURI := pre.UposURI
+	if !strings.HasPrefix(uposURI, "/") {
+		uposURI = "/" + uposURI
+	}
+	uploadURL := endpoint + uposURI + "?" + buildQueryString(params)
 
 	// 使用限流器和重试机制
 	limiter := GetAPILimiter()
@@ -161,7 +270,7 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, chunk []byte, partNum, to
 	})
 }
 
-func (u *UposUploader) completeUpload(pre *PreUploadResp, totalParts int) error {
+func (u *UposUploader) completeUpload(pre *PreUploadResp, line *LineUploadResp, totalParts int) error {
 	parts := make([]map[string]interface{}, totalParts)
 	for i := 0; i < totalParts; i++ {
 		parts[i] = map[string]interface{}{
@@ -176,13 +285,25 @@ func (u *UposUploader) completeUpload(pre *PreUploadResp, totalParts int) error 
 
 	params := map[string]string{
 		"output":   "json",
-		"name":     pre.BiliFilename,
+		"name":     line.Key, // 使用lineUpload返回的key
 		"profile":  "ugcupos/bup",
-		"uploadId": pre.UploadID,
+		"uploadId": line.UploadID, // 使用lineUpload返回的upload_id
 		"biz_id":   fmt.Sprintf("%d", pre.BizID),
 	}
 
-	uploadURL := pre.Endpoint + "?" + buildQueryString(params)
+	// 确保endpoint格式正确
+	endpoint := pre.Endpoint
+	if !strings.HasPrefix(endpoint, "http") {
+		endpoint = "https:" + endpoint
+	}
+	endpoint = strings.TrimSuffix(endpoint, "/")
+
+	// 构建完整URL
+	uposURI := pre.UposURI
+	if !strings.HasPrefix(uposURI, "/") {
+		uposURI = "/" + uposURI
+	}
+	uploadURL := endpoint + uposURI + "?" + buildQueryString(params)
 
 	// 使用限流器和重试机制
 	limiter := GetAPILimiter()

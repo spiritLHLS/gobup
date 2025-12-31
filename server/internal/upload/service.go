@@ -88,6 +88,7 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 
 	// 创建客户端
 	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+	client.Line = room.Line // 设置上传线路
 
 	// 根据线路选择上传器
 	var uploader interface {

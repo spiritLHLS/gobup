@@ -14,6 +14,7 @@ type BiliClient struct {
 	AccessToken string
 	Cookies     string
 	Mid         int64
+	Line        string // 上传线路，如 cs_txa, cs_bda2
 	ReqClient   *req.Client
 }
 
@@ -24,7 +25,16 @@ type PreUploadResp struct {
 	Endpoints    []string `json:"endpoints"`
 	BizID        int64    `json:"biz_id"`
 	UploadID     string   `json:"upload_id"`
+	UposURI      string   `json:"upos_uri"`
 	BiliFilename string   `json:"bilifilename"`
+}
+
+// LineUploadResp 线路上传响应
+type LineUploadResp struct {
+	OK       int    `json:"OK"`
+	UploadID string `json:"upload_id"`
+	Key      string `json:"key"`
+	Bucket   string `json:"bucket"`
 }
 
 type UploadResult struct {

@@ -107,3 +107,40 @@ func getFileInfo(filePath string) (*FileInfo, *os.File, error) {
 		Name: stat.Name(),
 	}, file, nil
 }
+
+// parseLineParams 从线路名称解析 zone 和 upcdn 参数
+// 例如: cs_txa -> zone=cs, upcdn=txa
+//
+//	jd_bd -> zone=jd, upcdn=bd
+func parseLineParams(line string) (zone, upcdn string) {
+	// 默认值
+	zone = "cs"
+	upcdn = "ws"
+
+	if line == "" {
+		return
+	}
+
+	// 特殊处理 kodo 和 app
+	if line == "kodo" || line == "app" {
+		return
+	}
+
+	// 格式: zone_upcdn，例如 cs_txa, jd_bd
+	parts := []string{}
+	start := 0
+	for i := 0; i < len(line); i++ {
+		if line[i] == '_' {
+			parts = append(parts, line[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, line[start:])
+
+	if len(parts) >= 2 {
+		zone = parts[0]
+		upcdn = parts[1]
+	}
+
+	return
+}
