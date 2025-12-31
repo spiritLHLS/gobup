@@ -114,14 +114,20 @@ func GenerateTVQRCode() (*QRCodeResponse, error) {
 	}
 
 	signedURL := signParams(params)
-	apiURL := "https://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code?" + signedURL
+	apiURL := "https://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code"
 
-	fmt.Printf("[TV_QR] 请求URL: %s\n", apiURL)
+	fmt.Printf("[TV_QR] 请求URL: %s?%s\n", apiURL, signedURL)
 
 	var qrResp QRCodeResponse
 	client := req.C().ImpersonateChrome()
 	resp, err := client.R().
-		Get(apiURL)
+		SetFormDataFromValues(url.Values{
+			"appkey":   {AppKey},
+			"local_id": {"0"},
+			"ts":       {"0"},
+			"sign":     {params["sign"]},
+		}).
+		Post(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("请求二维码失败: %w", err)
 	}
@@ -226,14 +232,21 @@ func PollTVQRCodeStatus(authCode string) (*QRCodePollResponse, error) {
 	}
 
 	signedURL := signParams(params)
-	apiURL := "https://passport.bilibili.com/x/passport-tv-login/qrcode/poll?" + signedURL
+	apiURL := "https://passport.bilibili.com/x/passport-tv-login/qrcode/poll"
 
-	fmt.Printf("[TV_POLL] 轮询URL: %s\n", apiURL)
+	fmt.Printf("[TV_POLL] 请求URL: %s?%s\n", apiURL, signedURL)
 
 	var pollResp QRCodePollResponse
 	client := req.C().ImpersonateChrome()
 	resp, err := client.R().
-		Get(apiURL)
+		SetFormDataFromValues(url.Values{
+			"appkey":    {AppKey},
+			"auth_code": {authCode},
+			"local_id":  {"0"},
+			"ts":        {"0"},
+			"sign":      {params["sign"]},
+		}).
+		Post(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("轮询状态失败: %w", err)
 	}
@@ -446,8 +459,8 @@ func GetCookieValue(cookieStr, key string) string {
 	return cookies[key]
 }
 
-// signParams 签名参数
-func signParams(params map[string]string) string {
+// signParams 签名参数，返回包含sign的params map
+func signParams(params map[string]string) map[string]string {
 	keys := make([]string, 0, len(params))
 	for k := range params {
 		keys = append(keys, k)
@@ -461,7 +474,8 @@ func signParams(params map[string]string) string {
 	queryString := strings.Join(query, "&")
 
 	sign := md5Sign(queryString + AppSecret)
-	return queryString + "&sign=" + sign
+	params["sign"] = sign
+	return params
 }
 
 // md5Sign 计算MD5签名
