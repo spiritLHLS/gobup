@@ -10,7 +10,7 @@ services:
     ports:
       - "22380:12380"
     volumes:
-      - ./recordings:/rec
+      - ./bilirecord:/rec
       - ./data:/app/data
     environment:
       - TZ=Asia/Shanghai

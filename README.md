@@ -104,7 +104,7 @@ docker pull spiritlhl/gobup:latest
 docker run -d \
   --name gobup \
   -p 22380:12380 \
-  -v /path/to/recordings:/rec \
+  -v /path/to/bilirecord:/rec \
   -v /path/to/data:/app/data \
   --restart unless-stopped \
   spiritlhl/gobup:latest
@@ -118,7 +118,7 @@ docker pull spiritlhl/gobup:latest
 docker run -d \
   --name gobup \
   -p 22380:12380 \
-  -v /root/recordings:/rec \
+  -v /root/bilirecord:/rec \
   -v /root/data:/app/data \
   -e USERNAME=admin \
   -e PASSWORD=your_secure_password \
@@ -143,7 +143,7 @@ services:
     ports:
       - "22380:12380"
     volumes:
-      - ./recordings:/rec
+      - ./bilirecord:/rec
       - ./data:/app/data
     environment:
       - TZ=Asia/Shanghai
@@ -171,7 +171,7 @@ docker build -t gobup .
 docker run -d \
   --name gobup \
   -p 22380:12380 \
-  -v /path/to/recordings:/rec \
+  -v /path/to/bilirecord:/rec \
   -v /path/to/data:/app/data \
   -e USERNAME=admin \
   -e PASSWORD=your_password \
@@ -197,20 +197,20 @@ docker run -d \
 ```bash
 # Linux/macOS（无认证）
 tar -xzf gobup-server-linux-amd64.tar.gz
-./gobup-server-linux-amd64 -port 12380 -work-path /path/to/recordings
+./gobup-server-linux-amd64 -port 12380 -work-path /path/to/bilirecord
 
 # Linux/macOS（带认证，推荐）
-./gobup-server-linux-amd64 -port 12380 -work-path /path/to/recordings \
+./gobup-server-linux-amd64 -port 12380 -work-path /path/to/bilirecord \
   -username admin -password your_password
 ```
 
 ```powershell
 # Windows（无认证）
 # 解压 gobup-server-windows-amd64.zip
-gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings
+gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\bilirecord
 
 # Windows（带认证，推荐）
-gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\recordings ^
+gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\bilirecord ^
   -username admin -password your_password
 ```
 
@@ -262,7 +262,7 @@ environment:
 #### 方法三：手动运行
 
 ```bash
-./gobup-server -username admin -password your_password -port 12380 -work-path /path/to/recordings
+./gobup-server -username admin -password your_password -port 12380 -work-path /path/to/bilirecord
 ```
 
 ### 常见问题

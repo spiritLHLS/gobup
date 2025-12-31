@@ -66,7 +66,7 @@ python3 import_brec_history.py --dir /root/bilirecord
 
 在你的配置中：
 - **brec 容器**: `-v /root/bilirecord:/rec` （录制文件存储位置）
-- **gobup 容器**: `-v /root/recordings:/rec` （gobup 访问录制文件）
+- **gobup 容器**: `-v /root/bilirecord:/rec` （gobup 访问录制文件）
 
 ### 重要提示
 
@@ -124,7 +124,7 @@ python3 import_brec_history.py --dir /root/bilirecord
 #### 2. 数据库锁定
 
 # 如果 gobup 容器配置是：
-# -v /root/recordings:/rec
+# -v /root/bilirecord:/rec
 # 你需始扫描目录: /root/bilirecord
 💾 数据库路径: /root/data/gobup.db
 ------------------------------------------------------------

@@ -1,6 +1,7 @@
 package bili
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -46,28 +47,28 @@ func GetAPILimiter() *APILimiter {
 func (l *APILimiter) WaitPreUpload() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.preUploadLimiter.Wait(nil)
+	return l.preUploadLimiter.Wait(context.Background())
 }
 
 // WaitChunkUpload 等待分片上传API调用
 func (l *APILimiter) WaitChunkUpload() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.chunkUploadLimiter.Wait(nil)
+	return l.chunkUploadLimiter.Wait(context.Background())
 }
 
 // WaitPublish 等待投稿API调用
 func (l *APILimiter) WaitPublish() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.publishLimiter.Wait(nil)
+	return l.publishLimiter.Wait(context.Background())
 }
 
 // WaitGeneral 等待通用API调用
 func (l *APILimiter) WaitGeneral() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.generalLimiter.Wait(nil)
+	return l.generalLimiter.Wait(context.Background())
 }
 
 // RetryConfig 重试配置
