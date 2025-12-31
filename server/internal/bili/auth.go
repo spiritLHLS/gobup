@@ -12,6 +12,14 @@ import (
 	"github.com/imroc/req/v3"
 )
 
+// min 辅助函数
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 const (
 	AppKey    = "4409e2ce8ffd12b8"
 	AppSecret = "59b43e04ad6965f34319062b478f83dd"
@@ -139,8 +147,8 @@ func PollWebQRCodeStatus(oauthKey string) (*QRCodePollResponse, error) {
 
 	// 记录响应用于调试
 	if resp != nil {
-		fmt.Printf("Web端轮询响应: code=%d, status=%v, url=%s\n",
-			pollResp.Data.Code, pollResp.Status, pollResp.Data.URL)
+		fmt.Printf("[WEB_POLL] 响应 - code=%d, status=%v, url=%s, hasURL=%v\n",
+			pollResp.Data.Code, pollResp.Status, pollResp.Data.URL, pollResp.Data.URL != "")
 	}
 
 	return &pollResp, nil
@@ -165,7 +173,8 @@ func PollTVQRCodeStatus(authCode string) (*QRCodePollResponse, error) {
 		return nil, fmt.Errorf("轮询状态失败: %w", err)
 	}
 
-	fmt.Printf("TV端轮询响应: code=%d, url=%s\n", pollResp.Data.Code, pollResp.Data.URL)
+	fmt.Printf("[TV_POLL] 响应 - code=%d, url=%s, hasURL=%v, hasRefreshToken=%v\n",
+		pollResp.Data.Code, pollResp.Data.URL, pollResp.Data.URL != "", pollResp.Data.RefreshToken != "")
 
 	return &pollResp, nil
 }
@@ -229,11 +238,14 @@ func ExtractCookiesFromWebPollResponse(pollResp *QRCodePollResponse, client *req
 		if cookie.Name == "SESSDATA" || cookie.Name == "bili_jct" ||
 			cookie.Name == "DedeUserID" || cookie.Name == "DedeUserID__ckMd5" {
 			cookieStrs = append(cookieStrs, fmt.Sprintf("%s=%s", cookie.Name, cookie.Value))
+			fmt.Printf("[WEB_COOKIE] 提取Cookie - %s=%s\n", cookie.Name, cookie.Value[:min(20, len(cookie.Value))])
 		}
 	}
 
 	if len(cookieStrs) > 0 {
-		return strings.Join(cookieStrs, "; ")
+		result := strings.Join(cookieStrs, "; ")
+		fmt.Printf("[WEB_COOKIE] 提取成功 - length: %d\n", len(result))
+		return result
 	}
 
 	// 备选方案：从URL参数中提取
@@ -282,7 +294,8 @@ func ExtractCookiesFromTVPollResponse(pollResp *QRCodePollResponse) string {
 	}
 
 	cookieStr := strings.Join(cookies, "; ")
-	fmt.Printf("TV端提取的Cookie: %s\n", cookieStr)
+	fmt.Printf("[TV_COOKIE] 提取成功 - length: %d, DedeUserID: %s, SESSDATA: %s\n",
+		len(cookieStr), query.Get("DedeUserID"), query.Get("SESSDATA")[:min(20, len(query.Get("SESSDATA")))])
 	return cookieStr
 }
 

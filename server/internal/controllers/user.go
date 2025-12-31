@@ -25,6 +25,14 @@ type nopCloser struct {
 
 func (nopCloser) Close() error { return nil }
 
+// min 辅助函数
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // LoginSession 登录会话
 type LoginSession struct {
 	AuthCode   string
@@ -97,11 +105,19 @@ func LoginUser(c *gin.Context) {
 	}
 
 	pngBytes := buf.Bytes()
-	log.Printf("生成的PNG大小: %d bytes", len(pngBytes))
+	log.Printf("[INFO] 生成的PNG大小: %d bytes", len(pngBytes))
+
+	// 验证PNG头部
+	if len(pngBytes) < 8 || string(pngBytes[1:4]) != "PNG" {
+		log.Printf("[ERROR] PNG格式无效，头部: %v", pngBytes[:min(8, len(pngBytes))])
+		c.JSON(http.StatusOK, gin.H{"error": "生成的二维码图片格式无效"})
+		return
+	}
 
 	// Base64编码
 	imageBase64 := base64.StdEncoding.EncodeToString(pngBytes)
-	log.Printf("Base64编码长度: %d", len(imageBase64))
+	log.Printf("[INFO] Base64编码长度: %d", len(imageBase64))
+	log.Printf("[DEBUG] Base64前缀: %s", imageBase64[:min(50, len(imageBase64))])
 
 	// 使用图片的最后100个字符作为session key
 	sessionKey := imageBase64[len(imageBase64)-100:]
@@ -113,19 +129,18 @@ func LoginUser(c *gin.Context) {
 		CreateTime: time.Now().Unix(),
 		Status:     "pending",
 		Message:    "等待扫码",
-	}
-	// 保存登录类型到session的Message字段临时使用
-	if loginType == "web" {
-		session.Message = "web:等待扫码"
+		LoginType:  loginType, // 正确保存登录类型
 	}
 	loginSessions[sessionKey] = session
-	log.Printf("登录会话已创建，sessionKey: %s, type: %s", sessionKey, loginType)
+	log.Printf("[SUCCESS] 登录会话已创建 - sessionKey: %s, type: %s, authCode: %s", sessionKey, loginType, qrResp.Data.AuthCode)
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"image": imageBase64,
 		"key":   sessionKey,
 		"type":  loginType,
-	})
+	}
+	log.Printf("[SUCCESS] 返回二维码数据 - type: %s, imageLength: %d, keyLength: %d", loginType, len(imageBase64), len(sessionKey))
+	c.JSON(http.StatusOK, response)
 }
 
 // LoginCheck 检查登录状态（轮询）
@@ -174,6 +189,8 @@ func LoginCheck(c *gin.Context) {
 	var pollResp *bili.QRCodePollResponse
 	var err error
 
+	log.Printf("[POLL] 开始轮询 - type: %s, authCode: %s", session.LoginType, session.AuthCode)
+
 	if session.LoginType == "web" {
 		pollResp, err = bili.PollWebQRCodeStatus(session.AuthCode)
 	} else {
@@ -181,13 +198,15 @@ func LoginCheck(c *gin.Context) {
 	}
 
 	if err != nil {
-		log.Printf("轮询失败: %v", err)
+		log.Printf("[ERROR] 轮询失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "pending",
 			"message": "检查中...",
 		})
 		return
 	}
+
+	log.Printf("[POLL] 轮询响应 - code: %d, status: %s", pollResp.Data.Code, session.Status)
 
 	switch pollResp.Data.Code {
 	case 0: // 登录成功
