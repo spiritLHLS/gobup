@@ -56,6 +56,7 @@ func SetupRoutes(router *gin.Engine) {
 				histories.GET("/delete/:id", controllers.DeleteHistory)
 				histories.POST("/deleteWithFiles/:id", controllers.DeleteHistoryWithFiles)
 				histories.POST("/resetStatus/:id", controllers.ResetHistoryStatus)
+				histories.POST("/upload/:id", controllers.UploadHistory)
 				histories.POST("/publish/:id", controllers.RePublishHistory)
 				histories.GET("/updatePublishStatus/:id", controllers.UpdatePublishStatus)
 

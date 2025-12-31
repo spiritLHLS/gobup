@@ -227,3 +227,66 @@ func BatchDelete(c *gin.Context) {
 		"count": result.RowsAffected,
 	})
 }
+
+// UploadHistory 上传历史记录的所有分P
+func UploadHistory(c *gin.Context) {
+	id := c.Param("id")
+	historyID, _ := strconv.ParseUint(id, 10, 32)
+
+	type UploadReq struct {
+		UserID uint `json:"userId"`
+	}
+
+	var req UploadReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "用户ID缺失"})
+		return
+	}
+
+	db := database.GetDB()
+
+	// 获取历史记录
+	var history models.RecordHistory
+	if err := db.First(&history, historyID).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "历史记录不存在"})
+		return
+	}
+
+	// 获取房间信息
+	var room models.RecordRoom
+	if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "房间不存在"})
+		return
+	}
+
+	// 获取所有未上传的分P
+	var parts []models.RecordHistoryPart
+	if err := db.Where("history_id = ? AND upload = ? AND recording = ?", historyID, false, false).
+		Order("start_time ASC").
+		Find(&parts).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "查询分P失败"})
+		return
+	}
+
+	if len(parts) == 0 {
+		c.JSON(http.StatusOK, gin.H{"type": "warning", "msg": "没有待上传的分P"})
+		return
+	}
+
+	// 异步上传所有分P
+	uploadService := upload.NewService()
+	go func() {
+		for i := range parts {
+			if err := uploadService.UploadPart(&parts[i], &history, &room); err != nil {
+				// 错误会在UploadPart中记录
+				continue
+			}
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":  "success",
+		"msg":   "上传任务已启动",
+		"count": len(parts),
+	})
+}

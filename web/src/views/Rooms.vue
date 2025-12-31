@@ -93,10 +93,10 @@
             <el-option
               v-for="line in uploadLines"
               :key="line.value"
-              :label="line.label"
+              :label="formatLine(line.value)"
               :value="line.value"
             >
-              <span style="float: left">{{ line.label }}</span>
+              <span style="float: left">{{ formatLine(line.value) }}</span>
               <span style="float: right; font-size: 12px; color: #8492a6" v-if="lineStats[line.value]">
                 <i :class="getLineStatusIcon(lineStats[line.value])" :style="{color: getLineStatusColor(lineStats[line.value])}"></i>
                 {{ lineStats[line.value] }}

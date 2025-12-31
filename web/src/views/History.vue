@@ -247,13 +247,23 @@
         <div class="actions-section">
           <h4 class="section-title">可用操作</h4>
           <div class="actions-grid">
-            <!-- 上传和投稿 -->
+            <!-- 上传视频 -->
             <el-button 
-              type="primary"
-              :disabled="!!currentHistory?.bvId"
-              @click="handlePublishInDialog"
+              type="warning"
+              :disabled="!hasUnuploadedParts || currentHistory?.publish"
+              @click="handleUploadInDialog"
             >
               <el-icon><Upload /></el-icon>
+              上传视频
+            </el-button>
+
+            <!-- 投稿视频 -->
+            <el-button 
+              type="primary"
+              :disabled="!currentHistory?.uploadPartCount || !!currentHistory?.bvId"
+              @click="handlePublishInDialog"
+            >
+              <el-icon><Promotion /></el-icon>
               投稿视频
             </el-button>
 
@@ -326,7 +336,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { 
   Upload, 
@@ -335,7 +345,8 @@ import {
   FolderOpened, 
   RefreshLeft, 
   Delete, 
-  DeleteFilled 
+  DeleteFilled,
+  Promotion 
 } from '@element-plus/icons-vue'
 import { historyAPI } from '@/api'
 import axios from 'axios'
@@ -346,6 +357,14 @@ const total = ref(0)
 const selectedHistories = ref([])
 const showCleanDialog = ref(false)
 const cleanDays = ref(30)
+
+// 计算是否有未上传的分P
+const hasUnuploadedParts = computed(() => {
+  if (!currentHistory.value) return false
+  const partCount = currentHistory.value.partCount || 0
+  const uploadPartCount = currentHistory.value.uploadPartCount || 0
+  return partCount > uploadPartCount
+})
 
 
 const searchParams = ref({
@@ -406,6 +425,12 @@ const handleSizeChange = () => {
 const showActionsDialog = (row) => {
   currentHistory.value = row
   actionsDialogVisible.value = true
+}
+
+// 在对话框中投稿
+const handleUploadInDialog = async () => {
+  await handleUpload(currentHistory.value)
+  fetchHistories()
 }
 
 // 在对话框中投稿
@@ -505,6 +530,42 @@ const handleDeleteWithFiles = async () => {
     if (error !== 'cancel') {
       console.error('删除失败:', error)
       ElMessage.error(error.response?.data?.msg || '删除失败')
+    }
+  }
+}
+
+// 上传视频
+const handleUpload = async (row) => {
+  try {
+    await ElMessageBox.confirm('确定要开始上传视频到B站吗？', '上传确认', {
+      type: 'warning'
+    })
+    
+    // 获取用户列表
+    const userResponse = await axios.get('/api/biliUser/list')
+    const users = userResponse.data || []
+    
+    if (users.length === 0) {
+      ElMessage.warning('请先添加B站用户')
+      return
+    }
+    
+    const userId = users[0].id
+    
+    const loadingInstance = ElLoading.service({ text: '上传任务已启动，请稍候...' })
+    try {
+      const response = await axios.post(`/api/history/upload/${row.id}`, { userId })
+      ElMessage.success(response.data.msg || '上传任务已启动')
+      // 开始轮询进度
+      startHistoryProgressPolling()
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('上传失败:', error)
+      ElMessage.error(error.response?.data?.msg || '上传失败')
     }
   }
 }
