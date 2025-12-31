@@ -525,15 +525,6 @@ const handleSaveWxPush = async () => {
   }
 }
 
-// 处理二维码类型切换
-const handleQRTypeChange = () => {
-  // 切换登录方式时重新生成二维码
-  if (loginDialogVisible.value) {
-    stopPolling()
-    generateQRCode()
-  }
-}
-
 onMounted(() => {
   fetchUsers()
   loadRateLimitConfig()
