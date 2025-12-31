@@ -70,15 +70,25 @@ func GenerateWebQRCode() (*QRCodeResponse, error) {
 	// 参考: BiliUserController.java loginUser()
 	apiURL := "https://passport.bilibili.com/qrcode/getLoginUrl"
 
+	fmt.Printf("[WEB_QR] 请求URL: %s\n", apiURL)
+
 	var qrResp QRCodeResponse
 	client := req.C().ImpersonateChrome()
-	_, err := client.R().
+	resp, err := client.R().
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
 		SetHeader("Referer", "https://www.bilibili.com/").
-		SetSuccessResult(&qrResp).
 		Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("请求二维码失败: %w", err)
+	}
+
+	// 打印原始响应用于调试
+	rawBody := resp.String()
+	fmt.Printf("[WEB_QR_DEBUG] 原始响应: %s\n", rawBody)
+
+	// 解析JSON
+	if err := resp.UnmarshalJson(&qrResp); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
 
 	if qrResp.Code != 0 {
@@ -110,11 +120,19 @@ func GenerateTVQRCode() (*QRCodeResponse, error) {
 
 	var qrResp QRCodeResponse
 	client := req.C().ImpersonateChrome()
-	_, err := client.R().
-		SetSuccessResult(&qrResp).
+	resp, err := client.R().
 		Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("请求二维码失败: %w", err)
+	}
+
+	// 打印原始响应用于调试
+	rawBody := resp.String()
+	fmt.Printf("[TV_QR_DEBUG] 原始响应: %s\n", rawBody)
+
+	// 解析JSON
+	if err := resp.UnmarshalJson(&qrResp); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
 
 	if qrResp.Code != 0 {
@@ -131,9 +149,11 @@ func PollWebQRCodeStatus(oauthKey string) (*QRCodePollResponse, error) {
 	// 参考: main.py save_ck() 和 BiliApi.java loginOnWeb()
 	tokenurl := "https://passport.bilibili.com/qrcode/getLoginInfo"
 
+	fmt.Printf("[WEB_POLL] 请求URL: %s\n", tokenurl)
+
 	var pollResp QRCodePollResponse
 	client := req.C().ImpersonateChrome()
-	_, err := client.R().
+	resp, err := client.R().
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
 		SetHeader("Host", "passport.bilibili.com").
 		SetHeader("Referer", "https://passport.bilibili.com/login").
@@ -141,11 +161,19 @@ func PollWebQRCodeStatus(oauthKey string) (*QRCodePollResponse, error) {
 			"oauthKey": oauthKey,
 			"gourl":    "https://www.bilibili.com/",
 		}).
-		SetSuccessResult(&pollResp).
 		Post(tokenurl)
 
 	if err != nil {
 		return nil, fmt.Errorf("轮询状态失败: %w", err)
+	}
+
+	// 打印原始响应用于调试
+	rawBody := resp.String()
+	fmt.Printf("[WEB_POLL_DEBUG] 原始响应: %s\n", rawBody)
+
+	// 解析JSON
+	if err := resp.UnmarshalJson(&pollResp); err != nil {
+		return nil, fmt.Errorf("解析轮询响应失败: %w", err)
 	}
 
 	// 参考Python项目的状态码处理逻辑：
@@ -204,11 +232,19 @@ func PollTVQRCodeStatus(authCode string) (*QRCodePollResponse, error) {
 
 	var pollResp QRCodePollResponse
 	client := req.C().ImpersonateChrome()
-	_, err := client.R().
-		SetSuccessResult(&pollResp).
+	resp, err := client.R().
 		Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("轮询状态失败: %w", err)
+	}
+
+	// 打印原始响应用于调试
+	rawBody := resp.String()
+	fmt.Printf("[TV_POLL_DEBUG] 原始响应: %s\n", rawBody)
+
+	// 解析JSON
+	if err := resp.UnmarshalJson(&pollResp); err != nil {
+		return nil, fmt.Errorf("解析轮询响应失败: %w", err)
 	}
 
 	// TV端返回的状态码映射（参考Java项目）
@@ -244,14 +280,25 @@ func PollTVQRCodeStatus(authCode string) (*QRCodePollResponse, error) {
 
 // GetUserInfo 获取用户信息
 func GetUserInfo(cookies string) (*UserInfoResponse, error) {
+	apiURL := "https://api.bilibili.com/x/space/myinfo"
+	fmt.Printf("[USER_INFO] 请求URL: %s\n", apiURL)
+
 	var userInfo UserInfoResponse
 	client := req.C().ImpersonateChrome()
-	_, err := client.R().
+	resp, err := client.R().
 		SetHeader("Cookie", cookies).
-		SetSuccessResult(&userInfo).
-		Get("https://api.bilibili.com/x/space/myinfo")
+		Get(apiURL)
 	if err != nil {
 		return nil, err
+	}
+
+	// 打印原始响应用于调试
+	rawBody := resp.String()
+	fmt.Printf("[USER_INFO_DEBUG] 原始响应: %s\n", rawBody)
+
+	// 解析JSON
+	if err := resp.UnmarshalJson(&userInfo); err != nil {
+		return nil, fmt.Errorf("解析用户信息失败: %w", err)
 	}
 
 	if userInfo.Code == -101 {
