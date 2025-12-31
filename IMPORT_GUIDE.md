@@ -4,17 +4,6 @@
 
 `import_brec_history_db.py` 是一个独立的导入工具，用于从 BililiveRecorder 录制文件夹批量导入历史记录到 gobup。
 
-### 特性
-
-- ✅ 批量扫描录制文件夹
-- ✅ 自动从文件名提取元数据
-- ✅ 自动去重（基于文件路径）
-- ✅ 支持递归扫描子文件夹
-- ✅ 详细的导入统计和错误报告
-- ✅ 自动合并同一场直播的多个文件
-- ⚡ 直接操作数据库，速度快、更可靠
-- ❌ 无需认证，简单易用
-
 ## 前提条件
 
 ### 1. 确保 Python 3 已安装
@@ -56,13 +45,6 @@ python3 import_brec_history_db.py \
   --dir /root/bilirecord \
   --db /root/data/gobup.db
 ```
-
-**重要提示**: 
-1. 导入前建议停止 gobup 服务或确保没有并发写入
-2. 建议先备份数据库: `cp /root/data/gobup.db /root/data/gobup.db.backup`--dir` | `-d` | ✅ | - | BililiveRecorder 录制文件夹路径 |
-| `--url` | `-u` | ❌ | `http://localhost:22380` | gobup API 地址 |
-| `--user` | - | ❌ | `root` | gobup 用户名 |
-| `--pass` | `-p` | ❌ | `spiritlhl` | gobup 密码 |
 
 ## 使用环境变量
 
