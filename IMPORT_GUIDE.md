@@ -45,8 +45,6 @@ ls -la /root/data/gobup.db
 
 ```bash
 # 下载脚本
-```bash
-# 下载脚本
 cd /root
 wget https://raw.githubusercontent.com/spiritlhls/gobup/main/import_brec_history_db.py
 

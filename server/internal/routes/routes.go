@@ -94,6 +94,13 @@ func SetupRoutes(router *gin.Engine) {
 				ratelimit.GET("/config", controllers.GetRateLimitConfig)
 				ratelimit.POST("/config", controllers.SetRateLimitConfig)
 			}
+
+			// 配置导入导出
+			config := auth.Group("/config")
+			{
+				config.POST("/export", controllers.ExportConfig)
+				config.POST("/import", controllers.ImportConfig)
+			}
 		}
 	}
 

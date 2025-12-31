@@ -54,7 +54,7 @@ class BrecImporterDB:
         try:
             cursor = self.conn.cursor()
             cursor.execute(
-                "SELECT id FROM record_history_parts WHERE file_path = ? AND deleted_at IS NULL",
+                "SELECT id FROM record_history_parts WHERE file_path = ?",
                 (file_path,)
             )
             result = cursor.fetchone()
@@ -68,7 +68,7 @@ class BrecImporterDB:
         try:
             cursor = self.conn.cursor()
             cursor.execute(
-                "SELECT id FROM record_rooms WHERE room_id = ? AND deleted_at IS NULL",
+                "SELECT id FROM record_rooms WHERE room_id = ?",
                 (room_id,)
             )
             result = cursor.fetchone()
@@ -92,7 +92,7 @@ class BrecImporterDB:
             
             # 检查是否已存在相同 session_id 的历史记录
             cursor.execute(
-                "SELECT id FROM record_histories WHERE session_id = ? AND deleted_at IS NULL",
+                "SELECT id FROM record_histories WHERE session_id = ?",
                 (metadata['session_id'],)
             )
             result = cursor.fetchone()
@@ -263,7 +263,17 @@ class BrecImporterDB:
         title = title_match.group(1) if title_match else filename
         
         # 生成 session_id（同一场直播的多个文件使用相同的 session_id）
-        session_key = f"{room_id}_{start_time.split('.')[0]}"
+        # 从文件名提取时间戳部分：录制-5050-20251227-231202-161
+        timestamp_match = re.search(r'(\d{8}-\d{6})', filename)
+        if timestamp_match:
+            # 使用日期+时间(精确到分钟)作为session标识，同一时间段的视频会归为一场直播
+            timestamp = timestamp_match.group(1)
+            date_part = timestamp[:8]  # YYYYMMDD
+            time_part = timestamp[9:13]  # HHMM (只取到分钟)
+            session_key = f"{room_id}_{date_part}_{time_part}"
+        else:
+            # 降级方案：使用日期作为session
+            session_key = f"{room_id}_{start_time[:10]}"
         session_id = hashlib.md5(session_key.encode()).hexdigest()[:16]
         
         if os.getenv('DEBUG'):
