@@ -127,6 +127,9 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 
 	apiURL := "https://member.bilibili.com/preupload?" + buildQueryString(params)
 
+	// 设置referer header（用于线路选择）
+	lineQuery := fmt.Sprintf("?os=upos&zone=%s&upcdn=%s", zone, upcdn)
+
 	var preResp PreUploadResp
 
 	// 使用限流器和重试机制
@@ -138,6 +141,7 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 		}
 
 		_, err := u.client.ReqClient.R().
+			SetHeader("referer", lineQuery).
 			SetSuccessResult(&preResp).
 			Get(apiURL)
 		return err
@@ -157,12 +161,11 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 }
 
 func (u *UposUploader) lineUpload(pre *PreUploadResp) (*LineUploadResp, error) {
-	// 构建URL: https:{endpoint}{upos_uri}?uploads&output=json
-	// upos_uri 格式类似: /ugcbup/xxx.mp4
-	uposURI := pre.UposURI
-	if uposURI == "" || uposURI == "/" {
-		// 如果没有upos_uri，尝试从endpoint构建
-		return nil, fmt.Errorf("upos_uri为空")
+	// 构建URL: https:{endpoint}/{upUrl}?uploads&output=json
+	// upUrl 从 upos_uri 提取（去掉开头的/）
+	upUrl := getUpUrl(pre.UposURI)
+	if upUrl == "" {
+		return nil, fmt.Errorf("upos_uri为空或无效")
 	}
 
 	// 确保endpoint以https:开头
@@ -171,11 +174,7 @@ func (u *UposUploader) lineUpload(pre *PreUploadResp) (*LineUploadResp, error) {
 		endpoint = "https:" + endpoint
 	}
 
-	// 移除endpoint末尾的斜杠
-	endpoint = strings.TrimSuffix(endpoint, "/")
-
-	uploadURL := endpoint + uposURI + "?uploads&output=json"
-
+	uploadURL := endpoint + "/" + upUrl + "?uploads&output=json"
 	var lineResp LineUploadResp
 
 	// 使用限流器和重试机制
@@ -213,12 +212,9 @@ func (u *UposUploader) lineUpload(pre *PreUploadResp) (*LineUploadResp, error) {
 
 func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chunk []byte, partNum, totalParts int, fileSize int64) error {
 	chunkSize := int64(len(chunk))
-	start := (int64(partNum) - 1) * (fileSize / int64(totalParts))
-	if partNum == 1 {
-		start = 0
-	} else {
-		start = (int64(partNum - 1)) * chunkSize
-	}
+	// 标准分片大小
+	standardChunkSize := int64(5 * 1024 * 1024)
+	start := int64(partNum-1) * standardChunkSize
 	end := start + chunkSize - 1
 
 	params := map[string]string{
@@ -285,9 +281,9 @@ func (u *UposUploader) completeUpload(pre *PreUploadResp, line *LineUploadResp, 
 
 	params := map[string]string{
 		"output":   "json",
-		"name":     line.Key, // 使用lineUpload返回的key
+		"name":     pre.BiliFilename,
 		"profile":  "ugcupos/bup",
-		"uploadId": line.UploadID, // 使用lineUpload返回的upload_id
+		"uploadId": line.UploadID,
 		"biz_id":   fmt.Sprintf("%d", pre.BizID),
 	}
 
@@ -296,16 +292,10 @@ func (u *UposUploader) completeUpload(pre *PreUploadResp, line *LineUploadResp, 
 	if !strings.HasPrefix(endpoint, "http") {
 		endpoint = "https:" + endpoint
 	}
-	endpoint = strings.TrimSuffix(endpoint, "/")
 
 	// 构建完整URL
-	uposURI := pre.UposURI
-	if !strings.HasPrefix(uposURI, "/") {
-		uposURI = "/" + uposURI
-	}
-	uploadURL := endpoint + uposURI + "?" + buildQueryString(params)
-
-	// 使用限流器和重试机制
+	upUrl := getUpUrl(pre.UposURI)
+	uploadURL := endpoint + "/" + upUrl + "?" + buildQueryString(params)
 	limiter := GetAPILimiter()
 	var result map[string]interface{}
 	err := WithRetry(DefaultRetryConfig, func() error {

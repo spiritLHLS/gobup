@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strings"
 )
 
 // FileChunk 文件分片信息
@@ -143,4 +144,17 @@ func parseLineParams(line string) (zone, upcdn string) {
 	}
 
 	return
+}
+
+// getUpUrl 从upos_uri提取上传路径（去掉开头的/）
+// 例如: /ugcbup/xxx.mp4 -> ugcbup/xxx.mp4
+func getUpUrl(uposURI string) string {
+	if uposURI == "" {
+		return ""
+	}
+	// 如果以/开头，去掉第一个/
+	if strings.HasPrefix(uposURI, "/") {
+		return uposURI[1:]
+	}
+	return uposURI
 }

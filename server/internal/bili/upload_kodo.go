@@ -79,7 +79,7 @@ func (u *KodoUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 		"name":    filename,
 		"size":    fmt.Sprintf("%d", filesize),
 		"r":       "kodo",
-		"profile": "ugckodo/bup",
+		"profile": "ugcupos/bupfetch",
 		"ssl":     "0",
 		"version": "2.14.0",
 		"build":   "2140000",
