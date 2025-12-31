@@ -65,7 +65,7 @@ export const historyAPI = {
 // 用户管理
 export const userAPI = {
   list: () => request.get('/biliUser/list'),
-  login: () => request.get('/biliUser/login'),
+  login: (type = 'tv') => request.get('/biliUser/login', { params: { type } }),
   loginCheck: (key) => request.get('/biliUser/loginCheck', { params: { key } }),
   loginCancel: (key) => request.get('/biliUser/loginCancel', { params: { key } }),
   loginByCookie: (cookies) => request.post('/biliUser/loginByCookie', { cookies }),

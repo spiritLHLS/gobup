@@ -13,6 +13,7 @@ import (
 	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
+	"github.com/imroc/req/v3"
 	"github.com/yeqown/go-qrcode/v2"
 	"github.com/yeqown/go-qrcode/writer/standard"
 )
@@ -31,6 +32,7 @@ type LoginSession struct {
 	CreateTime int64
 	Status     string // pending, success, failed, expired
 	Message    string
+	LoginType  string // web or tv
 }
 
 var loginSessions = make(map[string]*LoginSession)
@@ -52,15 +54,25 @@ func ListBiliUsers(c *gin.Context) {
 
 // LoginUser 生成B站登录二维码
 func LoginUser(c *gin.Context) {
-	// 生成TV端二维码（参考biliupforjava实现）
-	log.Printf("开始生成二维码...")
-	qrResp, err := bili.GenerateTVQRCode()
+	// 获取登录类型参数 (web/tv)，默认为tv
+	loginType := c.DefaultQuery("type", "tv")
+	log.Printf("开始生成%s端二维码...", loginType)
+
+	var qrResp *bili.QRCodeResponse
+	var err error
+
+	if loginType == "web" {
+		qrResp, err = bili.GenerateWebQRCode()
+	} else {
+		qrResp, err = bili.GenerateTVQRCode()
+	}
+
 	if err != nil {
 		log.Printf("生成二维码失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"error": "生成二维码失败: " + err.Error()})
 		return
 	}
-	log.Printf("二维码URL: %s, AuthCode: %s", qrResp.Data.URL, qrResp.Data.AuthCode)
+	log.Printf("%s端二维码URL: %s, AuthCode: %s", loginType, qrResp.Data.URL, qrResp.Data.AuthCode)
 
 	// 生成二维码图片
 	qrc, err := qrcode.NewWith(qrResp.Data.URL,
@@ -102,12 +114,17 @@ func LoginUser(c *gin.Context) {
 		Status:     "pending",
 		Message:    "等待扫码",
 	}
+	// 保存登录类型到session的Message字段临时使用
+	if loginType == "web" {
+		session.Message = "web:等待扫码"
+	}
 	loginSessions[sessionKey] = session
-	log.Printf("登录会话已创建，sessionKey: %s", sessionKey)
+	log.Printf("登录会话已创建，sessionKey: %s, type: %s", sessionKey, loginType)
 
 	c.JSON(http.StatusOK, gin.H{
 		"image": imageBase64,
 		"key":   sessionKey,
+		"type":  loginType,
 	})
 }
 
@@ -153,9 +170,18 @@ func LoginCheck(c *gin.Context) {
 		return
 	}
 
-	// 轮询登录状态
-	pollResp, err := bili.PollQRCodeStatus(session.AuthCode)
+	// 根据登录类型轮询登录状态
+	var pollResp *bili.QRCodePollResponse
+	var err error
+
+	if session.LoginType == "web" {
+		pollResp, err = bili.PollWebQRCodeStatus(session.AuthCode)
+	} else {
+		pollResp, err = bili.PollTVQRCodeStatus(session.AuthCode)
+	}
+
 	if err != nil {
+		log.Printf("轮询失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "pending",
 			"message": "检查中...",
@@ -165,8 +191,16 @@ func LoginCheck(c *gin.Context) {
 
 	switch pollResp.Data.Code {
 	case 0: // 登录成功
-		// 解析Cookie
-		cookieStr := bili.ExtractCookiesFromPollResponse(pollResp)
+		// 根据登录类型解析Cookie
+		var cookieStr string
+		if session.LoginType == "web" {
+			client := req.C().ImpersonateChrome()
+			cookieStr = bili.ExtractCookiesFromWebPollResponse(pollResp, client)
+		} else {
+			cookieStr = bili.ExtractCookiesFromTVPollResponse(pollResp)
+		}
+
+		log.Printf("[%s] 提取到的Cookie: %s", session.LoginType, cookieStr)
 		if cookieStr == "" {
 			session.Status = "failed"
 			session.Message = "获取Cookie失败"

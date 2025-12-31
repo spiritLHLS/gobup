@@ -83,6 +83,22 @@
         <!-- 扫码登录 -->
         <el-tab-pane label="扫码登录" name="qrcode">
           <div class="qrcode-container">
+            <!-- 登录方式选择 -->
+            <div class="login-type-selector" style="margin-bottom: 16px; text-align: center;">
+              <el-radio-group v-model="qrcodeType" @change="handleQRTypeChange">
+                <el-radio label="tv">TV端扫码</el-radio>
+                <el-radio label="web">Web端扫码</el-radio>
+              </el-radio-group>
+              <div style="font-size: 12px; color: #999; margin-top: 8px;">
+                <template v-if="qrcodeType === 'tv'">
+                  💡 推荐：稳定性更好，适合长期使用
+                </template>
+                <template v-else>
+                  💡 兼容性更好，与网页端登录一致
+                </template>
+              </div>
+            </div>
+            
             <div v-if="qrcodeLoading" class="loading">
               <el-icon class="is-loading"><Loading /></el-icon>
               <p>生成二维码中...</p>
@@ -226,6 +242,7 @@ const showWxPushDialog = ref(false)
 const qrcodeUrl = ref('')
 const qrcodeRef = ref(null)
 const loginStatus = ref('等待扫码...')
+const qrcodeType = ref('tv') // 默认使用TV端
 let authKey = ''
 let pollingTimer = null
 
@@ -274,8 +291,8 @@ const generateQRCode = async () => {
   qrcodeUrl.value = '' // 清空旧的二维码
   
   try {
-    // 新的API返回格式: {image: base64, key: sessionKey}
-    const data = await userAPI.login()
+    // 新的API返回格式: {image: base64, key: sessionKey, type: "web"/"tv"}
+    const data = await userAPI.login(qrcodeType.value)
     
     console.log('========== 二维码API响应 ==========')
     console.log('完整响应:', data)
@@ -385,6 +402,14 @@ const stopPolling = () => {
   if (pollingTimer) {
     clearInterval(pollingTimer)
     pollingTimer = null
+  }
+}
+
+const handleQRTypeChange = () => {
+  // 切换登录方式时重新生成二维码
+  if (loginDialogVisible.value) {
+    stopPolling()
+    generateQRCode()
   }
 }
 
@@ -500,6 +525,15 @@ const handleSaveWxPush = async () => {
   }
 }
 
+// 处理二维码类型切换
+const handleQRTypeChange = () => {
+  // 切换登录方式时重新生成二维码
+  if (loginDialogVisible.value) {
+    stopPolling()
+    generateQRCode()
+  }
+}
+
 onMounted(() => {
   fetchUsers()
   loadRateLimitConfig()
@@ -599,6 +633,15 @@ onMounted(() => {
   color: #ff4d4f;
   font-weight: bold;
   margin-top: 10px;
+}
+
+.login-type-selector {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.login-type-selector .el-radio-group {
+  margin-bottom: 8px;
 }
 
 .empty {
