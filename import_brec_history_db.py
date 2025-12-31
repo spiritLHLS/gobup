@@ -114,8 +114,10 @@ class BrecImporterDB:
                     room_id, session_id, uname, title, area_name,
                     start_time, end_time,
                     recording, streaming, upload, publish,
-                    code, file_size
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    code, file_size,
+                    danmaku_sent, danmaku_count, files_moved,
+                    video_state, video_state_desc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 now, now,
                 metadata['room_id'],
@@ -130,7 +132,12 @@ class BrecImporterDB:
                 1,  # upload
                 0,  # publish
                 -1, # code
-                0   # file_size
+                0,  # file_size
+                0,  # danmaku_sent
+                0,  # danmaku_count
+                0,  # files_moved
+                -1, # video_state (-1表示未知)
+                ''  # video_state_desc
             ))
             
             history_id = cursor.lastrowid
@@ -165,11 +172,11 @@ class BrecImporterDB:
                     created_at,
                     history_id, room_id, session_id,
                     title, live_title, area_name,
-                    file_path, file_name, file_size,
+                    file_path, file_name, file_size, duration,
                     start_time, end_time,
                     recording, upload, uploading,
-                    file_delete, file_moved, page, xcode_state
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    file_delete, file_moved, page, xcode_state, cid
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 now,
                 history_id,
@@ -181,6 +188,7 @@ class BrecImporterDB:
                 container_path,
                 video_file.name,
                 self.get_file_size(video_file),
+                0,  # duration (秒)
                 start_time,
                 end_time,
                 0,  # recording
@@ -189,7 +197,8 @@ class BrecImporterDB:
                 0,  # file_delete
                 0,  # file_moved
                 0,  # page
-                0   # xcode_state
+                0,  # xcode_state
+                0   # cid
             ))
             
             self.conn.commit()
