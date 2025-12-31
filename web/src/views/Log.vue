@@ -5,7 +5,7 @@
         <div class="log-header">
           <span class="log-title">
             <i class="el-icon-document"></i>
-            实时日志
+            系统日志
           </span>
           <div class="log-controls">
             <el-input
@@ -15,7 +15,9 @@
               clearable
               style="width: 200px; margin-right: 10px"
             >
-              <i slot="prefix" class="el-icon-search"></i>
+              <template #prefix>
+                <i class="el-icon-search"></i>
+              </template>
             </el-input>
             <el-select
               v-model="levelFilter"
@@ -25,17 +27,19 @@
               size="small"
               style="width: 150px; margin-right: 10px"
             >
-              <el-option label="INFO" value="INFO" />
+              <el-option label="INFO" value="INFO">
+                <el-tag type="success" size="small">+ 2</el-tag>
+              </el-option>
               <el-option label="WARN" value="WARN" />
               <el-option label="ERROR" value="ERROR" />
               <el-option label="DEBUG" value="DEBUG" />
             </el-select>
             <el-button
-              :type="realtime ? 'success' : 'info'"
+              :type="autoRefresh ? 'success' : 'info'"
               size="small"
-              @click="toggleRealtime"
+              @click="toggleAutoRefresh"
             >
-              {{ realtime ? '实时推送' : '已暂停' }}
+              {{ autoRefresh ? '实时推送' : '已暂停' }}
             </el-button>
             <el-button size="small" @click="clearLogs">
               清空
@@ -44,7 +48,7 @@
         </div>
       </template>
 
-      <div class="log-console" ref="console">
+      <div class="log-console" ref="consoleRef">
         <div
           v-for="(log, index) in filteredLogs"
           :key="index"
@@ -58,7 +62,7 @@
           <span class="log-message">{{ log.message }}</span>
         </div>
         <div v-if="filteredLogs.length === 0" class="log-empty">
-          {{ realtime ? '等待日志...' : '暂无日志' }}
+          {{ autoRefresh ? '等待日志...' : '暂无日志' }}
         </div>
       </div>
     </el-card>
@@ -67,13 +71,15 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import axios from 'axios'
+import { ElMessage } from 'element-plus'
 
 const logs = ref([])
 const searchKeyword = ref('')
 const levelFilter = ref(['INFO', 'WARN', 'ERROR'])
-const realtime = ref(true)
-const ws = ref(null)
-const console = ref(null)
+const autoRefresh = ref(true)
+const consoleRef = ref(null)
+let refreshTimer = null
 
 const filteredLogs = computed(() => {
   let result = logs.value
@@ -95,80 +101,72 @@ const filteredLogs = computed(() => {
   return result
 })
 
-const connectWebSocket = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.host
-  ws.value = new WebSocket(`${protocol}//${host}/ws/log`)
-
-  ws.value.onopen = () => {
-    console.log('WebSocket连接已建立')
-  }
-
-  ws.value.onmessage = (event) => {
-    try {
-      const log = JSON.parse(event.data)
-      addLog(log)
-    } catch (e) {
-      console.error('解析日志失败:', e)
-    }
-  }
-
-  ws.value.onerror = (error) => {
-    console.error('WebSocket错误:', error)
-  }
-
-  ws.value.onclose = () => {
-    console.log('WebSocket连接已关闭')
-    if (realtime.value) {
-      // 3秒后重连
-      setTimeout(() => {
-        if (realtime.value) {
-          connectWebSocket()
-        }
-      }, 3000)
-    }
+const fetchLogs = async () => {
+  try {
+    const response = await axios.get('/api/logs?limit=1000')
+    logs.value = response.data.logs || []
+    
+    // 自动滚动到底部
+    nextTick(() => {
+      if (consoleRef.value) {
+        consoleRef.value.scrollTop = consoleRef.value.scrollHeight
+      }
+    })
+  } catch (error) {
+    console.error('获取日志失败:', error)
   }
 }
 
-const addLog = (log) => {
-  logs.value.push(log)
+const startAutoRefresh = () => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+  }
   
-  // 限制日志数量，避免内存溢出
-  if (logs.value.length > 1000) {
-    logs.value.shift()
-  }
-
-  // 自动滚动到底部
-  nextTick(() => {
-    if (console.value) {
-      console.value.scrollTop = console.value.scrollHeight
-    }
-  })
+  // 立即获取一次
+  fetchLogs()
+  
+  // 每10秒刷新一次
+  refreshTimer = setInterval(() => {
+    fetchLogs()
+  }, 10000)
 }
 
-const toggleRealtime = () => {
-  realtime.value = !realtime.value
-  if (realtime.value) {
-    connectWebSocket()
-  } else if (ws.value) {
-    ws.value.close()
+const stopAutoRefresh = () => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
   }
 }
 
-const clearLogs = () => {
-  logs.value = []
+const toggleAutoRefresh = () => {
+  autoRefresh.value = !autoRefresh.value
+  if (autoRefresh.value) {
+    startAutoRefresh()
+  } else {
+    stopAutoRefresh()
+  }
+}
+
+const clearLogs = async () => {
+  try {
+    await axios.post('/api/logs/clear')
+    logs.value = []
+    ElMessage.success('日志已清空')
+  } catch (error) {
+    ElMessage.error('清空日志失败')
+  }
 }
 
 onMounted(() => {
-  if (realtime.value) {
-    connectWebSocket()
+  if (autoRefresh.value) {
+    startAutoRefresh()
+  } else {
+    fetchLogs()
   }
 })
 
 onUnmounted(() => {
-  if (ws.value) {
-    ws.value.close()
-  }
+  stopAutoRefresh()
 })
 </script>
 

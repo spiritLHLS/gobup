@@ -136,6 +136,9 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 	}
 
 	if uploadErr != nil {
+		// 标记上传失败
+		s.progressTracker.MarkFailed(int64(part.ID), uploadErr.Error())
+
 		// 推送失败通知
 		if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
 			s.wxPusher.NotifyUploadFailed(room.UploadUserID, room.Wxuid, room.Uname, part.FileName, uploadErr.Error())
@@ -150,6 +153,9 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 	db.Save(part)
 
 	log.Printf("上传完成: part_id=%d, cid=%d", part.ID, part.CID)
+
+	// 标记上传成功并移除进度
+	s.progressTracker.MarkSuccessAndRemove(int64(part.ID))
 
 	// 处理文件策略：3-上传后删除, 4-上传后移动, 6-上传后复制, 7-上传完成后立即删除
 	if room.DeleteType == 3 || room.DeleteType == 4 || room.DeleteType == 6 || room.DeleteType == 7 {

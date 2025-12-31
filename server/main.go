@@ -108,6 +108,7 @@ func main() {
 	// 初始化上传服务
 	uploadSvc := upload.NewService()
 	controllers.SetUploadService(uploadSvc)
+	controllers.SetHistoryUploadService(uploadSvc)
 
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)

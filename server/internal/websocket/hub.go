@@ -23,6 +23,8 @@ type Hub struct {
 	unregister chan *Client
 	broadcast  chan *LogMessage
 	mu         sync.RWMutex
+	logHistory []*LogMessage // 日志历史缓存
+	maxHistory int           // 最大历史记录数
 }
 
 // Client WebSocket客户端
@@ -46,6 +48,8 @@ func GetHub() *Hub {
 			register:   make(chan *Client),
 			unregister: make(chan *Client),
 			broadcast:  make(chan *LogMessage, 1000),
+			logHistory: make([]*LogMessage, 0, 1000),
+			maxHistory: 1000, // 保留最近1000条日志
 		}
 		go GlobalHub.run()
 	})
@@ -104,12 +108,49 @@ func (h *Hub) BroadcastLog(level, message string) {
 		Message:   message,
 	}
 
+	// 保存到历史记录
+	h.mu.Lock()
+	h.logHistory = append(h.logHistory, logMsg)
+	// 限制历史记录数量
+	if len(h.logHistory) > h.maxHistory {
+		h.logHistory = h.logHistory[len(h.logHistory)-h.maxHistory:]
+	}
+	h.mu.Unlock()
+
 	select {
 	case h.broadcast <- logMsg:
 	default:
 		// 消息队列满，丢弃最旧的消息
 		log.Printf("WebSocket消息队列已满，丢弃消息: %s", message)
 	}
+}
+
+// GetLogHistory 获取日志历史记录
+func (h *Hub) GetLogHistory(limit int) []*LogMessage {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if limit <= 0 || limit > len(h.logHistory) {
+		limit = len(h.logHistory)
+	}
+
+	// 返回最近的limit条日志
+	start := len(h.logHistory) - limit
+	if start < 0 {
+		start = 0
+	}
+
+	// 复制切片以避免并发问题
+	result := make([]*LogMessage, limit)
+	copy(result, h.logHistory[start:])
+	return result
+}
+
+// ClearLogHistory 清空日志历史
+func (h *Hub) ClearLogHistory() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.logHistory = make([]*LogMessage, 0, h.maxHistory)
 }
 
 // writePump 处理客户端写入

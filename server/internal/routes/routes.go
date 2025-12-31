@@ -104,6 +104,13 @@ func SetupRoutes(router *gin.Engine) {
 				config.POST("/export", controllers.ExportConfig)
 				config.POST("/import", controllers.ImportConfig)
 			}
+
+			// 日志API
+			logs := auth.Group("/logs")
+			{
+				logs.GET("", controllers.GetLogs)
+				logs.POST("/clear", controllers.ClearLogs)
+			}
 		}
 	}
 

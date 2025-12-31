@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,6 +11,13 @@ import (
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/upload"
 )
+
+var historyUploadService *upload.Service
+
+// SetHistoryUploadService 设置上传服务
+func SetHistoryUploadService(svc *upload.Service) {
+	historyUploadService = svc
+}
 
 func ListHistories(c *gin.Context) {
 	db := database.GetDB()
@@ -94,8 +102,12 @@ func RePublishHistory(c *gin.Context) {
 		return
 	}
 
-	uploadService := upload.NewService()
-	if err := uploadService.PublishHistory(uint(historyID), req.UserID); err != nil {
+	if historyUploadService == nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "上传服务未初始化"})
+		return
+	}
+
+	if err := historyUploadService.PublishHistory(uint(historyID), req.UserID); err != nil {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": err.Error()})
 		return
 	}
@@ -273,15 +285,24 @@ func UploadHistory(c *gin.Context) {
 		return
 	}
 
+	if historyUploadService == nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "上传服务未初始化"})
+		return
+	}
+
+	log.Printf("开始上传历史记录 %d 的 %d 个分P", historyID, len(parts))
+
 	// 异步上传所有分P
-	uploadService := upload.NewService()
 	go func() {
 		for i := range parts {
-			if err := uploadService.UploadPart(&parts[i], &history, &room); err != nil {
+			log.Printf("正在上传分P: part_id=%d, file=%s", parts[i].ID, parts[i].FileName)
+			if err := historyUploadService.UploadPart(&parts[i], &history, &room); err != nil {
 				// 错误会在UploadPart中记录
+				log.Printf("分P上传失败: part_id=%d, error=%v", parts[i].ID, err)
 				continue
 			}
 		}
+		log.Printf("历史记录 %d 的所有分P上传任务完成", historyID)
 	}()
 
 	c.JSON(http.StatusOK, gin.H{
