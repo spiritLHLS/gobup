@@ -66,13 +66,16 @@ type UserInfoResponse struct {
 	} `json:"data"`
 }
 
-// GenerateWebQRCode 生成Web端二维码（类似Python项目）
+// GenerateWebQRCode 生成Web端二维码（使用旧版API）
 func GenerateWebQRCode() (*QRCodeResponse, error) {
 	apiURL := "https://passport.bilibili.com/qrcode/getLoginUrl"
 
 	var qrResp QRCodeResponse
 	client := req.C().ImpersonateChrome()
-	_, err := client.R().SetSuccessResult(&qrResp).Get(apiURL)
+	_, err := client.R().
+		SetHeader("Referer", "https://www.bilibili.com/").
+		SetSuccessResult(&qrResp).
+		Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("请求二维码失败: %w", err)
 	}
@@ -81,8 +84,10 @@ func GenerateWebQRCode() (*QRCodeResponse, error) {
 		return nil, fmt.Errorf("生成二维码失败: %s", qrResp.Message)
 	}
 
-	// Web端使用oauthKey作为authCode
+	// Web端使用oauthKey作为authCode用于轮询
 	qrResp.Data.AuthCode = qrResp.Data.OauthKey
+
+	fmt.Printf("[WEB_QR] 生成成功 - url: %s, oauthKey: %s\n", qrResp.Data.URL, qrResp.Data.OauthKey)
 
 	return &qrResp, nil
 }
@@ -118,7 +123,10 @@ func PollWebQRCodeStatus(oauthKey string) (*QRCodePollResponse, error) {
 
 	var pollResp QRCodePollResponse
 	client := req.C().ImpersonateChrome()
-	resp, err := client.R().
+	_, err := client.R().
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
+		SetHeader("Host", "passport.bilibili.com").
+		SetHeader("Referer", "https://passport.bilibili.com/login").
 		SetFormData(map[string]string{
 			"oauthKey": oauthKey,
 			"gourl":    "https://www.bilibili.com/",
@@ -130,25 +138,24 @@ func PollWebQRCodeStatus(oauthKey string) (*QRCodePollResponse, error) {
 		return nil, fmt.Errorf("轮询状态失败: %w", err)
 	}
 
-	// Web端特殊处理
-	if pollResp.Data.Code == 0 || pollResp.Status {
-		// 登录成功，设置状态码为0
+	// Web端轮询返回的状态码处理（参考Python项目）
+	// status=True 表示登录成功
+	// data.code: -4=未失效, -5=已扫码未确认, -2=已失效
+	if pollResp.Status || pollResp.Data.Code == 0 {
+		// 登录成功
 		pollResp.Data.Code = 0
+		fmt.Printf("[WEB_POLL] 登录成功 - url=%s\n", pollResp.Data.URL)
 	} else if pollResp.Data.Code == -4 {
-		// 二维码未失效
+		// 二维码未失效，等待扫码
 		pollResp.Data.Code = 86101
 	} else if pollResp.Data.Code == -5 {
 		// 已扫码未确认
 		pollResp.Data.Code = 86090
+		fmt.Printf("[WEB_POLL] 已扫码，等待确认\n")
 	} else if pollResp.Data.Code == -2 {
 		// 二维码已失效
 		pollResp.Data.Code = 86038
-	}
-
-	// 记录响应用于调试
-	if resp != nil {
-		fmt.Printf("[WEB_POLL] 响应 - code=%d, status=%v, url=%s, hasURL=%v\n",
-			pollResp.Data.Code, pollResp.Status, pollResp.Data.URL, pollResp.Data.URL != "")
+		fmt.Printf("[WEB_POLL] 二维码已过期\n")
 	}
 
 	return &pollResp, nil
@@ -214,54 +221,65 @@ func ValidateCookie(cookies string) (bool, error) {
 	return true, nil
 }
 
-// ExtractCookiesFromWebPollResponse 从Web端轮询响应中提取Cookie
+// ExtractCookiesFromWebPollResponse 从Web端轮询响应中提取Cookie（参考Python项目）
 func ExtractCookiesFromWebPollResponse(pollResp *QRCodePollResponse, client *req.Client) string {
 	if pollResp == nil || (pollResp.Data.Code != 0 && !pollResp.Status) {
+		fmt.Printf("[WEB_COOKIE] 登录未完成，跳过Cookie提取\n")
 		return ""
 	}
 
 	if pollResp.Data.URL == "" {
+		fmt.Printf("[WEB_COOKIE] 错误：URL为空\n")
 		return ""
 	}
 
-	// Web端需要访问返回的URL来设置cookie
-	resp, err := client.R().Get(pollResp.Data.URL)
-	if err != nil {
-		fmt.Printf("访问Web端登录URL失败: %v\n", err)
-		return ""
-	}
+	// Web端登录成功后，URL中包含Cookie参数（参考Python实现）
+	// 格式: https://passport.biligame.com/crossDomain?...&DedeUserID=xxx&SESSDATA=xxx&bili_jct=xxx&...
+	fmt.Printf("[WEB_COOKIE] 解析登录URL: %s\n", pollResp.Data.URL[:min(100, len(pollResp.Data.URL))])
 
-	// 从响应的cookies中提取
-	cookies := resp.Cookies()
-	var cookieStrs []string
-	for _, cookie := range cookies {
-		if cookie.Name == "SESSDATA" || cookie.Name == "bili_jct" ||
-			cookie.Name == "DedeUserID" || cookie.Name == "DedeUserID__ckMd5" {
-			cookieStrs = append(cookieStrs, fmt.Sprintf("%s=%s", cookie.Name, cookie.Value))
-			fmt.Printf("[WEB_COOKIE] 提取Cookie - %s=%s\n", cookie.Name, cookie.Value[:min(20, len(cookie.Value))])
-		}
-	}
-
-	if len(cookieStrs) > 0 {
-		result := strings.Join(cookieStrs, "; ")
-		fmt.Printf("[WEB_COOKIE] 提取成功 - length: %d\n", len(result))
-		return result
-	}
-
-	// 备选方案：从URL参数中提取
 	parsedURL, err := url.Parse(pollResp.Data.URL)
-	if err == nil {
-		query := parsedURL.Query()
-		cookieStrs = []string{
-			fmt.Sprintf("DedeUserID=%s", query.Get("DedeUserID")),
-			fmt.Sprintf("SESSDATA=%s", query.Get("SESSDATA")),
-			fmt.Sprintf("bili_jct=%s", query.Get("bili_jct")),
-			fmt.Sprintf("DedeUserID__ckMd5=%s", query.Get("DedeUserID__ckMd5")),
-		}
-		return strings.Join(cookieStrs, "; ")
+	if err != nil {
+		fmt.Printf("[WEB_COOKIE] URL解析失败: %v\n", err)
+		return ""
 	}
 
-	return ""
+	// 从URL查询参数中提取Cookie（参考Python项目的实现）
+	// txt = str(qrcodedata['data']['url'][42:-39])
+	// DedeUserID = txt.split('&')[0]
+	// SESSDATA = txt.split('&')[3]
+	// bili_jct = txt.split('&')[4]
+	query := parsedURL.Query()
+	dedeUserID := query.Get("DedeUserID")
+	sessdata := query.Get("SESSDATA")
+	biliJct := query.Get("bili_jct")
+	dedeUserIDCkMd5 := query.Get("DedeUserID__ckMd5")
+	sid := query.Get("sid")
+
+	if dedeUserID == "" || sessdata == "" || biliJct == "" {
+		fmt.Printf("[WEB_COOKIE] 关键字段缺失 - DedeUserID: %v, SESSDATA: %v, bili_jct: %v\n",
+			dedeUserID != "", sessdata != "", biliJct != "")
+		return ""
+	}
+
+	// 构建Cookie字符串
+	cookieStrs := []string{
+		fmt.Sprintf("DedeUserID=%s", dedeUserID),
+		fmt.Sprintf("SESSDATA=%s", sessdata),
+		fmt.Sprintf("bili_jct=%s", biliJct),
+	}
+
+	if dedeUserIDCkMd5 != "" {
+		cookieStrs = append(cookieStrs, fmt.Sprintf("DedeUserID__ckMd5=%s", dedeUserIDCkMd5))
+	}
+	if sid != "" {
+		cookieStrs = append(cookieStrs, fmt.Sprintf("sid=%s", sid))
+	}
+
+	result := strings.Join(cookieStrs, "; ")
+	fmt.Printf("[WEB_COOKIE] 提取成功 - DedeUserID: %s, SESSDATA长度: %d\n",
+		dedeUserID, len(sessdata))
+
+	return result
 }
 
 // ExtractCookiesFromTVPollResponse 从TV端轮询响应中提取Cookie
