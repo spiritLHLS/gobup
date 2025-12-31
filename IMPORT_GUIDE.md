@@ -46,7 +46,7 @@ ls -la /root/data/gobup.db
 ```bash
 # 下载脚本
 cd /root
-wget https://raw.githubusercontent.com/spiritlhls/gobup/main/import_brec_history_db.py
+wget https://cdn.spiritlhl.net/https://raw.githubusercontent.com/spiritlhls/gobup/main/import_brec_history_db.py
 
 # 添加执行权限
 chmod +x import_brec_history_db.py

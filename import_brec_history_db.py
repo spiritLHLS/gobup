@@ -39,10 +39,40 @@ class BrecImporterDB:
             self.conn = sqlite3.connect(self.db_path)
             self.conn.row_factory = sqlite3.Row
             print(f"✅ 数据库连接成功: {self.db_path}")
+            
+            # 检测表结构
+            self.detect_schema()
             return True
         except Exception as e:
             print(f"❌ 数据库连接失败: {e}")
             return False
+    
+    def detect_schema(self):
+        """检测数据库表结构，判断是否有新字段"""
+        try:
+            cursor = self.conn.cursor()
+            
+            # 检查 record_histories 表的字段
+            cursor.execute("PRAGMA table_info(record_histories)")
+            history_columns = {row[1] for row in cursor.fetchall()}
+            self.has_danmaku_fields = 'danmaku_sent' in history_columns
+            
+            # 检查 record_history_parts 表的字段
+            cursor.execute("PRAGMA table_info(record_history_parts)")
+            part_columns = {row[1] for row in cursor.fetchall()}
+            self.has_cid_field = 'cid' in part_columns
+            self.has_duration_field = 'duration' in part_columns
+            
+            if os.getenv('DEBUG'):
+                print(f"   📋 数据库字段检测:")
+                print(f"      - danmaku字段: {'✅' if self.has_danmaku_fields else '❌'}")
+                print(f"      - cid字段: {'✅' if self.has_cid_field else '❌'}")
+                print(f"      - duration字段: {'✅' if self.has_duration_field else '❌'}")
+        except Exception as e:
+            print(f"⚠️  检测表结构失败，使用兼容模式: {e}")
+            self.has_danmaku_fields = False
+            self.has_cid_field = False
+            self.has_duration_field = False
     
     def close_db(self):
         """关闭数据库连接"""
@@ -108,37 +138,65 @@ class BrecImporterDB:
             start_time = metadata.get('start_time', now)
             end_time = metadata.get('end_time', now)
             
-            cursor.execute("""
-                INSERT INTO record_histories (
-                    created_at, updated_at,
-                    room_id, session_id, uname, title, area_name,
-                    start_time, end_time,
-                    recording, streaming, upload, publish,
-                    code, file_size,
-                    danmaku_sent, danmaku_count, files_moved,
-                    video_state, video_state_desc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                now, now,
-                metadata['room_id'],
-                metadata['session_id'],
-                metadata.get('name', f"房间{metadata['room_id']}"),
-                metadata.get('title', ''),
-                metadata.get('area_name_parent', ''),
-                start_time,
-                end_time,
-                0,  # recording
-                0,  # streaming
-                1,  # upload
-                0,  # publish
-                -1, # code
-                0,  # file_size
-                0,  # danmaku_sent
-                0,  # danmaku_count
-                0,  # files_moved
-                -1, # video_state (-1表示未知)
-                ''  # video_state_desc
-            ))
+            # 根据表结构动态构建SQL
+            if self.has_danmaku_fields:
+                cursor.execute("""
+                    INSERT INTO record_histories (
+                        created_at, updated_at,
+                        room_id, session_id, uname, title, area_name,
+                        start_time, end_time,
+                        recording, streaming, upload, publish,
+                        code, file_size,
+                        danmaku_sent, danmaku_count, files_moved,
+                        video_state, video_state_desc
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    now, now,
+                    metadata['room_id'],
+                    metadata['session_id'],
+                    metadata.get('name', f"房间{metadata['room_id']}"),
+                    metadata.get('title', ''),
+                    metadata.get('area_name_parent', ''),
+                    start_time,
+                    end_time,
+                    0,  # recording
+                    0,  # streaming
+                    1,  # upload
+                    0,  # publish
+                    -1, # code
+                    0,  # file_size
+                    0,  # danmaku_sent
+                    0,  # danmaku_count
+                    0,  # files_moved
+                    -1, # video_state
+                    ''  # video_state_desc
+                ))
+            else:
+                # 旧版本数据库，不包含弹幕相关字段
+                cursor.execute("""
+                    INSERT INTO record_histories (
+                        created_at, updated_at,
+                        room_id, session_id, uname, title, area_name,
+                        start_time, end_time,
+                        recording, streaming, upload, publish,
+                        code, file_size
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    now, now,
+                    metadata['room_id'],
+                    metadata['session_id'],
+                    metadata.get('name', f"房间{metadata['room_id']}"),
+                    metadata.get('title', ''),
+                    metadata.get('area_name_parent', ''),
+                    start_time,
+                    end_time,
+                    0,  # recording
+                    0,  # streaming
+                    1,  # upload
+                    0,  # publish
+                    -1, # code
+                    0   # file_size
+                ))
             
             history_id = cursor.lastrowid
             self.conn.commit()
@@ -167,39 +225,75 @@ class BrecImporterDB:
             start_time = metadata.get('start_time', now)
             end_time = metadata.get('end_time', now)
             
-            cursor.execute("""
-                INSERT INTO record_history_parts (
-                    created_at,
-                    history_id, room_id, session_id,
-                    title, live_title, area_name,
-                    file_path, file_name, file_size, duration,
-                    start_time, end_time,
-                    recording, upload, uploading,
-                    file_delete, file_moved, page, xcode_state, cid
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                now,
-                history_id,
-                metadata['room_id'],
-                metadata['session_id'],
-                metadata.get('title', ''),
-                metadata.get('title', ''),
-                metadata.get('area_name_parent', ''),
-                container_path,
-                video_file.name,
-                self.get_file_size(video_file),
-                0,  # duration (秒)
-                start_time,
-                end_time,
-                0,  # recording
-                0,  # upload
-                0,  # uploading
-                0,  # file_delete
-                0,  # file_moved
-                0,  # page
-                0,  # xcode_state
-                0   # cid
-            ))
+            # 根据表结构动态构建SQL
+            if self.has_cid_field and self.has_duration_field:
+                # 新版本数据库，包含 duration 和 cid 字段
+                cursor.execute("""
+                    INSERT INTO record_history_parts (
+                        created_at,
+                        history_id, room_id, session_id,
+                        title, live_title, area_name,
+                        file_path, file_name, file_size, duration,
+                        start_time, end_time,
+                        recording, upload, uploading,
+                        file_delete, file_moved, page, xcode_state, cid
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    now,
+                    history_id,
+                    metadata['room_id'],
+                    metadata['session_id'],
+                    metadata.get('title', ''),
+                    metadata.get('title', ''),
+                    metadata.get('area_name_parent', ''),
+                    container_path,
+                    video_file.name,
+                    self.get_file_size(video_file),
+                    0,  # duration
+                    start_time,
+                    end_time,
+                    0,  # recording
+                    0,  # upload
+                    0,  # uploading
+                    0,  # file_delete
+                    0,  # file_moved
+                    0,  # page
+                    0,  # xcode_state
+                    0   # cid
+                ))
+            else:
+                # 旧版本数据库，不包含 duration 和 cid 字段
+                cursor.execute("""
+                    INSERT INTO record_history_parts (
+                        created_at,
+                        history_id, room_id, session_id,
+                        title, live_title, area_name,
+                        file_path, file_name, file_size,
+                        start_time, end_time,
+                        recording, upload, uploading,
+                        file_delete, file_moved, page, xcode_state
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    now,
+                    history_id,
+                    metadata['room_id'],
+                    metadata['session_id'],
+                    metadata.get('title', ''),
+                    metadata.get('title', ''),
+                    metadata.get('area_name_parent', ''),
+                    container_path,
+                    video_file.name,
+                    self.get_file_size(video_file),
+                    start_time,
+                    end_time,
+                    0,  # recording
+                    0,  # upload
+                    0,  # uploading
+                    0,  # file_delete
+                    0,  # file_moved
+                    0,  # page
+                    0   # xcode_state
+                ))
             
             self.conn.commit()
             
