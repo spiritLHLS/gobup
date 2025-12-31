@@ -121,7 +121,7 @@
                 </div>
                 <div class="qrcode-info">
                   <p class="scan-tip">
-                    <el-icon><IphoneFilled /></el-icon>
+                    <el-icon><Iphone /></el-icon>
                     请使用哔哩哔哩APP扫描二维码登录
                   </p>
                   <el-divider />
@@ -253,7 +253,7 @@ import {
   Star, 
   InfoFilled, 
   Picture, 
-  IphoneFilled, 
+  Iphone, 
   CircleCheck, 
   CircleClose, 
   Clock 
