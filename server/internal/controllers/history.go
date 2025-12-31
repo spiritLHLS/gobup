@@ -40,6 +40,21 @@ func ListHistories(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	query.Order("end_time DESC").Limit(pageSize).Offset(offset).Find(&histories)
 
+	// 统计每个历史记录的分P信息
+	for i := range histories {
+		var partCount int64
+		var uploadPartCount int64
+		var recordPartCount int64
+
+		db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", histories[i].ID).Count(&partCount)
+		db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND upload = ?", histories[i].ID, true).Count(&uploadPartCount)
+		db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND recording = ?", histories[i].ID, true).Count(&recordPartCount)
+
+		histories[i].PartCount = int(partCount)
+		histories[i].UploadPartCount = int(uploadPartCount)
+		histories[i].RecordPartCount = int(recordPartCount)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"list":  histories,
 		"total": total,

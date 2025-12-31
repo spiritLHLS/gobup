@@ -46,6 +46,14 @@ func ExportConfig(c *gin.Context) {
 	if params.ExportHistory {
 		var histories []models.RecordHistory
 		db.Limit(1000).Order("start_time DESC").Find(&histories)
+
+		// 统计每个历史记录的分P信息
+		for i := range histories {
+			var partCount int64
+			db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", histories[i].ID).Count(&partCount)
+			histories[i].PartCount = int(partCount)
+		}
+
 		configData["historyList"] = histories
 
 		// 导出对应的分P数据

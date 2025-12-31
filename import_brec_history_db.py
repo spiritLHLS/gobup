@@ -263,16 +263,15 @@ class BrecImporterDB:
         title = title_match.group(1) if title_match else filename
         
         # 生成 session_id（同一场直播的多个文件使用相同的 session_id）
-        # 从文件名提取时间戳部分：录制-5050-20251227-231202-161
-        timestamp_match = re.search(r'(\d{8}-\d{6})', filename)
-        if timestamp_match:
-            # 使用日期+时间(精确到分钟)作为session标识，同一时间段的视频会归为一场直播
-            timestamp = timestamp_match.group(1)
-            date_part = timestamp[:8]  # YYYYMMDD
-            time_part = timestamp[9:13]  # HHMM (只取到分钟)
-            session_key = f"{room_id}_{date_part}_{time_part}"
+        # 策略：使用 房间号 + 日期 作为session标识
+        # 这样同一天同一房间的所有录制都会归为同一场直播
+        # 从文件名提取日期部分：录制-5050-20251227-231202-161 → 20251227
+        date_match = re.search(r'(\d{8})', filename)
+        if date_match:
+            date_part = date_match.group(1)  # YYYYMMDD
+            session_key = f"{room_id}_{date_part}"
         else:
-            # 降级方案：使用日期作为session
+            # 降级方案：使用文件修改时间的日期
             session_key = f"{room_id}_{start_time[:10]}"
         session_id = hashlib.md5(session_key.encode()).hexdigest()[:16]
         
