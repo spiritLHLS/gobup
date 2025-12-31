@@ -185,6 +185,50 @@
       </el-table>
     </el-dialog>
 
+    <!-- 重置状态选项对话框 -->
+    <el-dialog v-model="resetDialogVisible" title="重置状态选项" width="500px">
+      <div style="margin-bottom: 20px; color: #666;">
+        <el-icon><InfoFilled /></el-icon>
+        请选择要重置的状态项：
+      </div>
+      <el-form label-width="120px">
+        <el-form-item label="上传状态">
+          <el-checkbox v-model="resetOptions.upload">
+            将所有分P标记为未上传，清除CID等上传信息
+          </el-checkbox>
+        </el-form-item>
+        <el-form-item label="投稿状态">
+          <el-checkbox v-model="resetOptions.publish">
+            标记为未投稿，清除BV号、AV号等投稿信息
+          </el-checkbox>
+        </el-form-item>
+        <el-form-item label="弹幕状态">
+          <el-checkbox v-model="resetOptions.danmaku">
+            标记为未发送弹幕
+          </el-checkbox>
+        </el-form-item>
+        <el-form-item label="文件状态">
+          <el-checkbox v-model="resetOptions.files">
+            标记为未移动文件
+          </el-checkbox>
+        </el-form-item>
+      </el-form>
+      <div style="margin-top: 20px; padding: 12px; background: #fff3cd; border-radius: 4px; color: #856404;">
+        <el-icon><Warning /></el-icon>
+        <span style="margin-left: 8px;">提示：重置后需要重新执行相应的操作</span>
+      </div>
+      <template #footer>
+        <el-button @click="resetDialogVisible = false">取消</el-button>
+        <el-button 
+          type="primary" 
+          @click="confirmReset"
+          :disabled="!resetOptions.upload && !resetOptions.publish && !resetOptions.danmaku && !resetOptions.files"
+        >
+          确定重置
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 清理旧记录对话框 -->
     <el-dialog v-model="showCleanDialog" title="清理旧记录" width="400px">
       <el-form>
@@ -346,7 +390,9 @@ import {
   RefreshLeft, 
   Delete, 
   DeleteFilled,
-  Promotion 
+  Promotion,
+  InfoFilled,
+  Warning
 } from '@element-plus/icons-vue'
 import { historyAPI } from '@/api'
 import axios from 'axios'
@@ -385,6 +431,13 @@ const actionsDialogVisible = ref(false)
 const currentHistory = ref(null)
 const historyProgressMap = ref({})
 const historyProgressTimer = ref(null)
+const resetDialogVisible = ref(false)
+const resetOptions = ref({
+  upload: true,
+  publish: true,
+  danmaku: true,
+  files: true
+})
 
 const fetchHistories = async () => {
   loading.value = true
@@ -462,28 +515,33 @@ const handleMoveFilesInDialog = async () => {
 }
 
 // 重置状态
-const handleResetStatus = async () => {
+const handleResetStatus = () => {
+  // 重置选项为默认值
+  resetOptions.value = {
+    upload: true,
+    publish: true,
+    danmaku: true,
+    files: true
+  }
+  resetDialogVisible.value = true
+}
+
+// 确认重置
+const confirmReset = async () => {
   try {
-    await ElMessageBox.confirm(
-      '此操作将重置该记录及其所有分P为未上传、未发布的初始状态，并清除BVID关联。确定要重置吗？',
-      '重置状态',
-      { type: 'warning' }
-    )
-    
     const loadingInstance = ElLoading.service({ text: '重置中...' })
     try {
-      await axios.post(`/api/history/resetStatus/${currentHistory.value.id}`)
+      await axios.post(`/api/history/resetStatus/${currentHistory.value.id}`, resetOptions.value)
       ElMessage.success('状态已重置')
+      resetDialogVisible.value = false
       actionsDialogVisible.value = false
       fetchHistories()
     } finally {
       loadingInstance.close()
     }
   } catch (error) {
-    if (error !== 'cancel') {
-      console.error('重置失败:', error)
-      ElMessage.error(error.response?.data?.msg || '重置失败')
-    }
+    console.error('重置失败:', error)
+    ElMessage.error(error.response?.data?.msg || '重置失败')
   }
 }
 

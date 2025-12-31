@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gobup/server/internal/database"
@@ -102,6 +103,24 @@ func RetryFailedSyncTasks(c *gin.Context) {
 func ResetHistoryStatus(c *gin.Context) {
 	historyID, _ := strconv.ParseUint(c.Param("id"), 10, 32)
 
+	type ResetOptions struct {
+		Upload  bool `json:"upload"`
+		Publish bool `json:"publish"`
+		Danmaku bool `json:"danmaku"`
+		Files   bool `json:"files"`
+	}
+
+	var options ResetOptions
+	if err := c.ShouldBindJSON(&options); err != nil {
+		// 如果没有传递选项，默认重置所有
+		options = ResetOptions{
+			Upload:  true,
+			Publish: true,
+			Danmaku: true,
+			Files:   true,
+		}
+	}
+
 	db := database.GetDB()
 
 	var history models.RecordHistory
@@ -110,30 +129,61 @@ func ResetHistoryStatus(c *gin.Context) {
 		return
 	}
 
-	// 重置历史记录状态
-	history.Publish = false
-	history.BvID = ""
-	history.AvID = ""
-	history.Code = -1
-	history.Message = ""
-	history.DanmakuSent = false
-	history.FilesMoved = false
-	history.VideoState = -1
-	history.VideoStateDesc = ""
+	resetItems := []string{}
+
+	// 根据选项重置相应状态
+	if options.Publish {
+		history.Publish = false
+		history.BvID = ""
+		history.AvID = ""
+		history.Code = -1
+		history.Message = ""
+		history.VideoState = -1
+		history.VideoStateDesc = ""
+		resetItems = append(resetItems, "投稿状态")
+	}
+
+	if options.Danmaku {
+		history.DanmakuSent = false
+		resetItems = append(resetItems, "弹幕状态")
+	}
+
+	if options.Files {
+		history.FilesMoved = false
+		resetItems = append(resetItems, "文件状态")
+	}
+
 	db.Save(&history)
 
-	// 重置所有分P的上传状态
-	db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", historyID).Updates(map[string]interface{}{
-		"upload":      false,
-		"uploading":   false,
-		"cid":         0,
-		"file_delete": false,
-		"file_moved":  false,
-		"page":        0,
-		"xcode_state": 0,
-	})
+	// 重置分P的上传状态
+	if options.Upload {
+		partUpdates := map[string]interface{}{
+			"upload":      false,
+			"uploading":   false,
+			"cid":         0,
+			"page":        0,
+			"xcode_state": 0,
+		}
+		if options.Files {
+			partUpdates["file_delete"] = false
+			partUpdates["file_moved"] = false
+		}
+		db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", historyID).Updates(partUpdates)
+		resetItems = append(resetItems, "上传状态")
+	} else if options.Files {
+		// 如果只重置文件状态而不重置上传状态
+		db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", historyID).Updates(map[string]interface{}{
+			"file_delete": false,
+			"file_moved":  false,
+		})
+	}
 
-	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "状态已重置"})
+	msg := "状态已重置"
+	if len(resetItems) > 0 {
+		msg = "已重置: " + strings.Join(resetItems, "、")
+	}
+
+	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": msg})
 }
 
 // DeleteHistoryWithFiles 删除记录和文件
