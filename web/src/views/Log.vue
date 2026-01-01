@@ -25,7 +25,7 @@
               collapse-tags
               placeholder="日志级别"
               size="small"
-              style="width: 150px; margin-right: 10px"
+              style="width: 150px"
             >
               <el-option label="INFO" value="INFO">
                 <el-tag type="success" size="small">+ 2</el-tag>
@@ -34,16 +34,6 @@
               <el-option label="ERROR" value="ERROR" />
               <el-option label="DEBUG" value="DEBUG" />
             </el-select>
-            <el-button
-              :type="autoRefresh ? 'success' : 'info'"
-              size="small"
-              @click="toggleAutoRefresh"
-            >
-              {{ autoRefresh ? '实时推送' : '已暂停' }}
-            </el-button>
-            <el-button size="small" @click="clearLogs">
-              清空
-            </el-button>
           </div>
         </div>
       </template>
@@ -62,7 +52,7 @@
           <span class="log-message">{{ log.message }}</span>
         </div>
         <div v-if="filteredLogs.length === 0" class="log-empty">
-          {{ autoRefresh ? '等待日志...' : '暂无日志' }}
+          暂无日志
         </div>
       </div>
     </el-card>
@@ -77,7 +67,6 @@ import { ElMessage } from 'element-plus'
 const logs = ref([])
 const searchKeyword = ref('')
 const levelFilter = ref(['INFO', 'WARN', 'ERROR'])
-const autoRefresh = ref(true)
 const consoleRef = ref(null)
 let refreshTimer = null
 
@@ -131,42 +120,15 @@ const startAutoRefresh = () => {
   }, 10000)
 }
 
-const stopAutoRefresh = () => {
+onMounted(() => {
+  startAutoRefresh()
+})
+
+onUnmounted(() => {
   if (refreshTimer) {
     clearInterval(refreshTimer)
     refreshTimer = null
   }
-}
-
-const toggleAutoRefresh = () => {
-  autoRefresh.value = !autoRefresh.value
-  if (autoRefresh.value) {
-    startAutoRefresh()
-  } else {
-    stopAutoRefresh()
-  }
-}
-
-const clearLogs = async () => {
-  try {
-    await axios.post('/api/logs/clear')
-    logs.value = []
-    ElMessage.success('日志已清空')
-  } catch (error) {
-    ElMessage.error('清空日志失败')
-  }
-}
-
-onMounted(() => {
-  if (autoRefresh.value) {
-    startAutoRefresh()
-  } else {
-    fetchLogs()
-  }
-})
-
-onUnmounted(() => {
-  stopAutoRefresh()
 })
 </script>
 

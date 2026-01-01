@@ -105,15 +105,17 @@ const activeMenu = computed(() => route.path)
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  padding: 0 var(--spacing-md);
+  padding: var(--spacing-md);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: var(--spacing-sm);
   
   h1 {
     color: #ffffff;
     font-weight: var(--font-weight-bold);
-    font-size: var(--font-size-xl);
+    font-size: var(--font-size-2xl);
     margin: 0;
     transition: opacity 0.3s;
+    line-height: 1.2;
     
     &.logo-collapsed {
       font-size: var(--font-size-3xl);
@@ -122,8 +124,9 @@ const activeMenu = computed(() => route.path)
   
   span {
     font-size: var(--font-size-xs);
-    color: #dcfce7;
+    color: rgba(255, 255, 255, 0.7);
     margin-top: 4px;
+    white-space: nowrap;
   }
 }
 
@@ -135,13 +138,16 @@ const activeMenu = computed(() => route.path)
 .sidebar-menu {
   border: none;
   background: transparent;
+  padding: var(--spacing-sm) 0;
   
   :deep(.el-menu-item) {
-    height: 50px;
-    line-height: 50px;
+    height: 48px;
+    line-height: 48px;
     color: rgba(255, 255, 255, 0.85);
     border-left: 3px solid transparent;
     transition: var(--transition-normal);
+    margin: var(--spacing-xs) 0;
+    padding: 0 var(--spacing-lg);
     
     &:hover {
       background-color: rgba(255, 255, 255, 0.1);
@@ -151,13 +157,14 @@ const activeMenu = computed(() => route.path)
     &.is-active {
       background-color: rgba(255, 255, 255, 0.15);
       color: #ffffff;
-      border-left-color: #dcfce7;
+      border-left-color: #ffffff;
       font-weight: var(--font-weight-semibold);
     }
     
     .el-icon {
       color: inherit;
       font-size: 18px;
+      margin-right: 12px;
     }
   }
   
@@ -165,6 +172,10 @@ const activeMenu = computed(() => route.path)
     :deep(.el-menu-item) {
       padding: 0 20px;
       text-align: center;
+      
+      .el-icon {
+        margin-right: 0;
+      }
     }
   }
 }

@@ -413,7 +413,7 @@ onMounted(() => {
 }
 
 .stat-card {
-  height: 140px;
+  height: 120px;
   border-radius: var(--border-radius-xl);
   transition: var(--transition-normal);
   cursor: pointer;
@@ -440,25 +440,25 @@ onMounted(() => {
     height: 100%;
     display: flex;
     align-items: center;
-    padding: 24px;
+    padding: 20px;
   }
 }
 
 .stat-content {
   display: flex;
   align-items: center;
-  gap: var(--spacing-lg);
+  gap: var(--spacing-md);
   width: 100%;
 }
 
 .stat-icon {
-  width: 70px;
-  height: 70px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 32px;
+  font-size: 28px;
   flex-shrink: 0;
   
   &.primary-icon {
@@ -484,14 +484,15 @@ onMounted(() => {
 
 .stat-info {
   flex: 1;
+  min-width: 0;
 }
 
 .stat-number {
-  font-size: var(--font-size-4xl);
+  font-size: var(--font-size-3xl);
   font-weight: var(--font-weight-bold);
   color: var(--text-color-primary);
   line-height: 1.2;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .stat-label {
@@ -576,18 +577,18 @@ onMounted(() => {
 /* 响应式 */
 @media (max-width: 1024px) {
   .stat-card {
-    height: 120px;
+    height: 110px;
     margin-bottom: var(--spacing-md);
   }
   
   .stat-icon {
-    width: 60px;
-    height: 60px;
-    font-size: 28px;
+    width: 55px;
+    height: 55px;
+    font-size: 26px;
   }
   
   .stat-number {
-    font-size: var(--font-size-3xl);
+    font-size: var(--font-size-2xl);
   }
 }
 
@@ -596,9 +597,12 @@ onMounted(() => {
     font-size: var(--font-size-2xl);
   }
   
+  .stats-row {
+    margin-bottom: var(--spacing-lg);
+  }
+  
   .stat-card {
-    height: auto;
-    min-height: 100px;
+    height: 100px;
     
     :deep(.el-card__body) {
       padding: 16px;
@@ -606,7 +610,7 @@ onMounted(() => {
   }
   
   .stat-content {
-    gap: var(--spacing-md);
+    gap: var(--spacing-sm);
   }
   
   .stat-icon {
@@ -633,10 +637,35 @@ onMounted(() => {
   .number-input-wrapper {
     flex-direction: column;
     align-items: flex-start;
+    gap: var(--spacing-sm);
+  }
+  
+  .help-text {
+    min-width: auto;
   }
 }
 
 @media (max-width: 480px) {
+  .page-header {
+    margin-bottom: var(--spacing-md);
+    
+    h2 {
+      font-size: var(--font-size-xl);
+    }
+    
+    p {
+      font-size: var(--font-size-sm);
+    }
+  }
+  
+  .stat-card {
+    height: 90px;
+    
+    :deep(.el-card__body) {
+      padding: 12px;
+    }
+  }
+  
   .stat-icon {
     width: 45px;
     height: 45px;
@@ -647,10 +676,22 @@ onMounted(() => {
     font-size: var(--font-size-xl);
   }
   
+  .stat-label {
+    font-size: 12px;
+  }
+  
   .card-header {
     flex-direction: column;
     gap: var(--spacing-sm);
     align-items: flex-start;
+    
+    :deep(.el-button) {
+      width: 100%;
+    }
+  }
+  
+  :deep(.el-input-number) {
+    width: 100%;
   }
 }
 </style>
