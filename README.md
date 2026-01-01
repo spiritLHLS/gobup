@@ -265,52 +265,6 @@ environment:
 ./gobup-server -username admin -password your_password -port 12380 -work-path /path/to/bilirecord
 ```
 
-### 常见问题
-
-**Q: 为什么一直提示要认证？**
-
-A: 可能的原因：
-1. **未设置用户名密码** - 首次部署时没有设置 USERNAME 和 PASSWORD 环境变量
-2. **浏览器未保存凭证** - 清除了浏览器缓存或使用了隐私模式
-3. **凭证错误** - 输入的用户名密码与启动时设置的不一致
-
-**Q: 如何首次登录？**
-
-A: 
-- 如果部署时设置了 USERNAME 和 PASSWORD，使用这些凭证登录
-- 如果未设置，访问时会自动跳转到登录页面，输入任意用户名密码即可（建议使用强密码）
-
-**Q: 忘记密码怎么办？**
-
-A: 
-1. 停止服务：`systemctl stop gobup` 或 `docker stop gobup`
-2. 删除数据库：`rm /app/data/gobup.db` 或 `rm ./data/gobup.db`
-3. 重新启动并设置新密码：
-   ```bash
-   # systemd
-   sudo systemctl edit gobup
-   # 添加：
-   [Service]
-   Environment="USERNAME=newadmin"
-   Environment="PASSWORD=newpassword"
-   sudo systemctl restart gobup
-   
-   # Docker
-   docker rm gobup
-   docker run -d -e USERNAME=newadmin -e PASSWORD=newpassword ...
-   ```
-
-**Q: 可以修改密码吗？**
-
-A: 当前版本暂不支持在线修改密码，需要删除数据库重新初始化（会丢失所有数据）。建议部署时就设置好强密码并妥善保管。
-
-**Q: 为什么浏览器一直弹出认证窗口？**
-
-A: 
-- 浏览器的 HTTP Basic Auth 弹窗是原生行为
-- 使用新的登录页面（已在本次更新中添加）可以避免浏览器弹窗
-- 确保前端代码已更新到最新版本
-
 ## 配置说明
 
 ### 配置Docker网络（Docker部署）

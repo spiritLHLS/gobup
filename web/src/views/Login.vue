@@ -1,52 +1,94 @@
 <template>
   <div class="login-container">
-    <el-card class="login-card">
-      <template #header>
-        <div class="card-header">
-          <h2>GoBup 登录</h2>
+    <!-- 页面头部 -->
+    <div class="login-header">
+      <div class="header-content">
+        <div class="logo">
+          <h1>GoBup</h1>
         </div>
-      </template>
-      
-      <el-form :model="form" :rules="rules" ref="formRef" label-width="80px">
-        <el-form-item label="用户名" prop="username">
-          <el-input 
-            v-model="form.username" 
-            placeholder="请输入用户名"
-            @keyup.enter="handleLogin"
-          />
-        </el-form-item>
-        
-        <el-form-item label="密码" prop="password">
-          <el-input 
-            v-model="form.password" 
-            type="password" 
-            placeholder="请输入密码"
-            show-password
-            @keyup.enter="handleLogin"
-          />
-        </el-form-item>
-        
-        <el-form-item>
-          <el-button type="primary" @click="handleLogin" style="width: 100%">
-            登录
-          </el-button>
-        </el-form-item>
-      </el-form>
-      
-      <el-alert 
-        v-if="errorMsg" 
-        :title="errorMsg" 
-        type="error" 
-        :closable="false"
-        style="margin-top: 10px"
-      />
-      
-      <div class="login-tips">
-        <p>提示：请使用启动服务时设置的用户名和密码</p>
-        <p>启动参数：-username 和 -password</p>
-        <p>或环境变量：USERNAME 和 PASSWORD</p>
       </div>
-    </el-card>
+    </div>
+
+    <!-- 登录主体 -->
+    <div class="login-main">
+      <div class="login-form-wrapper">
+        <el-card class="login-card">
+          <div class="form-header">
+            <h2>欢迎回来</h2>
+            <p>登录 GoBup 直播录制管理系统</p>
+          </div>
+          
+          <el-form 
+            ref="formRef" 
+            :model="form" 
+            :rules="rules" 
+            size="large"
+            @keyup.enter="handleLogin"
+          >
+            <el-form-item prop="username">
+              <el-input 
+                v-model="form.username" 
+                placeholder="请输入用户名"
+                :prefix-icon="User"
+                clearable
+              />
+            </el-form-item>
+            
+            <el-form-item prop="password">
+              <el-input 
+                v-model="form.password" 
+                type="password" 
+                placeholder="请输入密码"
+                :prefix-icon="Lock"
+                show-password
+                clearable
+              />
+            </el-form-item>
+            
+            <el-form-item>
+              <el-button 
+                type="primary" 
+                :loading="loading"
+                @click="handleLogin" 
+                class="login-button"
+              >
+                {{ loading ? '登录中...' : '登录' }}
+              </el-button>
+            </el-form-item>
+          </el-form>
+          
+          <el-alert 
+            v-if="errorMsg" 
+            :title="errorMsg" 
+            type="error" 
+            :closable="true"
+            @close="errorMsg = ''"
+            class="error-alert"
+          />
+          
+          <div class="login-tips">
+            <el-alert
+              type="info"
+              :closable="false"
+            >
+              <template #title>
+                <div class="tips-content">
+                  <p><strong>提示：</strong></p>
+                  <p>• 使用启动服务时设置的用户名和密码</p>
+                  <p>• 启动参数：-username 和 -password</p>
+                  <p>• 或环境变量：USERNAME 和 PASSWORD</p>
+                </div>
+              </template>
+            </el-alert>
+          </div>
+        </el-card>
+      </div>
+    </div>
+
+    <!-- 页面底部 -->
+    <div class="login-footer">
+      <p>© 2024 GoBup. All rights reserved.</p>
+    </div>
   </div>
 </template>
 
