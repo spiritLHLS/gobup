@@ -8,6 +8,7 @@ import (
 	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
+	danmakuprogress "github.com/gobup/server/internal/progress"
 )
 
 type DanmakuService struct{}
@@ -28,6 +29,11 @@ func (s *DanmakuService) SendDanmakuForHistory(historyID uint, userID uint) erro
 
 	if history.BvID == "" {
 		return fmt.Errorf("视频尚未投稿")
+	}
+
+	// 检查BV号格式
+	if !strings.HasPrefix(history.BvID, "BV") {
+		return fmt.Errorf("无效的BV号格式")
 	}
 
 	if history.DanmakuSent {
@@ -99,6 +105,9 @@ func (s *DanmakuService) SendDanmakuForHistory(historyID uint, userID uint) erro
 		db.Save(&history)
 		return nil
 	}
+
+	// 初始化进度
+	danmakuprogress.SetDanmakuProgress(int64(historyID), 0, len(danmakus), true, false)
 
 	// 获取视频分P信息
 	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
@@ -207,17 +216,30 @@ func (s *DanmakuService) SendDanmakuForHistory(historyID uint, userID uint) erro
 	// 批量发送弹幕
 	if len(danmakuItems) > 0 {
 		log.Printf("开始发送 %d 条弹幕到视频 %s", len(danmakuItems), history.BvID)
-		successCount, err := client.BatchSendDanmaku(danmakuItems)
-		if err != nil {
-			log.Printf("弹幕发送部分失败: %v (成功 %d/%d)", err, successCount, len(danmakuItems))
-		} else {
-			log.Printf("弹幕发送完成: %d/%d", successCount, len(danmakuItems))
+
+		// 发送弹幕并更新进度
+		successCount := 0
+		for i, dm := range danmakuItems {
+			err := client.SendDanmaku(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
+			if err != nil {
+				log.Printf("发送第%d条弹幕失败: %v", i+1, err)
+			} else {
+				successCount++
+			}
+
+			// 更新进度
+			danmakuprogress.SetDanmakuProgress(int64(historyID), i+1, len(danmakuItems), true, false)
 		}
+
+		log.Printf("弹幕发送完成: %d/%d", successCount, len(danmakuItems))
 
 		// 更新历史记录
 		history.DanmakuSent = true
 		history.DanmakuCount = sentCount
 		db.Save(&history)
+
+		// 完成进度
+		danmakuprogress.SetDanmakuProgress(int64(historyID), len(danmakuItems), len(danmakuItems), false, true)
 
 		return nil
 	}
@@ -225,6 +247,9 @@ func (s *DanmakuService) SendDanmakuForHistory(historyID uint, userID uint) erro
 	history.DanmakuSent = true
 	history.DanmakuCount = 0
 	db.Save(&history)
+
+	// 完成进度
+	danmakuprogress.ClearDanmakuProgress(int64(historyID))
 
 	return nil
 }

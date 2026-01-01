@@ -8,6 +8,8 @@ export function useHistoryProgress() {
   const speedTracking = ref({})
   const historyProgressMap = ref({})
   const historyProgressTimer = ref(null)
+  const danmakuProgressMap = ref({})
+  const danmakuProgressTimer = ref(null)
 
   // 开始轮询上传进度
   const startProgressPolling = async (historyId) => {
@@ -133,15 +135,95 @@ export function useHistoryProgress() {
     return progress.overallPercent || 0
   }
 
+  // 开始弹幕进度轮询
+  const startDanmakuProgressPolling = () => {
+    if (danmakuProgressTimer.value) return
+    
+    danmakuProgressTimer.value = setInterval(() => {
+      // 这个函数需要从外部传入历史记录列表
+    }, 1000)
+  }
+
+  // 停止弹幕进度轮询
+  const stopDanmakuProgressPolling = () => {
+    if (danmakuProgressTimer.value) {
+      clearInterval(danmakuProgressTimer.value)
+      danmakuProgressTimer.value = null
+    }
+  }
+
+  // 获取弹幕发送进度
+  const fetchDanmakuProgress = async (histories) => {
+    // 找出所有有弹幕进度的历史记录
+    const historyIds = Object.keys(danmakuProgressMap.value).map(id => parseInt(id))
+    
+    if (historyIds.length === 0) {
+      stopDanmakuProgressPolling()
+      return
+    }
+    
+    let hasActiveProgress = false
+    
+    for (const historyId of historyIds) {
+      try {
+        const response = await axios.get(`/api/progress/danmaku/${historyId}`)
+        if (response.data) {
+          danmakuProgressMap.value[historyId] = response.data
+          
+          // 如果有正在发送的弹幕，保持轮询
+          if (response.data.sending && !response.data.completed) {
+            hasActiveProgress = true
+          }
+        }
+      } catch (error) {
+        console.error(`获取弹幕进度${historyId}失败:`, error)
+      }
+    }
+    
+    if (!hasActiveProgress) {
+      stopDanmakuProgressPolling()
+    }
+  }
+
+  // 获取弹幕进度信息
+  const getDanmakuProgress = (historyId) => {
+    return danmakuProgressMap.value[historyId]
+  }
+
+  // 获取弹幕进度百分比
+  const getDanmakuProgressPercent = (historyId) => {
+    const progress = getDanmakuProgress(historyId)
+    if (!progress || !progress.total) return 0
+    return Math.round((progress.current / progress.total) * 100)
+  }
+
+  // 标记弹幕发送开始
+  const markDanmakuSendingStart = (historyId, total) => {
+    danmakuProgressMap.value[historyId] = {
+      sending: true,
+      completed: false,
+      current: 0,
+      total: total
+    }
+    startDanmakuProgressPolling()
+  }
+
+  // 清除弹幕进度
+  const clearDanmakuProgress = (historyId) => {
+    delete danmakuProgressMap.value[historyId]
+  }
+
   onUnmounted(() => {
     stopProgressPolling()
     stopHistoryProgressPolling()
+    stopDanmakuProgressPolling()
   })
 
   return {
     uploadProgress,
     speedTracking,
     historyProgressMap,
+    danmakuProgressMap,
     startProgressPolling,
     stopProgressPolling,
     fetchProgress,
@@ -149,11 +231,21 @@ export function useHistoryProgress() {
     stopHistoryProgressPolling,
     fetchHistoryProgress,
     getHistoryProgress,
-    getHistoryUploadPercent
+    getHistoryUploadPercent,
+    startDanmakuProgressPolling,
+    stopDanmakuProgressPolling,
+    fetchDanmakuProgress,
+    getDanmakuProgress,
+    getDanmakuProgressPercent,
+    markDanmakuSendingStart,
+    clearDanmakuProgress
   }
 }
 
 export function useHistoryOperations() {
+  // 弹幕进度追踪
+  const danmakuProgressMap = ref({})
+  
   // 上传视频
   const handleUpload = async (row, callback) => {
     try {
@@ -237,13 +329,23 @@ export function useHistoryOperations() {
       
       const userId = users[0].id
       
-      const loadingInstance = ElLoading.service({ text: '弹幕发送中，请稍候...' })
-      try {
-        await axios.post(`/api/history/sendDanmaku/${row.id}`, { userId })
-        ElMessage.success('弹幕发送成功')
-        callback?.()
-      } finally {
-        loadingInstance.close()
+      ElMessage.info('弹幕发送任务已启动，请查看进度...')
+      
+      // 异步发送，不等待结果
+      axios.post(`/api/history/sendDanmaku/${row.id}`, { userId })
+        .then(() => {
+          ElMessage.success('弹幕发送完成')
+          callback?.()
+        })
+        .catch((error) => {
+          console.error('发送弹幕失败:', error)
+          ElMessage.error(error.response?.data?.msg || '发送弹幕失败')
+          callback?.()
+        })
+      
+      // 立即回调以刷新状态
+      if (callback) {
+        setTimeout(callback, 500)
       }
     } catch (error) {
       if (error !== 'cancel') {

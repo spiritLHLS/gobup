@@ -52,7 +52,7 @@
         <el-table-column prop="bvId" label="BV号" width="150">
           <template #default="{ row }">
             <a
-              v-if="row.bvId"
+              v-if="row.bvId && row.bvId.startsWith('BV')"
               :href="`https://www.bilibili.com/video/${row.bvId}`"
               target="_blank"
               style="color: #1890ff"
@@ -64,13 +64,12 @@
         </el-table-column>
         <el-table-column label="分P数量" width="100">
           <template #default="{ row }">
-            <el-button
-              link
-              type="primary"
+            <span
+              style="cursor: pointer; color: #606266"
               @click="showParts(row)"
             >
-              {{ row.partCount || 0 }} P
-            </el-button>
+              {{ row.partCount || 0 }}
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="视频状态" width="120">
@@ -84,10 +83,22 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="弹幕" width="100">
+        <el-table-column label="弹幕" width="150">
           <template #default="{ row }">
-            <el-tag v-if="row.danmakuSent" type="success">{{ row.danmakuCount || 0 }}</el-tag>
-            <el-tag v-else-if="row.bvId" type="info">未发送</el-tag>
+            <div v-if="getDanmakuProgress(row.id)">
+              <el-progress
+                :percentage="getDanmakuProgressPercent(row.id)"
+                :status="getDanmakuProgressPercent(row.id) >= 100 ? 'success' : null"
+                :stroke-width="8"
+              >
+                <span style="font-size: 12px;">{{ getDanmakuProgressPercent(row.id) }}%</span>
+              </el-progress>
+              <div style="font-size: 11px; color: #999; margin-top: 2px;">
+                {{ getDanmakuProgress(row.id).current || 0 }}/{{ getDanmakuProgress(row.id).total || 0 }}
+              </div>
+            </div>
+            <el-tag v-else-if="row.danmakuSent" type="success">{{ row.danmakuCount || 0 }}</el-tag>
+            <el-tag v-else-if="row.bvId && row.bvId.startsWith('BV')" type="info">未发送</el-tag>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -226,7 +237,12 @@ const {
   getHistoryUploadPercent,
   fetchHistoryProgress,
   startHistoryProgressPolling,
-  stopHistoryProgressPolling
+  stopHistoryProgressPolling,
+  getDanmakuProgress,
+  getDanmakuProgressPercent,
+  fetchDanmakuProgress,
+  startDanmakuProgressPolling,
+  stopDanmakuProgressPolling
 } = useHistoryProgress()
 
 const {
@@ -254,6 +270,9 @@ const fetchHistories = async () => {
     } else {
       stopHistoryProgressPolling()
     }
+    
+    // 检查是否有弹幕发送进度需要更新
+    await fetchDanmakuProgress(histories.value)
   } catch (error) {
     console.error('获取历史记录失败:', error)
   } finally {
@@ -309,8 +328,19 @@ const handlePublishInDialog = async () => {
 
 const handleSendDanmakuInDialog = async () => {
   const historyId = currentHistory.value.id
+  
+  // 标记开始发送（初始化进度）
+  const userResponse = await axios.get('/api/biliUser/list')
+  const users = userResponse.data || []
+  
+  if (users.length === 0) {
+    ElMessage.warning('请先添加B站用户')
+    return
+  }
+  
   await handleSendDanmaku(currentHistory.value, async () => {
     await fetchHistories()
+    startDanmakuProgressPolling()
     
     // 刷新对话框内的数据
     const updatedHistory = histories.value.find(h => h.id === historyId)
@@ -497,20 +527,20 @@ const handleBatchSendDanmaku = async () => {
     
     const userId = users[0].id
 
-    const loadingInstance = ElLoading.service({ text: '批量发送弹幕中...' })
-    try {
-      for (const history of selectedHistories.value) {
-        try {
-          await axios.post(`/api/history/sendDanmaku/${history.id}`, { userId })
-        } catch (error) {
-          console.error(`发送弹幕到历史记录${history.id}失败:`, error)
-        }
+    ElMessage.info('批量发送弹幕任务已启动')
+    
+    // 启动弹幕进度轮询
+    startDanmakuProgressPolling()
+    
+    for (const history of selectedHistories.value) {
+      try {
+        await axios.post(`/api/history/sendDanmaku/${history.id}`, { userId })
+      } catch (error) {
+        console.error(`发送弹幕到历史记录${history.id}失败:`, error)
       }
-      ElMessage.success('批量发送弹幕成功')
-      fetchHistories()
-    } finally {
-      loadingInstance.close()
     }
+    
+    fetchHistories()
   } catch (error) {
     if (error !== 'cancel') {
       console.error('批量发送弹幕失败:', error)

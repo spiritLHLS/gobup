@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	danmakuprogress "github.com/gobup/server/internal/progress"
 	"github.com/gobup/server/internal/upload"
 )
 
@@ -88,4 +89,27 @@ func GetHistoryProgress(c *gin.Context) {
 		OverallPercent: overallPercent,
 		Items:          items,
 	})
+}
+
+// GetDanmakuProgress 获取弹幕发送进度
+func GetDanmakuProgress(c *gin.Context) {
+	historyIDStr := c.Param("historyId")
+	historyID, err := strconv.ParseInt(historyIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的历史ID"})
+		return
+	}
+
+	progressData := danmakuprogress.GetDanmakuProgress(historyID)
+	c.JSON(http.StatusOK, progressData)
+}
+
+// SetDanmakuProgress 设置弹幕发送进度（内部使用）
+func SetDanmakuProgress(historyID int64, current, total int, sending, completed bool) {
+	danmakuprogress.SetDanmakuProgress(historyID, current, total, sending, completed)
+}
+
+// ClearDanmakuProgress 清除弹幕发送进度（内部使用）
+func ClearDanmakuProgress(historyID int64) {
+	danmakuprogress.ClearDanmakuProgress(historyID)
 }

@@ -28,12 +28,15 @@ func SendDanmaku(c *gin.Context) {
 	}
 
 	danmakuService := services.NewDanmakuService()
-	if err := danmakuService.SendDanmakuForHistory(uint(historyID), req.UserID); err != nil {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": err.Error()})
-		return
-	}
 
-	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "弹幕发送成功"})
+	// 异步执行弹幕发送
+	go func() {
+		if err := danmakuService.SendDanmakuForHistory(uint(historyID), req.UserID); err != nil {
+			log.Printf("弹幕发送失败 (history_id=%d): %v", historyID, err)
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "弹幕发送任务已启动"})
 }
 
 // MoveFiles 移动历史记录的文件

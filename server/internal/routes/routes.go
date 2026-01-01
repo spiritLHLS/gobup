@@ -145,5 +145,6 @@ func SetupRoutes(router *gin.Engine) {
 	{
 		progress.GET("/part/:partId", controllers.GetPartProgress)
 		progress.GET("/history/:historyId", controllers.GetHistoryProgress)
+		progress.GET("/danmaku/:historyId", controllers.GetDanmakuProgress)
 	}
 }
