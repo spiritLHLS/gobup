@@ -73,10 +73,11 @@ func (u *AppUploader) Upload(filePath string) (*UploadResult, error) {
 	if err := u.completeUpload(preResp.Endpoint, int(totalChunks), fileInfo.Size, md5Hash, fileName); err != nil {
 		return nil, fmt.Errorf("APP完成上传失败: %w", err)
 	}
-	log.Printf("[APP] 上传完成: file=%s, biz_id=%d", fileName, preResp.BizID)
+	log.Printf("[APP] 上传完成: file=%s, biz_id=%d, bili_filename=%s", fileName, preResp.BizID, preResp.BiliFilename)
 
+	// 使用B站返回的BiliFilename而不是本地文件名
 	return &UploadResult{
-		FileName: fileName,
+		FileName: preResp.BiliFilename,
 		BizID:    preResp.BizID,
 	}, nil
 }

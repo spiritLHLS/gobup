@@ -121,13 +121,10 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	}
 	var chunkTotal int
 	switch room.Line {
-	case "kodo":
-		chunkTotal = int((fileInfo.Size() + 4*1024*1024 - 1) / (4 * 1024 * 1024))
-		uploader = bili.NewKodoUploader(client)
 	case "app":
 		chunkTotal = int((fileInfo.Size() + 2*1024*1024 - 1) / (2 * 1024 * 1024))
 		uploader = bili.NewAppUploader(client)
-	default: // upos
+	default: // upos (包含所有upos线路)
 		chunkTotal = int((fileInfo.Size() + 5*1024*1024 - 1) / (5 * 1024 * 1024))
 		uploader = bili.NewUposUploader(client)
 	}

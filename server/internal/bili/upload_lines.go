@@ -4,7 +4,7 @@ package bili
 type UploadLine struct {
 	Name        string // 线路名称
 	DisplayName string // 显示名称
-	UploadType  string // 上传类型: upos, kodo, app
+	UploadType  string // 上传类型: upos, app
 	CDN         string // CDN类型
 	Profile     string // profile参数
 	Description string // 描述信息
@@ -49,9 +49,6 @@ func GetAllUploadLines() []UploadLine {
 		// UPOS线路 - 其他
 		{Name: "upos", DisplayName: "UPOS默认", UploadType: "upos", CDN: "", Profile: "ugcupos/bup", Description: "UPOS默认线路"},
 
-		// Kodo线路
-		{Name: "kodo", DisplayName: "七牛云Kodo", UploadType: "kodo", CDN: "", Profile: "ugcupos/bup", Description: "七牛云Kodo上传"},
-
 		// App线路
 		{Name: "app", DisplayName: "App上传", UploadType: "app", CDN: "", Profile: "", Description: "App端上传（小文件）"},
 	}
@@ -76,7 +73,7 @@ func GetDefaultLines() []string {
 		"cs_bldsa",   // 百度云BLDSA
 		"cs_estx",    // 腾讯云ESTX（新）
 		"cs_cnbldsa", // B站自建
-		"kodo",       // 七牛云Kodo（备用）
+		"app",        // App上传（备用）
 	}
 }
 

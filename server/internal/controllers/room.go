@@ -176,8 +176,7 @@ func getAllUploadLines() []UploadLine {
 
 		// 其他
 		{Value: "upos", Label: "UPOS", Description: "UPOS默认", Region: "", Continent: "", Provider: "bilibili", Recommended: false, LineQuery: "?os=upos"},
-		{Value: "kodo", Label: "KODO", Description: "七牛云", Region: "", Continent: "", Provider: "qiniu", Recommended: false, LineQuery: "?r=kodo&profile=ugcupos/bupfetch"},
-		{Value: "app", Label: "APP", Description: "APP上传", Region: "", Continent: "", Provider: "bilibili", Recommended: false, LineQuery: "?os=app"},
+		{Value: "app", Label: "APP", Description: "APP上传（小文件适用）", Region: "", Continent: "", Provider: "bilibili", Recommended: false, LineQuery: "?os=app"},
 
 		// 废弃线路（兼容性）
 		{Value: "cs_qn", Label: "CS_QN_废弃", Description: "七牛云(废弃)", Region: "", Continent: "", Provider: "qiniu", Recommended: false, LineQuery: "?os=upos&zone=cs&upcdn=qn"},

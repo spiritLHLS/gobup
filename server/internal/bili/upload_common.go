@@ -122,8 +122,8 @@ func parseLineParams(line string) (zone, upcdn string) {
 		return
 	}
 
-	// 特殊处理 kodo 和 app
-	if line == "kodo" || line == "app" {
+	// 特殊处理 app
+	if line == "app" {
 		return
 	}
 

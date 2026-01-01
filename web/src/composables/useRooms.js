@@ -116,7 +116,6 @@ export function formatLine(line) {
   const lineMap = {
     'upos': '华北',
     'CS_UPOS': '华北',
-    'kodo': '七牛云',
     'app': '移动端',
     'bda2': '华东',
     'qn': '华东',

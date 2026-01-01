@@ -359,7 +359,7 @@ docker network connect bili-net gobup
 - **标题模板**: 视频标题（支持变量）
 - **简介模板**: 视频简介（支持变量）
 - **标签**: 视频标签，用逗号分隔
-- **上传线路**: upos/kodo/app，建议upos
+- **上传线路**: upos/app，建议upos（支持多条UPOS线路选择）
 - **合集ID**: 自动添加到指定合集（可选）
 - **分P设置**: 
   - 是否分P
