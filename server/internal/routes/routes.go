@@ -98,6 +98,14 @@ func SetupRoutes(router *gin.Engine) {
 				ratelimit.POST("/config", controllers.SetRateLimitConfig)
 			}
 
+			// 验证码相关（参考biliupforjava）
+			captcha := auth.Group("/captcha")
+			{
+				captcha.GET("/status", controllers.GetCaptchaStatus)
+				captcha.POST("/submit", controllers.SubmitCaptchaResult)
+				captcha.POST("/clear", controllers.ClearCaptcha)
+			}
+
 			// 上传队列状态
 			queue := auth.Group("/queue")
 			{

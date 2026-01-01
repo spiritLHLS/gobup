@@ -297,11 +297,8 @@ const loadConfig = async () => {
   loading.value = true
   try {
     const response = await api.get('/config/system')
-    if (response.data.code === 0) {
-      config.value = response.data.data
-    } else {
-      ElMessage.error(response.data.message || '加载配置失败')
-    }
+    // 后端直接返回 config 对象
+    config.value = response
   } catch (error) {
     console.error('加载配置失败:', error)
     ElMessage.error('加载配置失败: ' + (error.message || '网络错误'))
@@ -314,9 +311,8 @@ const loadConfig = async () => {
 const loadStats = async () => {
   try {
     const response = await api.get('/config/stats')
-    if (response.data.code === 0) {
-      stats.value = response.data.data
-    }
+    // 后端直接返回 stats 对象
+    stats.value = response
   } catch (error) {
     console.error('加载统计数据失败:', error)
   }
@@ -326,13 +322,13 @@ const loadStats = async () => {
 const toggleFeature = async (feature, enabled) => {
   try {
     const response = await api.post('/config/toggle', {
-      feature,
-      enabled
+      key: feature,
+      value: enabled
     })
-    if (response.data.code === 0) {
+    if (response.type === 'success') {
       ElMessage.success(`${getFeatureName(feature)}已${enabled ? '开启' : '关闭'}`)
     } else {
-      ElMessage.error(response.data.message || '切换失败')
+      ElMessage.error(response.msg || '切换失败')
       // 还原状态
       config.value[feature] = !enabled
     }
@@ -349,11 +345,11 @@ const saveConfig = async () => {
   saving.value = true
   try {
     const response = await api.put('/config/system', config.value)
-    if (response.data.code === 0) {
+    if (response.type === 'success') {
       ElMessage.success('配置保存成功')
       loadConfig()
     } else {
-      ElMessage.error(response.data.message || '保存失败')
+      ElMessage.error(response.msg || '保存失败')
     }
   } catch (error) {
     console.error('保存配置失败:', error)

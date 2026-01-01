@@ -2,7 +2,9 @@ package scheduler
 
 import (
 	"log"
+	"time"
 
+	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/services"
@@ -83,6 +85,14 @@ func InitScheduler() {
 		}
 	})
 
+	// Token自动刷新任务 - 每2天执行一次（参考biliupforjava的RefreshTokenJob）
+	cronJob.AddFunc("0 */48 * * *", func() {
+		log.Println("执行定时任务: Token自动刷新")
+		if err := refreshAllUserTokens(); err != nil {
+			log.Printf("Token刷新任务失败: %v", err)
+		}
+	})
+
 	cronJob.Start()
 	log.Println("调度器已启动")
 }
@@ -113,6 +123,76 @@ func isFeatureEnabled(feature string) bool {
 	default:
 		return true
 	}
+}
+
+// refreshAllUserTokens 刷新所有用户的Token（参考biliupforjava的RefreshTokenJob）
+func refreshAllUserTokens() error {
+	db := database.GetDB()
+	var users []models.BiliBiliUser
+
+	// 查询所有已登录的用户（排除管理员账号 UID=-1）
+	if err := db.Where("login = ? AND uid != ?", true, -1).Find(&users).Error; err != nil {
+		return err
+	}
+
+	log.Printf("[TOKEN_REFRESH] 开始刷新%d个用户的Token", len(users))
+
+	successCount := 0
+	failCount := 0
+
+	for _, user := range users {
+		// 跳过没有RefreshToken的用户
+		if user.RefreshToken == "" {
+			log.Printf("[TOKEN_REFRESH] 跳过用户%s(%d): 无RefreshToken", user.Uname, user.UID)
+			continue
+		}
+
+		// 避免请求过快，每次请求间隔5秒
+		if successCount > 0 || failCount > 0 {
+			time.Sleep(5 * time.Second)
+		}
+
+		log.Printf("[TOKEN_REFRESH] 刷新用户Token: %s(%d)", user.Uname, user.UID)
+
+		// 调用刷新Token API
+		refreshResp, err := bili.RefreshToken(user.AccessKey, user.RefreshToken, user.Cookies)
+		if err != nil {
+			log.Printf("[TOKEN_REFRESH] 刷新失败 %s(%d): %v", user.Uname, user.UID, err)
+			failCount++
+			continue
+		}
+
+		// 提取新的Token和Cookie
+		tokenInfo := bili.ExtractRefreshTokenInfo(refreshResp)
+		if tokenInfo == nil {
+			log.Printf("[TOKEN_REFRESH] 提取Token信息失败 %s(%d)", user.Uname, user.UID)
+			failCount++
+			continue
+		}
+
+		// 更新用户信息
+		user.AccessKey = tokenInfo.AccessToken
+		user.RefreshToken = tokenInfo.RefreshToken
+		user.Cookies = tokenInfo.Cookies
+
+		// 更新过期时间
+		now := time.Now()
+		expireTime := now.Add(time.Duration(tokenInfo.ExpiresIn) * time.Second)
+		user.ExpireTime = &expireTime
+
+		if err := db.Save(&user).Error; err != nil {
+			log.Printf("[TOKEN_REFRESH] 保存用户失败 %s(%d): %v", user.Uname, user.UID, err)
+			failCount++
+			continue
+		}
+
+		log.Printf("[TOKEN_REFRESH] 刷新成功 %s(%d), 新过期时间: %s",
+			user.Uname, user.UID, expireTime.Format("2006-01-02 15:04:05"))
+		successCount++
+	}
+
+	log.Printf("[TOKEN_REFRESH] 完成: 成功=%d, 失败=%d", successCount, failCount)
+	return nil
 }
 
 func StopScheduler() {

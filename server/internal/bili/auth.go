@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/imroc/req/v3"
 )
@@ -504,4 +505,122 @@ func md5Sign(s string) string {
 	h := md5.New()
 	h.Write([]byte(s))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// RefreshTokenResponse Token刷新响应
+type RefreshTokenResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    struct {
+		TokenInfo struct {
+			Mid          int64  `json:"mid"`
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			ExpiresIn    int64  `json:"expires_in"`
+		} `json:"token_info"`
+		CookieInfo struct {
+			Cookies []struct {
+				Name     string `json:"name"`
+				Value    string `json:"value"`
+				HttpOnly int    `json:"http_only"`
+				Expires  int64  `json:"expires"`
+				Secure   int    `json:"secure"`
+			} `json:"cookies"`
+		} `json:"cookie_info"`
+	} `json:"data"`
+}
+
+// RefreshToken 刷新用户Token（参考Java项目 BiliApi.refreshToken）
+func RefreshToken(accessToken, refreshToken, cookies string) (*RefreshTokenResponse, error) {
+	apiURL := "https://passport.bilibili.com/api/v2/oauth2/refresh_token"
+
+	params := map[string]string{
+		"appkey":        AppKey,
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"ts":            fmt.Sprintf("%d", time.Now().Unix()),
+	}
+
+	// 添加签名
+	params = signParams(params)
+
+	fmt.Printf("[REFRESH_TOKEN] 开始刷新Token - mid从cookies中提取\n")
+
+	client := req.C().ImpersonateChrome()
+	reqBuilder := client.R().SetFormData(params)
+
+	// 如果有 cookies，添加到请求头
+	if cookies != "" {
+		reqBuilder.SetHeader("Cookie", cookies)
+	}
+
+	resp, err := reqBuilder.Post(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("刷新Token请求失败: %w", err)
+	}
+
+	// 打印原始响应用于调试
+	rawBody := resp.String()
+	fmt.Printf("[REFRESH_TOKEN_DEBUG] 原始响应: %s\n", rawBody)
+
+	var refreshResp RefreshTokenResponse
+	if err := resp.UnmarshalJson(&refreshResp); err != nil {
+		return nil, fmt.Errorf("解析刷新响应失败: %w", err)
+	}
+
+	if refreshResp.Code != 0 {
+		return nil, fmt.Errorf("刷新Token失败 code=%d msg=%s", refreshResp.Code, refreshResp.Message)
+	}
+
+	fmt.Printf("[REFRESH_TOKEN] 刷新成功 - mid: %d, expires_in: %d\n",
+		refreshResp.Data.TokenInfo.Mid, refreshResp.Data.TokenInfo.ExpiresIn)
+
+	return &refreshResp, nil
+}
+
+// RefreshTokenInfo 从刷新响应中提取Token和Cookie信息
+type RefreshTokenInfo struct {
+	AccessToken  string
+	RefreshToken string
+	Cookies      string
+	Mid          int64
+	ExpiresIn    int64
+}
+
+// ExtractRefreshTokenInfo 从刷新响应中提取信息
+func ExtractRefreshTokenInfo(resp *RefreshTokenResponse) *RefreshTokenInfo {
+	if resp == nil || resp.Code != 0 {
+		return nil
+	}
+
+	info := &RefreshTokenInfo{
+		AccessToken:  resp.Data.TokenInfo.AccessToken,
+		RefreshToken: resp.Data.TokenInfo.RefreshToken,
+		Mid:          resp.Data.TokenInfo.Mid,
+		ExpiresIn:    resp.Data.TokenInfo.ExpiresIn,
+	}
+
+	// 提取Cookie
+	cookieMap := make(map[string]string)
+	for _, cookie := range resp.Data.CookieInfo.Cookies {
+		cookieMap[cookie.Name] = cookie.Value
+	}
+
+	// 构建Cookie字符串（使用等号）
+	cookieStrs := []string{
+		fmt.Sprintf("bili_jct=%s", cookieMap["bili_jct"]),
+		fmt.Sprintf("SESSDATA=%s", cookieMap["SESSDATA"]),
+		fmt.Sprintf("DedeUserID=%s", cookieMap["DedeUserID"]),
+	}
+
+	if val, ok := cookieMap["DedeUserID__ckMd5"]; ok && val != "" {
+		cookieStrs = append(cookieStrs, fmt.Sprintf("DedeUserID__ckMd5=%s", val))
+	}
+	if val, ok := cookieMap["sid"]; ok && val != "" {
+		cookieStrs = append(cookieStrs, fmt.Sprintf("sid=%s", val))
+	}
+
+	info.Cookies = strings.Join(cookieStrs, "; ")
+
+	return info
 }

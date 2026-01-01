@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 )
 
 // CaptchaService 验证码处理服务
 type CaptchaService struct {
-	retryQueue chan CaptchaRetryTask
-	maxRetries int
+	retryQueue    chan CaptchaRetryTask
+	maxRetries    int
+	currentStatus *CaptchaStatus
+	statusMu      sync.RWMutex
+	waitChan      chan map[string]string
 }
 
 type CaptchaRetryTask struct {
@@ -20,10 +24,34 @@ type CaptchaRetryTask struct {
 	LastError  string
 }
 
+// CaptchaStatus 当前验证码状态
+type CaptchaStatus struct {
+	Required  bool                   `json:"required"`
+	Voucher   string                 `json:"voucher"`
+	Filename  string                 `json:"filename"`
+	Extra     map[string]interface{} `json:"extra"`
+	Timestamp int64                  `json:"timestamp"`
+}
+
+var globalCaptchaService *CaptchaService
+var captchaServiceOnce sync.Once
+
+// GetCaptchaService 获取全局验证码服务实例
+func GetCaptchaService() *CaptchaService {
+	captchaServiceOnce.Do(func() {
+		globalCaptchaService = NewCaptchaService()
+	})
+	return globalCaptchaService
+}
+
 func NewCaptchaService() *CaptchaService {
 	service := &CaptchaService{
 		retryQueue: make(chan CaptchaRetryTask, 100),
 		maxRetries: 3,
+		currentStatus: &CaptchaStatus{
+			Required: false,
+		},
+		waitChan: make(chan map[string]string, 1),
 	}
 	go service.processRetryQueue()
 	return service
@@ -114,4 +142,93 @@ func (s *CaptchaService) processRetryQueue() {
 // GetRetryQueueSize 获取重试队列大小
 func (s *CaptchaService) GetRetryQueueSize() int {
 	return len(s.retryQueue)
+}
+
+// SetCaptchaRequired 设置需要验证码（参考biliupforjava的CaptchaService）
+func (s *CaptchaService) SetCaptchaRequired(voucher, filename string, extra map[string]interface{}) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+
+	s.currentStatus = &CaptchaStatus{
+		Required:  true,
+		Voucher:   voucher,
+		Filename:  filename,
+		Extra:     extra,
+		Timestamp: time.Now().Unix(),
+	}
+
+	log.Printf("[CAPTCHA] 验证码已设置: voucher=%s, filename=%s", voucher, filename)
+}
+
+// GetCaptchaStatus 获取当前验证码状态
+func (s *CaptchaService) GetCaptchaStatus() *CaptchaStatus {
+	s.statusMu.RLock()
+	defer s.statusMu.RUnlock()
+
+	// 复制状态
+	status := &CaptchaStatus{
+		Required:  s.currentStatus.Required,
+		Voucher:   s.currentStatus.Voucher,
+		Filename:  s.currentStatus.Filename,
+		Timestamp: s.currentStatus.Timestamp,
+	}
+
+	if s.currentStatus.Extra != nil {
+		status.Extra = make(map[string]interface{})
+		for k, v := range s.currentStatus.Extra {
+			status.Extra[k] = v
+		}
+	}
+
+	return status
+}
+
+// SubmitCaptchaResult 提交验证码结果（参考biliupforjava）
+func (s *CaptchaService) SubmitCaptchaResult(result map[string]string) error {
+	s.statusMu.Lock()
+	if !s.currentStatus.Required {
+		s.statusMu.Unlock()
+		return fmt.Errorf("当前不需要验证码")
+	}
+
+	// 重置状态
+	s.currentStatus.Required = false
+	s.statusMu.Unlock()
+
+	log.Printf("[CAPTCHA] 验证码结果已提交: %+v", result)
+
+	// 发送到等待通道
+	select {
+	case s.waitChan <- result:
+		return nil
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("发送验证码结果超时")
+	}
+}
+
+// WaitForCaptcha 等待验证码输入（参考biliupforjava，带超时）
+func (s *CaptchaService) WaitForCaptcha() map[string]string {
+	// 等待最多10分钟
+	timeout := time.After(10 * time.Minute)
+
+	select {
+	case result := <-s.waitChan:
+		log.Printf("[CAPTCHA] 收到验证码结果: %+v", result)
+		return result
+	case <-timeout:
+		log.Printf("[CAPTCHA] 等待验证码超时")
+		// 清除状态
+		s.statusMu.Lock()
+		s.currentStatus.Required = false
+		s.statusMu.Unlock()
+		return nil
+	}
+}
+
+// ClearCaptchaStatus 清除验证码状态
+func (s *CaptchaService) ClearCaptchaStatus() {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.currentStatus.Required = false
+	log.Printf("[CAPTCHA] 验证码状态已清除")
 }

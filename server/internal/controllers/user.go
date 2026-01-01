@@ -375,7 +375,7 @@ func DeleteBiliUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "删除成功"})
 }
 
-// RefreshUserCookie 刷新用户Cookie
+// RefreshUserCookie 刷新用户Token和Cookie（参考biliupforjava RefreshTokenJob）
 func RefreshUserCookie(c *gin.Context) {
 	id := c.Param("id")
 
@@ -387,31 +387,54 @@ func RefreshUserCookie(c *gin.Context) {
 		return
 	}
 
-	// 验证Cookie是否有效
-	valid, err := bili.ValidateCookie(user.Cookies)
+	// 检查是否有RefreshToken
+	if user.RefreshToken == "" {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "该用户无RefreshToken，请重新登录"})
+		return
+	}
+
+	log.Printf("[INFO] 开始刷新用户Token: %s(%d)", user.Uname, user.UID)
+
+	// 调用刷新Token API
+	refreshResp, err := bili.RefreshToken(user.AccessKey, user.RefreshToken, user.Cookies)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "验证失败: " + err.Error()})
+		log.Printf("[ERROR] 刷新Token失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "刷新失败: " + err.Error()})
 		return
 	}
 
-	if !valid {
-		user.Login = false
-		db.Save(&user)
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "Cookie已失效，请重新登录"})
+	// 提取新的Token和Cookie
+	tokenInfo := bili.ExtractRefreshTokenInfo(refreshResp)
+	if tokenInfo == nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "提取Token信息失败"})
 		return
 	}
 
-	// 获取最新用户信息
-	userInfo, err := bili.GetUserInfo(user.Cookies)
-	if err == nil {
-		user.Uname = userInfo.Data.Uname
-		user.Face = userInfo.Data.Face
-		user.Level = userInfo.Data.Level
-		user.Login = true
-		db.Save(&user)
+	// 更新用户信息
+	user.AccessKey = tokenInfo.AccessToken
+	user.RefreshToken = tokenInfo.RefreshToken
+	user.Cookies = tokenInfo.Cookies
+	user.Login = true
+
+	// 更新过期时间
+	now := time.Now()
+	expireTime := now.Add(time.Duration(tokenInfo.ExpiresIn) * time.Second)
+	user.ExpireTime = &expireTime
+
+	if err := db.Save(&user).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "保存用户失败"})
+		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "Cookie有效", "user": user})
+	log.Printf("[INFO] Token刷新成功: %s(%d), 新过期时间: %s",
+		user.Uname, user.UID, expireTime.Format("2006-01-02 15:04:05"))
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":       "success",
+		"msg":        "Token刷新成功",
+		"user":       user,
+		"expireTime": expireTime.Format("2006-01-02 15:04:05"),
+	})
 }
 
 // CheckUserStatus 检查用户Cookie状态

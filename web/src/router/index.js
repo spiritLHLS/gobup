@@ -43,6 +43,12 @@ const routes = [
         name: 'Logs',
         component: () => import('@/views/Log.vue'),
         meta: { title: '系统日志', requiresAuth: true }
+      },
+      {
+        path: 'captcha',
+        name: 'Captcha',
+        component: () => import('@/views/Captcha.vue'),
+        meta: { title: '验证码处理', requiresAuth: true }
       }
     ]
   }
