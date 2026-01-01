@@ -11,9 +11,15 @@ const routes = [
   {
     path: '/',
     component: Layout,
-    redirect: '/rooms',
+    redirect: '/dashboard',
     meta: { requiresAuth: true },
     children: [
+      {
+        path: 'dashboard',
+        name: 'Dashboard',
+        component: () => import('@/views/Dashboard.vue'),
+        meta: { title: '控制面板', requiresAuth: true }
+      },
       {
         path: 'rooms',
         name: 'Rooms',
@@ -61,7 +67,7 @@ router.beforeEach((to, from, next) => {
     }
   } else if (to.path === '/login' && username && password) {
     // 已登录用户访问登录页，跳转到首页
-    next('/rooms')
+    next('/dashboard')
   } else {
     next()
   }

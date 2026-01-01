@@ -217,9 +217,18 @@ func (p *Processor) handleFileOpened(event WebhookEvent) error {
 		return err
 	}
 
-	log.Printf("[INFO] 文件开始录制: 房间%d - %s, 文件: %s", data.RoomID, data.Title, data.RelativePath)
+	log.Printf("[INFO] 文件开始录制: 房间%d - %s, 文件: %s, EventID=%s", data.RoomID, data.Title, data.RelativePath, event.EventID)
 
+	// 检查是否已处理过该事件（防止重复）
 	db := database.GetDB()
+	if event.EventID != "" {
+		var existingHistory models.RecordHistory
+		if err := db.Where("event_id = ?", event.EventID).First(&existingHistory).Error; err == nil {
+			log.Printf("[WARN] FileOpened事件已处理过，跳过: EventID=%s, HistoryID=%d", event.EventID, existingHistory.ID)
+			return nil
+		}
+	}
+
 	roomID := fmt.Sprintf("%d", data.RoomID)
 
 	// 查找或创建房间
@@ -284,13 +293,20 @@ func (p *Processor) handleFileClosed(event WebhookEvent) error {
 	db := database.GetDB()
 	roomID := fmt.Sprintf("%d", data.RoomID)
 
-	log.Printf("[DEBUG] 开始处理 FileClosed 事件: RoomID=%s, SessionID=%s, FilePath=%s", roomID, data.SessionID, data.FilePath)
+	log.Printf("[DEBUG] 开始处理 FileClosed 事件: RoomID=%s, SessionID=%s, FilePath=%s, EventID=%s", roomID, data.SessionID, data.FilePath, event.EventID)
 
 	// 首先检查文件是否已经存在（避免重复导入）
 	var existingPart models.RecordHistoryPart
 	if err := db.Where("file_path = ?", data.FilePath).First(&existingPart).Error; err == nil {
-		log.Printf("[WARN] 文件已存在，跳过: FilePath=%s, PartID=%d", data.FilePath, existingPart.ID)
+		log.Printf("[WARN] 文件已存在，跳过重复导入: FilePath=%s, PartID=%d, HistoryID=%d", data.FilePath, existingPart.ID, existingPart.HistoryID)
 		return nil // 不返回错误，因为这是正常的跳过情况
+	}
+
+	// 检查是否存在相同EventID的记录（防止重复事件）
+	var existingPartByEvent models.RecordHistoryPart
+	if event.EventID != "" && db.Where("file_path = ? OR (history_id IN (SELECT id FROM record_histories WHERE event_id = ?))", data.FilePath, event.EventID).First(&existingPartByEvent).Error == nil {
+		log.Printf("[WARN] EventID重复，跳过: EventID=%s, ExistingPartID=%d", event.EventID, existingPartByEvent.ID)
+		return nil
 	}
 
 	// 优先通过 SessionID 查找历史记录
@@ -304,8 +320,25 @@ func (p *Processor) handleFileClosed(event WebhookEvent) error {
 		var room models.RecordRoom
 		if err := db.Where("room_id = ?", roomID).First(&room).Error; err == nil && room.HistoryID > 0 {
 			if err := db.First(&history, room.HistoryID).Error; err == nil {
+				// 检查时间是否合理（6小时内）
+				if time.Since(history.EndTime) < 6*time.Hour {
+					found = true
+					log.Printf("[INFO] 通过Room.HistoryID找到历史记录: ID=%d", history.ID)
+				} else {
+					log.Printf("[WARN] Room.HistoryID对应的历史记录太旧: ID=%d, EndTime=%v", history.ID, history.EndTime)
+				}
+			}
+		}
+
+		// 如果还是找不到，尝试在最近6小时内查找同一房间的历史记录
+		if !found {
+			var recentHistories []models.RecordHistory
+			sixHoursAgo := time.Now().Add(-6 * time.Hour)
+			if err := db.Where("room_id = ? AND end_time >= ? AND recording = ?", roomID, sixHoursAgo, false).
+				Order("end_time DESC").Limit(1).Find(&recentHistories).Error; err == nil && len(recentHistories) > 0 {
+				history = recentHistories[0]
 				found = true
-				log.Printf("[INFO] 通过Room.HistoryID找到历史记录: ID=%d", history.ID)
+				log.Printf("[INFO] 通过时间范围找到最近的历史记录: ID=%d, EndTime=%v", history.ID, history.EndTime)
 			}
 		}
 	}

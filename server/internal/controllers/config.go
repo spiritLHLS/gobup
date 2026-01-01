@@ -199,3 +199,143 @@ func ImportConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "导入成功"})
 }
+
+// GetSystemConfig 获取系统配置
+func GetSystemConfig(c *gin.Context) {
+	db := database.GetDB()
+
+	var config models.SystemConfig
+	if err := db.First(&config).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"type": "error",
+			"msg":  "获取配置失败",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, config)
+}
+
+// UpdateSystemConfig 更新系统配置
+func UpdateSystemConfig(c *gin.Context) {
+	var req models.SystemConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"type": "error",
+			"msg":  "参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	db := database.GetDB()
+	var config models.SystemConfig
+	if err := db.First(&config).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"type": "error",
+			"msg":  "配置不存在",
+		})
+		return
+	}
+
+	// 更新配置
+	config.AutoUpload = req.AutoUpload
+	config.AutoPublish = req.AutoPublish
+	config.AutoDelete = req.AutoDelete
+	config.AutoSendDanmaku = req.AutoSendDanmaku
+	config.AutoFileScan = req.AutoFileScan
+	config.FileScanInterval = req.FileScanInterval
+	config.FileScanMinAge = req.FileScanMinAge
+	config.FileScanMinSize = req.FileScanMinSize
+	config.FileScanMaxAge = req.FileScanMaxAge
+	config.WorkPath = req.WorkPath
+	config.EnableOrphanScan = req.EnableOrphanScan
+	config.OrphanScanInterval = req.OrphanScanInterval
+
+	// 参数验证
+	if config.FileScanInterval < 10 {
+		config.FileScanInterval = 10
+	}
+	if config.FileScanMinAge < 1 {
+		config.FileScanMinAge = 1
+	}
+
+	if err := db.Save(&config).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "保存失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "配置更新成功", "data": config})
+}
+
+// ToggleSystemConfig 切换单个配置项
+func ToggleSystemConfig(c *gin.Context) {
+	type ToggleRequest struct {
+		Key   string `json:"key" binding:"required"`
+		Value bool   `json:"value"`
+	}
+
+	var req ToggleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+
+	db := database.GetDB()
+	var config models.SystemConfig
+	if err := db.First(&config).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "配置不存在"})
+		return
+	}
+
+	switch req.Key {
+	case "autoUpload":
+		config.AutoUpload = req.Value
+	case "autoPublish":
+		config.AutoPublish = req.Value
+	case "autoDelete":
+		config.AutoDelete = req.Value
+	case "autoSendDanmaku":
+		config.AutoSendDanmaku = req.Value
+	case "autoFileScan":
+		config.AutoFileScan = req.Value
+	case "enableOrphanScan":
+		config.EnableOrphanScan = req.Value
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "未知的配置项"})
+		return
+	}
+
+	if err := db.Save(&config).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "保存失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "配置已更新", "data": config})
+}
+
+// GetSystemStats 获取系统统计信息
+func GetSystemStats(c *gin.Context) {
+	db := database.GetDB()
+
+	var stats struct {
+		TotalRooms     int64 `json:"totalRooms"`
+		RecordingRooms int64 `json:"recordingRooms"`
+		TotalHistories int64 `json:"totalHistories"`
+		RecordingCount int64 `json:"recordingCount"`
+		PendingUploads int64 `json:"pendingUploads"`
+		PendingPublish int64 `json:"pendingPublish"`
+		TotalParts     int64 `json:"totalParts"`
+		TotalUsers     int64 `json:"totalUsers"`
+	}
+
+	db.Model(&models.RecordRoom{}).Count(&stats.TotalRooms)
+	db.Model(&models.RecordRoom{}).Where("recording = ?", true).Count(&stats.RecordingRooms)
+	db.Model(&models.RecordHistory{}).Count(&stats.TotalHistories)
+	db.Model(&models.RecordHistory{}).Where("recording = ?", true).Count(&stats.RecordingCount)
+	db.Model(&models.RecordHistory{}).Where("upload = ? AND publish = ?", true, false).Count(&stats.PendingUploads)
+	db.Model(&models.RecordHistory{}).Where("publish = ?", false).Count(&stats.PendingPublish)
+	db.Model(&models.RecordHistoryPart{}).Count(&stats.TotalParts)
+	db.Model(&models.BiliBiliUser{}).Where("login = ?", true).Count(&stats.TotalUsers)
+
+	c.JSON(http.StatusOK, stats)
+}

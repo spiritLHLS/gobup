@@ -109,6 +109,12 @@ func SetupRoutes(router *gin.Engine) {
 			{
 				config.POST("/export", controllers.ExportConfig)
 				config.POST("/import", controllers.ImportConfig)
+
+				// 系统配置管理
+				config.GET("/system", controllers.GetSystemConfig)
+				config.PUT("/system", controllers.UpdateSystemConfig)
+				config.POST("/toggle", controllers.ToggleSystemConfig)
+				config.GET("/stats", controllers.GetSystemStats)
 			}
 
 			// 日志API

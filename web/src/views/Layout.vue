@@ -9,6 +9,10 @@
         router
         class="sidebar-menu"
       >
+        <el-menu-item index="/dashboard">
+          <el-icon><Odometer /></el-icon>
+          <span>控制面板</span>
+        </el-menu-item>
         <el-menu-item index="/rooms">
           <el-icon><VideoCamera /></el-icon>
           <span>房间管理</span>
@@ -59,7 +63,7 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, Odometer, VideoCamera, DocumentCopy, User, Document } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
