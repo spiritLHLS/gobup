@@ -82,87 +82,21 @@
       <el-tabs v-model="loginMethod" class="login-tabs">
         <!-- 扫码登录 -->
         <el-tab-pane label="扫码登录" name="qrcode">
-          <div class="qrcode-container-vertical">
-            <!-- 登录方式选择 -->
-            <div class="login-type-selector">
-              <el-radio-group v-model="qrcodeType" @change="handleQRTypeChange" size="default">
-                <el-radio-button label="tv">TV端扫码</el-radio-button>
-                <el-radio-button label="web">Web端扫码</el-radio-button>
-              </el-radio-group>
-              <div class="type-description">
-                <template v-if="qrcodeType === 'tv'">
-                  <el-icon><Star /></el-icon>
-                  <span>推荐：稳定性更好，适合长期使用</span>
-                </template>
-                <template v-else>
-                  <el-icon><InfoFilled /></el-icon>
-                  <span>兼容性更好，与网页端登录一致</span>
-                </template>
-              </div>
-            </div>
-            
-            <!-- 二维码显示区域 -->
-            <div class="qrcode-display-area">
-              <div v-if="qrcodeLoading" class="qrcode-loading">
-                <el-icon class="is-loading" :size="40"><Loading /></el-icon>
-                <p>生成二维码中...</p>
-              </div>
-              <div v-else class="qrcode-wrapper">
-                <div class="qrcode-image">
-                  <img v-if="qrcodeUrl" 
-                       :src="'data:image/png;base64,' + qrcodeUrl" 
-                       alt="登录二维码"
-                       @error="handleImageError"
-                       @load="handleImageLoad" />
-                  <div v-else class="qrcode-placeholder">
-                    <el-icon :size="60"><Picture /></el-icon>
-                    <span>等待二维码...</span>
-                  </div>
-                </div>
-                <div class="qrcode-info">
-                  <p class="scan-tip">
-                    <el-icon><Iphone /></el-icon>
-                    请使用哔哩哔哩APP扫描二维码登录
-                  </p>
-                  <el-divider />
-                  <p class="login-status" :class="getStatusClass()">
-                    <el-icon v-if="loginStatus.includes('成功')"><CircleCheck /></el-icon>
-                    <el-icon v-else-if="loginStatus.includes('失败') || loginStatus.includes('过期')"><CircleClose /></el-icon>
-                    <el-icon v-else-if="loginStatus.includes('已扫码')"><Loading class="is-loading" /></el-icon>
-                    <el-icon v-else><Clock /></el-icon>
-                    <span>{{ loginStatus }}</span>
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <QrcodeLogin
+            :visible="loginMethod === 'qrcode' && loginDialogVisible"
+            :qrcode-url="qrcodeUrl"
+            :qrcode-loading="qrcodeLoading"
+            :login-status="loginStatus"
+            :qrcode-type="qrcodeType"
+            @cancel="cancelLogin"
+            @regenerate="generateQRCode"
+            @type-change="handleQRTypeChange"
+          />
         </el-tab-pane>
 
         <!-- Cookie登录 -->
         <el-tab-pane label="Cookie登录" name="cookie">
-          <div class="cookie-container">
-            <el-form label-width="0">
-              <el-form-item>
-                <el-input
-                  v-model="cookieInput"
-                  type="textarea"
-                  :rows="6"
-                  placeholder="请粘贴完整的Cookie，格式如：&#10;SESSDATA=xxx; DedeUserID=xxx; DedeUserID__ckMd5=xxx; bili_jct=xxx"
-                  clearable
-                />
-                <div class="cookie-tips">
-                  <p>💡 Cookie获取方法：</p>
-                  <ol>
-                    <li>使用浏览器登录 <a href="https://www.bilibili.com" target="_blank">bilibili.com</a></li>
-                    <li>按F12打开开发者工具 → Network（网络）</li>
-                    <li>刷新页面，点击任意请求</li>
-                    <li>在Request Headers中找到Cookie，复制完整内容</li>
-                  </ol>
-                  <p class="warning">⚠️ 请勿将Cookie泄露给他人</p>
-                </div>
-              </el-form-item>
-            </el-form>
-          </div>
+          <CookieLogin v-model:cookie-input="cookieInput" />
         </el-tab-pane>
       </el-tabs>
 
@@ -187,99 +121,56 @@
     </el-dialog>
 
     <!-- 上传限速对话框 -->
-    <el-dialog v-model="showRateLimitDialog" title="上传限速配置" width="400px">
-      <el-form label-width="100px">
-        <el-form-item label="启用限速">
-          <el-switch v-model="rateLimitConfig.enabled" />
-        </el-form-item>
-        <el-form-item label="限速(MB/s)" v-if="rateLimitConfig.enabled">
-          <el-input-number
-            v-model="rateLimitConfig.speedMBps"
-            :min="1"
-            :max="100"
-            :step="0.5"
-          />
-          <div style="margin-top: 8px; font-size: 12px; color: #999;">
-            设置上传速度上限，避免占用过多带宽
-          </div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showRateLimitDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveRateLimit">保存</el-button>
-      </template>
-    </el-dialog>
+    <RateLimitDialog
+      v-model:visible="showRateLimitDialog"
+      :config="rateLimitConfig"
+      @save="handleSaveRateLimit"
+    />
 
     <!-- WxPusher配置对话框 -->
-    <el-dialog v-model="showWxPushDialog" title="配置WxPusher推送" width="500px">
-      <el-form label-width="120px">
-        <el-form-item label="WxPusher Token">
-          <el-input
-            v-model="wxPushForm.token"
-            placeholder="请输入WxPusher AppToken"
-            clearable
-          />
-          <div style="margin-top: 8px; font-size: 12px; color: #999;">
-            在 <a href="https://wxpusher.zjiecode.com" target="_blank">WxPusher官网</a> 注册获取AppToken
-          </div>
-        </el-form-item>
-        <el-form-item label="说明">
-          <div style="font-size: 13px; color: #666; line-height: 1.6;">
-            <p>配置后，可在房间设置中填写微信UID，实现以下推送通知：</p>
-            <ul style="padding-left: 20px; margin: 5px 0;">
-              <li>开播通知</li>
-              <li>上传进度通知</li>
-              <li>投稿成功通知</li>
-              <li>上传失败提醒</li>
-            </ul>
-          </div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showWxPushDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveWxPush">保存</el-button>
-      </template>
-    </el-dialog>
+    <WxPushDialog
+      v-model:visible="showWxPushDialog"
+      :form="wxPushForm"
+      @save="handleSaveWxPush"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
-  Plus, 
-  Setting, 
-  Loading, 
-  Star, 
-  InfoFilled, 
-  Picture, 
-  Iphone, 
-  CircleCheck, 
-  CircleClose, 
-  Clock 
-} from '@element-plus/icons-vue'
+import { Plus, Setting } from '@element-plus/icons-vue'
 import { userAPI } from '@/api'
 import axios from 'axios'
+import QrcodeLogin from '@/components/users/QrcodeLogin.vue'
+import CookieLogin from '@/components/users/CookieLogin.vue'
+import RateLimitDialog from '@/components/users/RateLimitDialog.vue'
+import WxPushDialog from '@/components/users/WxPushDialog.vue'
+import { useQrcodeLogin, useCookieLogin } from '@/composables/useUserLogin'
 
 const users = ref([])
 const loading = ref(false)
 const loginDialogVisible = ref(false)
 const loginMethod = ref('qrcode')
-const qrcodeLoading = ref(false)
 const showRateLimitDialog = ref(false)
 const showWxPushDialog = ref(false)
 
-// 二维码登录相关
-const qrcodeUrl = ref('')
-const qrcodeRef = ref(null)
-const loginStatus = ref('等待扫码...')
-const qrcodeType = ref('tv') // 默认使用TV端
-let authKey = ''
-let pollingTimer = null
+// 使用composables
+const {
+  qrcodeUrl,
+  qrcodeLoading,
+  loginStatus,
+  qrcodeType,
+  generateQRCode,
+  stopPolling,
+  cleanup
+} = useQrcodeLogin()
 
-// Cookie登录相关
-const cookieInput = ref('')
-const cookieLoginLoading = ref(false)
+const {
+  cookieInput,
+  cookieLoginLoading,
+  handleLogin: cookieLogin
+} = useCookieLogin()
 
 const rateLimitConfig = ref({
   enabled: false,
@@ -307,140 +198,25 @@ const handleLogin = () => {
   loginDialogVisible.value = true
   loginMethod.value = 'qrcode'
   cookieInput.value = ''
-  qrcodeUrl.value = ''
-  loginStatus.value = '等待扫码...'
-  stopPolling()
-  // 自动生成二维码
+  cleanup()
   nextTick(() => {
     generateQRCode()
   })
 }
 
-const generateQRCode = async () => {
-  qrcodeLoading.value = true
-  loginStatus.value = '等待扫码...'
-  qrcodeUrl.value = '' // 清空旧的二维码
-  
-  try {
-    // 新的API返回格式: {image: base64, key: sessionKey, type: "web"/"tv"}
-    const data = await userAPI.login(qrcodeType.value)
-    
-    console.log('========== 二维码API响应 ==========')
-    console.log('完整响应:', data)
-    console.log('是否有error字段:', !!data.error)
-    console.log('是否有image字段:', !!data.image)
-    console.log('是否有key字段:', !!data.key)
-    
-    // 检查返回的数据
-    if (data.error) {
-      console.error('API返回错误:', data.error)
-      ElMessage.error(data.error)
-      loginStatus.value = data.error
-      return
-    }
-    
-    if (!data.image || !data.key) {
-      console.error('数据不完整 - image:', !!data.image, 'key:', !!data.key)
-      ElMessage.error('二维码数据不完整')
-      loginStatus.value = '二维码数据不完整'
-      return
-    }
-    
-    authKey = data.key  // 保存session key用于轮询
-    qrcodeUrl.value = data.image
-    
-    console.log('✓ 二维码已设置')
-    console.log('✓ Base64长度:', data.image.length)
-    console.log('✓ Base64前50字符:', data.image.substring(0, 50))
-    console.log('✓ authKey:', authKey)
-    console.log('✓ qrcodeUrl响应式值已更新:', qrcodeUrl.value.length)
-    
-    // 开始轮询登录状态
-    startPolling()
-  } catch (error) {
-    console.error('========== 获取二维码异常 ==========')
-    console.error('错误对象:', error)
-    console.error('错误消息:', error.message)
-    console.error('错误堆栈:', error.stack)
-    loginStatus.value = '获取二维码失败: ' + (error.message || '未知错误')
-    ElMessage.error('获取二维码失败: ' + (error.message || '未知错误'))
-  } finally {
-    qrcodeLoading.value = false
-    console.log('========== 二维码生成流程结束 ==========')
-    console.log('qrcodeUrl是否有值:', !!qrcodeUrl.value)
-    console.log('qrcodeLoading:', qrcodeLoading.value)
+const handleQRTypeChange = (type) => {
+  qrcodeType.value = type
+  if (loginDialogVisible.value) {
+    stopPolling()
+    generateQRCode()
   }
 }
 
 const handleCookieLogin = async () => {
-  const cookies = cookieInput.value.trim()
-  if (!cookies) {
-    ElMessage.warning('请输入Cookie')
-    return
-  }
-
-  cookieLoginLoading.value = true
-  try {
-    const result = await userAPI.loginByCookie(cookies)
-    if (result.type === 'success') {
-      ElMessage.success('登录成功')
-      loginDialogVisible.value = false
-      cookieInput.value = ''
-      fetchUsers()
-    } else {
-      ElMessage.error(result.msg || '登录失败')
-    }
-  } catch (error) {
-    console.error('Cookie登录失败:', error)
-    ElMessage.error('登录失败，请检查Cookie是否正确')
-  } finally {
-    cookieLoginLoading.value = false
-  }
-}
-
-const startPolling = () => {
-  stopPolling()
-  
-  pollingTimer = setInterval(async () => {
-    try {
-      // 使用新的loginCheck API
-      const data = await userAPI.loginCheck(authKey)
-      
-      loginStatus.value = data.message || '检查中...'
-      
-      if (data.status === 'success') {
-        loginStatus.value = '登录成功！'
-        ElMessage.success('登录成功')
-        stopPolling()
-        loginDialogVisible.value = false
-        fetchUsers()
-      } else if (data.status === 'expired') {
-        loginStatus.value = '二维码已过期，请重新获取'
-        stopPolling()
-      } else if (data.status === 'scanned') {
-        loginStatus.value = '已扫码，请在手机上确认'
-      } else if (data.status === 'failed') {
-        loginStatus.value = data.message || '登录失败'
-        stopPolling()
-      }
-    } catch (error) {
-      console.error('查询登录状态失败:', error)
-    }
-  }, 2000)
-}
-
-const stopPolling = () => {
-  if (pollingTimer) {
-    clearInterval(pollingTimer)
-    pollingTimer = null
-  }
-}
-
-const handleQRTypeChange = () => {
-  // 切换登录方式时重新生成二维码
-  if (loginDialogVisible.value) {
-    stopPolling()
-    generateQRCode()
+  const result = await cookieLogin()
+  if (result.success) {
+    loginDialogVisible.value = false
+    fetchUsers()
   }
 }
 
@@ -448,26 +224,7 @@ const cancelLogin = () => {
   stopPolling()
   loginDialogVisible.value = false
   cookieInput.value = ''
-  qrcodeUrl.value = ''
-}
-
-const handleImageError = (e) => {
-  console.error('二维码图片加载失败:', e)
-  loginStatus.value = '二维码图片加载失败，请重新生成'
-  ElMessage.error('二维码图片加载失败')
-}
-
-const handleImageLoad = () => {
-  console.log('二维码图片加载成功')
-}
-
-// 获取状态样式类
-const getStatusClass = () => {
-  const status = loginStatus.value.toLowerCase()
-  if (status.includes('成功')) return 'status-success'
-  if (status.includes('失败') || status.includes('过期')) return 'status-error'
-  if (status.includes('已扫码') || status.includes('确认')) return 'status-scanned'
-  return 'status-waiting'
+  cleanup()
 }
 
 const handleCheckStatus = async (row) => {
@@ -476,13 +233,11 @@ const handleCheckStatus = async (row) => {
     const result = await userAPI.checkStatus(row.id)
     if (result.type === 'success') {
       ElMessage.success(result.msg || 'Cookie有效，用户状态正常')
-      // 更新用户信息
       if (result.user) {
         Object.assign(row, result.user)
       }
     } else {
       ElMessage.error(result.msg || 'Cookie已失效')
-      // 更新用户登录状态
       if (result.user) {
         Object.assign(row, result.user)
       }
@@ -515,7 +270,6 @@ const formatTime = (timeStr) => {
   return new Date(timeStr).toLocaleString('zh-CN')
 }
 
-// 加载限速配置
 const loadRateLimitConfig = async () => {
   try {
     const { data } = await axios.get('/api/ratelimit/config')
@@ -528,10 +282,9 @@ const loadRateLimitConfig = async () => {
   }
 }
 
-// 保存限速配置
-const handleSaveRateLimit = async () => {
+const handleSaveRateLimit = async (config) => {
   try {
-    await axios.post('/api/ratelimit/config', rateLimitConfig.value)
+    await axios.post('/api/ratelimit/config', config)
     ElMessage.success('限速配置已保存')
     showRateLimitDialog.value = false
   } catch (error) {
@@ -540,7 +293,6 @@ const handleSaveRateLimit = async () => {
   }
 }
 
-// 编辑WxPusher配置
 const handleEditWxPush = (row) => {
   wxPushForm.value = {
     userId: row.id,
@@ -549,12 +301,11 @@ const handleEditWxPush = (row) => {
   showWxPushDialog.value = true
 }
 
-// 保存WxPusher配置
-const handleSaveWxPush = async () => {
+const handleSaveWxPush = async (form) => {
   try {
     await userAPI.update({
-      id: wxPushForm.value.userId,
-      wxPushToken: wxPushForm.value.token
+      id: form.userId,
+      wxPushToken: form.token
     })
     ElMessage.success('WxPusher配置已保存')
     showWxPushDialog.value = false
@@ -584,255 +335,7 @@ onMounted(() => {
   gap: 10px;
 }
 
-/* 新的上下布局样式 */
-.qrcode-container-vertical {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  padding: 20px 10px;
-}
-
-.login-type-selector {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
-.type-description {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #909399;
-  padding: 8px 16px;
-  background-color: #f4f4f5;
-  border-radius: 4px;
-}
-
-.type-description .el-icon {
-  font-size: 16px;
-}
-
-.qrcode-display-area {
-  display: flex;
-  justify-content: center;
-  min-height: 350px;
-}
-
-.qrcode-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  color: #909399;
-}
-
-.qrcode-loading p {
-  font-size: 14px;
-  margin: 0;
-}
-
-.qrcode-wrapper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  width: 100%;
-  max-width: 400px;
-}
-
-.qrcode-image {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 20px;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
-}
-
-.qrcode-image img {
-  width: 256px;
-  height: 256px;
-  display: block;
-  border-radius: 4px;
-}
-
-.qrcode-placeholder {
-  width: 256px;
-  height: 256px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  border: 2px dashed #dcdfe6;
-  border-radius: 4px;
-  color: #909399;
-  background-color: #fafafa;
-}
-
-.qrcode-placeholder .el-icon {
-  color: #c0c4cc;
-}
-
-.qrcode-info {
-  width: 100%;
-  text-align: center;
-}
-
-.scan-tip {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin: 0 0 12px 0;
-  font-size: 14px;
-  color: #606266;
-}
-
-.scan-tip .el-icon {
-  font-size: 18px;
-  color: #409eff;
-}
-
-.el-divider {
-  margin: 12px 0;
-}
-
-.login-status {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin: 12px 0 0 0;
-  font-size: 14px;
-  font-weight: 500;
-  padding: 8px 16px;
-  border-radius: 4px;
-  background-color: #f4f4f5;
-}
-
-.login-status .el-icon {
-  font-size: 18px;
-}
-
-.login-status.status-waiting {
-  color: #909399;
-  background-color: #f4f4f5;
-}
-
-.login-status.status-scanned {
-  color: #409eff;
-  background-color: #ecf5ff;
-}
-
-.login-status.status-success {
-  color: #67c23a;
-  background-color: #f0f9ff;
-}
-
-.login-status.status-error {
-  color: #f56c6c;
-  background-color: #fef0f0;
-}
-
-/* 旧的样式保留用于兼容 */
-.qrcode-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 300px;
-}
-
-.loading {
-  text-align: center;
-}
-
-.loading .el-icon {
-  font-size: 40px;
-  margin-bottom: 10px;
-}
-
-.qrcode {
-  text-align: center;
-}
-
-.qrcode-image-old {
-  margin-bottom: 15px;
-}
-
-.tip {
-  color: #666;
-  font-size: 14px;
-  margin-bottom: 10px;
-}
-
-.status {
-  color: #1890ff;
-  font-size: 14px;
-  font-weight: bold;
-}
-
 .login-tabs {
   margin-top: -10px;
-}
-
-.cookie-container {
-  padding: 10px 0;
-}
-
-.cookie-tips {
-  margin-top: 15px;
-  padding: 15px;
-  background-color: #f5f7fa;
-  border-radius: 4px;
-  font-size: 13px;
-  color: #666;
-  line-height: 1.8;
-}
-
-.cookie-tips p {
-  margin: 8px 0;
-}
-
-.cookie-tips ol {
-  margin: 10px 0;
-  padding-left: 20px;
-}
-
-.cookie-tips ol li {
-  margin: 5px 0;
-}
-
-.cookie-tips a {
-  color: #1890ff;
-  text-decoration: none;
-}
-
-.cookie-tips a:hover {
-  text-decoration: underline;
-}
-
-.cookie-tips .warning {
-  color: #ff4d4f;
-  font-weight: bold;
-  margin-top: 10px;
-}
-
-.login-type-selector {
-  text-align: center;
-  margin-bottom: 16px;
-}
-
-.login-type-selector .el-radio-group {
-  margin-bottom: 8px;
-}
-
-.empty {
-  text-align: center;
-  padding: 40px 0;
 }
 </style>
