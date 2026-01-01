@@ -7,48 +7,22 @@
 
 ## 快速部署
 
-**GoBup 使用 HTTP Basic Auth 进行身份认证**
-
-**首次使用必须设置用户名和密码：**
-
 1. **安装脚本部署**：使用环境变量 `GOBUP_USERNAME` 和 `GOBUP_PASSWORD`
 2. **Docker 部署**：使用环境变量 `USERNAME` 和 `PASSWORD`
 3. **手动部署**：使用命令行参数 `-username` 和 `-password`
 
-**如果不设置认证信息：**
-- 首次访问会进入登录页面，要求输入用户名和密码
-- 输入的凭证将保存在浏览器本地，用于后续请求认证
-- 建议：在部署时就设置好用户名密码，避免浏览器弹窗
-
-**认证信息仅在首次启动时创建管理员账户使用，后续修改需要删除数据库重新初始化。**
-
-### 方式一：一键安装脚本（推荐）
+### 方式一：一键安装脚本
 
 使用一键安装脚本，自动下载并安装最新版本的服务器和Web文件：
 
-**无认证部署（首次访问需登录）：**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh -o install.sh && chmod +x install.sh && bash install.sh
-```
-
-**带认证部署（推荐）：**
+**带认证部署：**
 
 ```bash
 # 下载脚本
-curl -fsSL https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh -o install.sh && chmod +x install.sh
+curl -fsSL https://cdn.spiritlhl.net/https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh -o install.sh && chmod +x install.sh
 
 # 设置用户名密码安装
 GOBUP_USERNAME=admin GOBUP_PASSWORD=your_secure_password bash install.sh
-```
-
-或使用 wget：
-
-```bash
-wget -O install.sh https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh && chmod +x install.sh
-
-# 设置用户名密码安装
-GOBUP_USERNAME=root GOBUP_PASSWORD=123456 bash install.sh
 ```
 
 **支持的选项：**
@@ -64,14 +38,8 @@ GOBUP_USERNAME=root GOBUP_PASSWORD=123456 bash install.sh
 **示例：**
 
 ```bash
-# 完整安装（无认证，首次访问需登录）
-bash install.sh
-
 # 完整安装并设置认证（推荐）
 GOBUP_USERNAME=admin GOBUP_PASSWORD=123456 bash install.sh
-
-# 安装指定版本并设置认证
-INSTALL_VERSION=v20250101-120000 GOBUP_USERNAME=root GOBUP_PASSWORD=secret bash install.sh
 
 # 升级到最新版本
 bash install.sh upgrade
@@ -85,32 +53,9 @@ bash install.sh upgrade
 
 ### 方式二：使用预构建 Docker 镜像
 
-使用已构建好的多架构镜像，会自动根据当前系统架构下载对应版本。
-
-**镜像标签说明：**
-
-| 镜像标签 | 说明 | 用途 |
-|----------|------|------|
-| `spiritlhls/gobup:latest` | 最新版本 | 快速部署 |
-| `spiritlhl/gobup:20251230-062908` | 特定日期版本 | 需要固定版本 |
-
 所有镜像均支持 `linux/amd64` 和 `linux/arm64` 架构。
 
-**基础运行（无认证，首次访问需登录）：**
-
-```bash
-docker pull spiritlhl/gobup:latest
-
-docker run -d \
-  --name gobup \
-  -p 22380:12380 \
-  -v /path/to/bilirecord:/rec \
-  -v /path/to/data:/app/data \
-  --restart unless-stopped \
-  spiritlhl/gobup:latest
-```
-
-**完整配置运行（带认证，推荐）：**
+**完整配置运行**
 
 ```bash
 docker pull spiritlhl/gobup:latest
@@ -226,44 +171,6 @@ gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\bilirecord ^
 - 或使用服务器IP：`http://你的IP:12380` 或 `http://你的IP:22380`
 - 如果设置了认证，使用设置的用户名密码登录
 - 如果未设置认证，首次访问会要求输入用户名密码
-
-## 认证配置
-
-### 认证方式说明
-
-GoBup 使用 HTTP Basic Auth 进行身份认证，保护您的管理界面和数据安全。
-
-**首次部署时强烈建议设置用户名和密码！**
-
-### 如何设置认证
-
-#### 方法一：安装脚本部署
-
-```bash
-# 使用环境变量
-GOBUP_USERNAME=admin GOBUP_PASSWORD=your_password bash install.sh
-```
-
-#### 方法二：Docker 部署
-
-```bash
-# Docker run
-docker run -d \
-  -e USERNAME=admin \
-  -e PASSWORD=your_password \
-  ...其他参数
-
-# Docker Compose
-environment:
-  - USERNAME=admin
-  - PASSWORD=your_password
-```
-
-#### 方法三：手动运行
-
-```bash
-./gobup-server -username admin -password your_password -port 12380 -work-path /path/to/bilirecord
-```
 
 ## 配置说明
 
