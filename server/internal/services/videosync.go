@@ -61,6 +61,9 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 		history.AvID = strconv.FormatInt(videoInfo.Aid, 10)
 	}
 
+	// 记录之前的状态
+	oldVideoState := history.VideoState
+
 	// 更新视频状态
 	history.VideoState = videoInfo.State
 	switch videoInfo.State {
@@ -72,6 +75,19 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 		history.VideoStateDesc = "已通过"
 	default:
 		history.VideoStateDesc = fmt.Sprintf("未知状态(%d)", videoInfo.State)
+	}
+
+	// 检测到从非通过状态变为通过状态，触发审核通过后的文件处理
+	if oldVideoState != 1 && videoInfo.State == 1 {
+		log.Printf("视频 %s 审核通过，检查是否需要处理文件", history.BvID)
+		if room.DeleteType == 11 || room.DeleteType == 12 {
+			fileMoverSvc := NewFileMoverService()
+			if err := fileMoverSvc.ProcessFilesByStrategy(historyID, room.DeleteType); err != nil {
+				log.Printf("审核通过后文件处理失败: %v", err)
+			} else {
+				log.Printf("审核通过后文件处理成功: history_id=%d, strategy=%d", historyID, room.DeleteType)
+			}
+		}
 	}
 
 	// 获取分P详细信息

@@ -46,6 +46,8 @@ func (s *FileMoverService) ProcessFilesByStrategy(historyID uint, strategy int) 
 		return s.MoveFilesForHistory(historyID)
 	case 11: // 审核通过后复制
 		return s.copyFiles(historyID)
+	case 12: // 审核通过后删除
+		return s.deleteFiles(historyID)
 	default:
 		return fmt.Errorf("未知的文件处理策略: %d", strategy)
 	}
@@ -253,8 +255,9 @@ func (s *FileMoverService) deleteFiles(historyID uint) error {
 			continue
 		}
 
-		// 删除相关文件
-		s.deleteRelatedFiles(part.FilePath)
+		// 注意：投稿成功后只删除视频文件，不删除XML弹幕文件和封面文件
+		// 弹幕可能还没有填充完毕，封面可能还需要使用
+		// 如果需要删除相关文件，请手动删除或配置其他策略
 
 		part.FileDelete = true
 		db.Save(&part)

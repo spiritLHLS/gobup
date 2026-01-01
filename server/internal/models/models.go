@@ -43,7 +43,7 @@ type RecordRoom struct {
 	CoverType          string         `gorm:"default:default" json:"coverType"` // default, live, diy
 	Wxuid              string         `json:"wxuid"`
 	PushMsgTags        string         `json:"pushMsgTags"`
-	DeleteType         int            `gorm:"default:0" json:"deleteType"` // 0-不处理 1-上传前删除 2-上传前移动 3-上传后删除 4-上传后移动 5-上传前复制 6-上传后复制 7-上传完成后立即删除 8-N天后删除移动 9-投稿成功后删除 10-投稿成功后移动 11-审核通过后复制
+	DeleteType         int            `gorm:"default:9" json:"deleteType"` // 0-不处理 1-上传前删除 2-上传前移动 3-上传后删除 4-上传后移动 5-上传前复制 6-上传后复制 7-上传完成后立即删除 8-N天后删除移动 9-投稿成功后删除 10-投稿成功后移动 11-审核通过后复制 12-审核通过后删除
 	DeleteDay          int            `gorm:"default:5" json:"deleteDay"`
 	MoveDir            string         `json:"moveDir"`
 	SendDm             bool           `gorm:"default:false" json:"sendDm"`

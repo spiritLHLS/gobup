@@ -3,6 +3,7 @@ package upload
 import (
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -71,12 +72,6 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	tags := s.templateSvc.BuildTags(room.Tags, templateData)
 	tagsStr := strings.Join(tags, ",")
 
-	// 获取封面
-	coverURL := room.CoverURL
-	if coverURL == "" {
-		coverURL = "" // 使用默认封面或从视频截取
-	}
-
 	tid := room.TID
 	if tid == 0 {
 		tid = 171 // 默认分区：电子竞技
@@ -84,6 +79,48 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 
 	// 创建客户端
 	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+
+	// 获取封面
+	coverURL := room.CoverURL
+	if coverURL == "live" && len(parts) > 0 {
+		// 从录制文件路径查找封面文件
+		lastPartPath := parts[len(parts)-1].FilePath
+		basePath := strings.TrimSuffix(lastPartPath, filepath.Ext(lastPartPath))
+
+		// 尝试多种封面文件格式
+		coverPaths := []string{
+			basePath + ".cover.jpg",
+			basePath + ".jpg",
+			basePath + ".cover.png",
+			basePath + ".png",
+		}
+
+		for _, coverPath := range coverPaths {
+			if _, err := os.Stat(coverPath); err == nil {
+				// 找到封面文件，上传到B站
+				coverData, err := os.ReadFile(coverPath)
+				if err == nil {
+					log.Printf("找到封面文件: %s", coverPath)
+					uploadedURL, err := client.UploadCover(coverData)
+					if err == nil {
+						coverURL = uploadedURL
+						log.Printf("封面上传成功: %s", coverURL)
+						break
+					} else {
+						log.Printf("封面上传失败: %v", err)
+					}
+				}
+			}
+		}
+
+		if coverURL == "live" {
+			// 如果没找到封面文件，使用默认或从视频截取
+			coverURL = ""
+			log.Printf("未找到封面文件，将使用默认封面或从视频截取")
+		}
+	} else if coverURL == "" {
+		coverURL = "" // 使用默认封面或从视频截取
+	}
 
 	// 构建分P信息
 	var videoParts []bili.PublishVideoPartRequest
