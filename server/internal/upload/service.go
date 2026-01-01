@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
@@ -57,13 +58,29 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 
 // uploadPartInternal 实际执行上传分P（内部方法，由队列调用）
 func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) error {
+	db := database.GetDB()
+
+	// 检查是否在速率限制冷却期内
+	if part.RateLimitCooldownAt != nil && time.Now().Before(*part.RateLimitCooldownAt) {
+		remainingTime := time.Until(*part.RateLimitCooldownAt)
+		log.Printf("[速率限制] 分P %d 仍在冷却期内，剩余时间: %.0f分钟", part.ID, remainingTime.Minutes())
+		return fmt.Errorf("速率限制冷却期中，剩余时间: %.0f分钟", remainingTime.Minutes())
+	}
+
+	// 如果冷却期已过，重置相关字段
+	if part.RateLimitCooldownAt != nil && time.Now().After(*part.RateLimitCooldownAt) {
+		log.Printf("[速率限制] 分P %d 冷却期已过，重置限制状态", part.ID)
+		part.RateLimitCooldownAt = nil
+		part.RateLimitRetryCount = 0
+		part.UploadErrorMsg = ""
+		db.Save(part)
+	}
+
 	// 防止重复上传
 	if _, loaded := s.uploadingParts.LoadOrStore(part.ID, true); loaded {
 		return fmt.Errorf("分P %d 正在上传中", part.ID)
 	}
 	defer s.uploadingParts.Delete(part.ID)
-
-	db := database.GetDB()
 
 	// 标记为上传中
 	part.Uploading = true
@@ -148,6 +165,7 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	// 执行上传，支持重试
 	var uploadResult *bili.UploadResult
 	var uploadErr error
+	var is406RateLimit bool
 
 	maxRetries := 3
 	for retry := 0; retry < maxRetries; retry++ {
@@ -155,10 +173,28 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		if uploadErr == nil {
 			break
 		}
-		log.Printf("上传失败 (重试 %d/%d): %v", retry+1, maxRetries, uploadErr)
+
+		// 检测是否为406速率限制错误
+		errMsg := uploadErr.Error()
+		if contains(errMsg, "406") || contains(errMsg, "601") || contains(errMsg, "上传视频过快") {
+			is406RateLimit = true
+			log.Printf("检测到406速率限制错误 (重试 %d/%d): %v", retry+1, maxRetries, uploadErr)
+		} else {
+			log.Printf("上传失败 (重试 %d/%d): %v", retry+1, maxRetries, uploadErr)
+		}
 	}
 
 	if uploadErr != nil {
+		// 如果是406速率限制，并且所有重试都失败，设置24小时冷却期
+		if is406RateLimit {
+			cooldownTime := time.Now().Add(24 * time.Hour)
+			part.RateLimitCooldownAt = &cooldownTime
+			part.RateLimitRetryCount++
+			part.UploadErrorMsg = fmt.Sprintf("速率限制(406)，已设置24小时冷却期至 %s", cooldownTime.Format("2006-01-02 15:04:05"))
+			db.Save(part)
+			log.Printf("[速率限制] 分P %d 触发406限制，设置24小时冷却期至: %s", part.ID, cooldownTime.Format("2006-01-02 15:04:05"))
+		}
+
 		// 标记上传失败
 		s.progressTracker.MarkFailed(int64(part.ID), uploadErr.Error())
 
@@ -262,4 +298,9 @@ func containsTag(tags, target string) bool {
 		}
 	}
 	return false
+}
+
+// contains 检查字符串是否包含子串
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

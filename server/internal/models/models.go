@@ -100,31 +100,33 @@ type RecordHistory struct {
 
 // RecordHistoryPart 录制分P
 type RecordHistoryPart struct {
-	ID               uint      `gorm:"primarykey" json:"id"`
-	CreatedAt        time.Time `gorm:"index" json:"createdAt"`
-	HistoryID        uint      `gorm:"index;not null" json:"historyId"`
-	RoomID           string    `gorm:"index" json:"roomId"`
-	SessionID        string    `gorm:"index" json:"sessionId"`
-	Title            string    `json:"title"`
-	LiveTitle        string    `json:"liveTitle"`
-	AreaName         string    `json:"areaName"`
-	FilePath         string    `gorm:"uniqueIndex:idx_file_path" json:"filePath"`
-	FileName         string    `json:"fileName"`
-	FileSize         int64     `gorm:"default:0" json:"fileSize"`
-	Duration         int       `gorm:"default:0" json:"duration"`
-	StartTime        time.Time `gorm:"index" json:"startTime"`
-	EndTime          time.Time `json:"endTime"`
-	Recording        bool      `gorm:"default:false;index" json:"recording"`
-	Upload           bool      `gorm:"default:false;index" json:"upload"`
-	Uploading        bool      `gorm:"default:false" json:"uploading"`
-	CID              int64     `gorm:"column:c_id" json:"cid"`
-	FileDelete       bool      `gorm:"default:false" json:"fileDelete"`
-	FileMoved        bool      `gorm:"default:false" json:"fileMoved"`
-	Page             int       `gorm:"default:0" json:"page"`             // 分P序号
-	XcodeState       int       `gorm:"default:0" json:"xcodeState"`       // 转码状态
-	UploadRetryCount int       `gorm:"default:0" json:"uploadRetryCount"` // 上传重试次数
-	UploadErrorMsg   string    `gorm:"type:text" json:"uploadErrorMsg"`   // 上传错误信息
-	UploadLine       string    `json:"uploadLine"`                        // 实际上传使用的线路
+	ID                  uint       `gorm:"primarykey" json:"id"`
+	CreatedAt           time.Time  `gorm:"index" json:"createdAt"`
+	HistoryID           uint       `gorm:"index;not null" json:"historyId"`
+	RoomID              string     `gorm:"index" json:"roomId"`
+	SessionID           string     `gorm:"index" json:"sessionId"`
+	Title               string     `json:"title"`
+	LiveTitle           string     `json:"liveTitle"`
+	AreaName            string     `json:"areaName"`
+	FilePath            string     `gorm:"uniqueIndex:idx_file_path" json:"filePath"`
+	FileName            string     `json:"fileName"`
+	FileSize            int64      `gorm:"default:0" json:"fileSize"`
+	Duration            int        `gorm:"default:0" json:"duration"`
+	StartTime           time.Time  `gorm:"index" json:"startTime"`
+	EndTime             time.Time  `json:"endTime"`
+	Recording           bool       `gorm:"default:false;index" json:"recording"`
+	Upload              bool       `gorm:"default:false;index" json:"upload"`
+	Uploading           bool       `gorm:"default:false" json:"uploading"`
+	CID                 int64      `gorm:"column:c_id" json:"cid"`
+	FileDelete          bool       `gorm:"default:false" json:"fileDelete"`
+	FileMoved           bool       `gorm:"default:false" json:"fileMoved"`
+	Page                int        `gorm:"default:0" json:"page"`                // 分P序号
+	XcodeState          int        `gorm:"default:0" json:"xcodeState"`          // 转码状态
+	UploadRetryCount    int        `gorm:"default:0" json:"uploadRetryCount"`    // 上传重试次数
+	UploadErrorMsg      string     `gorm:"type:text" json:"uploadErrorMsg"`      // 上传错误信息
+	UploadLine          string     `json:"uploadLine"`                           // 实际上传使用的线路
+	RateLimitCooldownAt *time.Time `gorm:"index" json:"rateLimitCooldownAt"`     // 速率限制冷却时间（24小时后恢复）
+	RateLimitRetryCount int        `gorm:"default:0" json:"rateLimitRetryCount"` // 406速率限制失败次数
 }
 
 // BiliBiliUser B站用户

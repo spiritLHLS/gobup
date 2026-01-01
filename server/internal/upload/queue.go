@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/gobup/server/internal/models"
 )
@@ -59,6 +60,22 @@ func (q *UserUploadQueue) process() {
 	for task := range q.tasks {
 		log.Printf("[队列] 开始处理用户%d的上传任务: part_id=%d, file=%s (剩余队列: %d)",
 			q.userID, task.Part.ID, task.Part.FileName, len(q.tasks))
+
+		// 检查是否在速率限制冷却期内
+		if task.Part.RateLimitCooldownAt != nil && time.Now().Before(*task.Part.RateLimitCooldownAt) {
+			remainingTime := time.Until(*task.Part.RateLimitCooldownAt)
+			log.Printf("[队列] 用户%d的任务part_id=%d处于速率限制冷却期，剩余%.0f分钟，暂时跳过",
+				q.userID, task.Part.ID, remainingTime.Minutes())
+
+			// 将任务重新放回队列尾部，等待下次处理
+			select {
+			case q.tasks <- task:
+				log.Printf("[队列] 任务part_id=%d已重新放回队列等待冷却期结束", task.Part.ID)
+			default:
+				log.Printf("[队列] 队列已满，无法重新放入任务part_id=%d", task.Part.ID)
+			}
+			continue
+		}
 
 		// 执行上传
 		if err := q.service.uploadPartInternal(task.Part, task.History, task.Room); err != nil {
