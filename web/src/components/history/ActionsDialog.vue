@@ -237,7 +237,15 @@ const hasUnuploadedParts = computed(() => {
 
 .actions-grid .el-button {
   width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
   justify-content: center;
+  padding: 0 15px;
+}
+
+.actions-grid .el-button .el-icon {
+  margin-right: 5px;
 }
 
 @media (max-width: 768px) {

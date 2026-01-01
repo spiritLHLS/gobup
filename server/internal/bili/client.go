@@ -149,6 +149,12 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 		WebOS:        1,
 	}
 
+	// 调试日志：输出videos数组以检查CID
+	fmt.Printf("投稿请求 - 视频数量: %d\n", len(videos))
+	for i, v := range videos {
+		fmt.Printf("  视频[%d]: filename=%s, cid=%d, title=%s\n", i, v.Filename, v.Cid, v.Title)
+	}
+
 	var resp PublishResponse
 
 	// 获取buvid（参考biliupforjava的实现）
