@@ -2,6 +2,7 @@ package bili
 
 import (
 	"fmt"
+	"time"
 )
 
 // VideoInfo 视频基本信息
@@ -143,11 +144,17 @@ func (c *BiliClient) EditVideo(aid int64, title, desc, tags string, tid int, cov
 		CSRF:      csrf,
 	}
 
+	// 构建URL，添加时间戳和csrf参数（参考biliupforjava）
+	apiURL := fmt.Sprintf("https://member.bilibili.com/x/vu/web/edit?t=%d&csrf=%s",
+		time.Now().UnixMilli(), csrf)
+
 	var resp EditVideoResponse
 	r, err := c.ReqClient.R().
+		SetHeader("Content-Type", "application/json").
+		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame").
 		SetBodyJsonMarshal(req).
 		SetSuccessResult(&resp).
-		Post(fmt.Sprintf("https://member.bilibili.com/x/vu/web/edit?csrf=%s", csrf))
+		Post(apiURL)
 
 	if err != nil {
 		return fmt.Errorf("编辑视频失败: %w", err)
@@ -182,6 +189,8 @@ func (c *BiliClient) UpdateVideoVisibility(aid int64, isOnlySelf bool) error {
 	}
 
 	r, err := c.ReqClient.R().
+		SetHeader("Content-Type", "application/x-www-form-urlencoded").
+		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame").
 		SetFormData(map[string]string{
 			"aid":          fmt.Sprintf("%d", aid),
 			"is_only_self": fmt.Sprintf("%d", onlySelfValue),

@@ -75,6 +75,16 @@ type PublishResponse struct {
 	} `json:"data"`
 }
 
+// BuvIdResponse 获取buvid响应
+type BuvIdResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"message"`
+	Data struct {
+		B3 string `json:"b_3"`
+		B4 string `json:"b_4"`
+	} `json:"data"`
+}
+
 func NewBiliClient(accessKey, cookies string, mid int64) *BiliClient {
 	client := req.C().
 		SetTimeout(300 * time.Second).
@@ -101,6 +111,9 @@ func (c *BiliClient) PreUpload(filename string, filesize int64) (*PreUploadResp,
 // PublishVideo 投稿视频
 func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, cover string) (int64, error) {
 	csrf := GetCookieValue(c.Cookies, "bili_jct")
+	if csrf == "" {
+		return 0, fmt.Errorf("未找到CSRF token (bili_jct)")
+	}
 
 	req := PublishVideoRequest{
 		Copyright: copyright,
@@ -116,18 +129,43 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 
 	var resp PublishResponse
 
+	// 获取buvid（参考biliupforjava的实现）
+	buvResp, err := c.GetBuvId()
+	if err != nil {
+		// buvid获取失败不阻塞，记录日志继续
+		fmt.Printf("警告: 获取buvid失败: %v\n", err)
+	}
+
+	// 构建完整的Cookie（包含buvid3和buvid4）
+	fullCookie := c.Cookies
+	if buvResp != nil && buvResp.Data.B3 != "" && buvResp.Data.B4 != "" {
+		if !strings.Contains(c.Cookies, "buvid3=") {
+			fullCookie += fmt.Sprintf("; buvid3=%s", buvResp.Data.B3)
+		}
+		if !strings.Contains(c.Cookies, "buvid4=") {
+			fullCookie += fmt.Sprintf("; buvid4=%s", buvResp.Data.B4)
+		}
+	}
+
 	// 使用限流器和重试机制
 	limiter := GetAPILimiter()
-	err := WithRetry(DefaultRetryConfig, func() error {
+	err = WithRetry(DefaultRetryConfig, func() error {
 		// 等待限流器允许
 		if err := limiter.WaitPublish(); err != nil {
 			return err
 		}
 
+		// 构建URL，添加时间戳和csrf参数（参考biliupforjava）
+		apiURL := fmt.Sprintf("https://member.bilibili.com/x/vu/web/add/v3?t=%d&csrf=%s",
+			time.Now().UnixMilli(), csrf)
+
 		_, err := c.ReqClient.R().
-			SetBody(req).
+			SetHeader("Cookie", fullCookie).
+			SetHeader("Content-Type", "application/json").
+			SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame").
+			SetBodyJsonMarshal(req).
 			SetSuccessResult(&resp).
-			Post("https://member.bilibili.com/x/vu/web/add/v3")
+			Post(apiURL)
 		return err
 	})
 
@@ -170,6 +208,11 @@ func (c *BiliClient) GetSeasons(mid int64) ([]Season, error) {
 
 // UploadCover 上传封面
 func (c *BiliClient) UploadCover(imageData []byte) (string, error) {
+	csrf := GetCookieValue(c.Cookies, "bili_jct")
+	if csrf == "" {
+		return "", fmt.Errorf("未找到CSRF token")
+	}
+
 	var result struct {
 		Code int    `json:"code"`
 		Msg  string `json:"message"`
@@ -178,10 +221,14 @@ func (c *BiliClient) UploadCover(imageData []byte) (string, error) {
 		} `json:"data"`
 	}
 
+	// 添加csrf参数和适当的请求头
+	apiURL := fmt.Sprintf("https://member.bilibili.com/x/vu/web/cover/up?csrf=%s", csrf)
+
 	_, err := c.ReqClient.R().
+		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame").
 		SetFileBytes("file", "cover.jpg", imageData).
 		SetSuccessResult(&result).
-		Post("https://member.bilibili.com/x/vu/web/cover/up")
+		Post(apiURL)
 	if err != nil {
 		return "", err
 	}
@@ -202,6 +249,21 @@ func (c *BiliClient) IsValidCookie() bool {
 // GetCSRF 获取CSRF Token
 func (c *BiliClient) GetCSRF() string {
 	return GetCookieValue(c.Cookies, "bili_jct")
+}
+
+// GetBuvId 获取buvid3和buvid4
+func (c *BiliClient) GetBuvId() (*BuvIdResponse, error) {
+	var resp BuvIdResponse
+	_, err := c.ReqClient.R().
+		SetSuccessResult(&resp).
+		Get("https://api.bilibili.com/x/frontend/finger/spi")
+	if err != nil {
+		return nil, fmt.Errorf("获取buvid失败: %w", err)
+	}
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("获取buvid失败: %s", resp.Msg)
+	}
+	return &resp, nil
 }
 
 // SendDynamic 发送动态
