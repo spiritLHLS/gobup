@@ -93,17 +93,26 @@
             <el-option
               v-for="line in uploadLines"
               :key="line.value"
-              :label="formatLine(line.value)"
+              :label="line.label"
               :value="line.value"
             >
-              <span style="float: left">{{ formatLine(line.value) }}</span>
-              <span style="float: right; font-size: 12px; color: #8492a6" v-if="lineStats[line.value]">
-                <i :class="getLineStatusIcon(lineStats[line.value])" :style="{color: getLineStatusColor(lineStats[line.value])}"></i>
-                {{ lineStats[line.value] }}
-                <span v-if="lineSpeeds[line.value]" style="margin-left: 5px; color: #409EFF">
-                  <el-icon><Upload /></el-icon> {{ lineSpeeds[line.value] }}
-                </span>
-              </span>
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="flex: 1; overflow: hidden;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-weight: 500;">{{ line.label }}</span>
+                    <el-tag v-if="line.recommended" size="small" type="success">推荐</el-tag>
+                    <el-tag v-if="line.provider" size="small" type="info">{{ line.provider }}</el-tag>
+                  </div>
+                  <div style="font-size: 12px; color: #909399; margin-top: 2px;">{{ line.description }}</div>
+                </div>
+                <div style="flex-shrink: 0; margin-left: 10px; font-size: 12px; color: #8492a6;" v-if="lineStats[line.value]">
+                  <i :class="getLineStatusIcon(lineStats[line.value])" :style="{color: getLineStatusColor(lineStats[line.value])}"></i>
+                  {{ lineStats[line.value] }}
+                  <span v-if="lineSpeeds[line.value]" style="margin-left: 5px; color: #409EFF">
+                    <el-icon><Upload /></el-icon> {{ lineSpeeds[line.value] }}
+                  </span>
+                </div>
+              </div>
             </el-option>
           </el-select>
           <div class="line-test-actions" style="margin-top: 10px;">

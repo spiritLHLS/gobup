@@ -210,7 +210,7 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 
 func (u *UposUploader) lineUpload(pre *PreUploadResp) (*LineUploadResp, error) {
 	// 构建URL: https:{endpoint}/{upUrl}?uploads&output=json
-	// upUrl 从 upos_uri 提取（去掉开头的/）
+	// 参考Java实现: "https:" + preUploadBean.getEndpoint() + preUploadBean.getUpUrl() + "?uploads&output=json"
 	upUrl := getUpUrl(pre.UposURI)
 	if upUrl == "" {
 		return nil, fmt.Errorf("upos_uri为空或无效")
@@ -221,8 +221,14 @@ func (u *UposUploader) lineUpload(pre *PreUploadResp) (*LineUploadResp, error) {
 	if !strings.HasPrefix(endpoint, "http") {
 		endpoint = "https:" + endpoint
 	}
+	// 移除endpoint末尾的斜杠（如果有）
+	endpoint = strings.TrimSuffix(endpoint, "/")
 
+	// upUrl已经不包含开头的/，直接拼接
 	uploadURL := endpoint + "/" + upUrl + "?uploads&output=json"
+	log.Printf("[UPOS] 线路上传URL: %s", uploadURL)
+	log.Printf("[UPOS] upos_uri: %s, upUrl: %s", pre.UposURI, upUrl)
+
 	var lineResp LineUploadResp
 
 	// 使用限流器和重试机制
@@ -286,12 +292,9 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 	}
 	endpoint = strings.TrimSuffix(endpoint, "/")
 
-	// 构建完整URL
-	uposURI := pre.UposURI
-	if !strings.HasPrefix(uposURI, "/") {
-		uposURI = "/" + uposURI
-	}
-	uploadURL := endpoint + uposURI + "?" + buildQueryString(params)
+	// 构建完整URL - 参考Java实现: "https:" + preUploadBean.getEndpoint() + preUploadBean.getUpUrl()
+	upUrl := getUpUrl(pre.UposURI)
+	uploadURL := endpoint + "/" + upUrl + "?" + buildQueryString(params)
 
 	// 使用限流器和重试机制
 	limiter := GetAPILimiter()
@@ -303,13 +306,16 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 
 		resp, err := u.client.ReqClient.R().
 			SetHeader("X-Upos-Auth", pre.Auth).
+			SetHeader("Content-Type", "application/octet-stream").
 			SetBody(chunk).
 			Put(uploadURL)
 		if err != nil {
+			log.Printf("[UPOS] 上传分片%d请求失败: err=%v", partNum, err)
 			return err
 		}
 
 		if !resp.IsSuccessState() {
+			log.Printf("[UPOS] 上传分片%d HTTP错误: status=%d, body=%s", partNum, resp.GetStatusCode(), resp.String())
 			return fmt.Errorf("上传分片失败: %s", resp.String())
 		}
 
@@ -343,10 +349,13 @@ func (u *UposUploader) completeUpload(pre *PreUploadResp, line *LineUploadResp, 
 	if !strings.HasPrefix(endpoint, "http") {
 		endpoint = "https:" + endpoint
 	}
+	endpoint = strings.TrimSuffix(endpoint, "/")
 
 	// 构建完整URL
 	upUrl := getUpUrl(pre.UposURI)
 	uploadURL := endpoint + "/" + upUrl + "?" + buildQueryString(params)
+	log.Printf("[UPOS] 完成上传URL: %s", uploadURL)
+
 	limiter := GetAPILimiter()
 	var result map[string]interface{}
 	err := WithRetry(DefaultRetryConfig, func() error {
@@ -357,6 +366,7 @@ func (u *UposUploader) completeUpload(pre *PreUploadResp, line *LineUploadResp, 
 
 		resp, err := u.client.ReqClient.R().
 			SetHeader("X-Upos-Auth", pre.Auth).
+			SetHeader("Content-Type", "application/json").
 			SetBody(body).
 			SetSuccessResult(&result).
 			Post(uploadURL)

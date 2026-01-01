@@ -146,15 +146,20 @@ func parseLineParams(line string) (zone, upcdn string) {
 	return
 }
 
-// getUpUrl 从upos_uri提取上传路径（去掉开头的/）
-// 例如: /ugcbup/xxx.mp4 -> ugcbup/xxx.mp4
+// getUpUrl 从upos_uri提取上传路径
+// 从第一个/之后开始提取，匹配Java版本实现：upos_uri.substring(upos_uri.indexOf("/") + 1)
+// 例如: upos:/ugcever/xxx.flv -> ugcever/xxx.flv
+//
+//	/ugcbup/xxx.mp4 -> ugcbup/xxx.mp4
 func getUpUrl(uposURI string) string {
 	if uposURI == "" {
 		return ""
 	}
-	// 如果以/开头，去掉第一个/
-	if strings.HasPrefix(uposURI, "/") {
-		return uposURI[1:]
+	// 查找第一个/的位置，从其后开始提取
+	idx := strings.Index(uposURI, "/")
+	if idx >= 0 && idx < len(uposURI)-1 {
+		return uposURI[idx+1:]
 	}
+	// 如果没有/或/在最后，返回原字符串
 	return uposURI
 }
