@@ -84,8 +84,8 @@
           <el-form-item label="自动上传">
             <div class="switch-item">
               <el-switch 
-                v-model="config.AutoUpload" 
-                @change="toggleFeature('AutoUpload', $event)"
+                v-model="config.autoUpload" 
+                @change="toggleFeature('autoUpload', $event)"
                 size="large"
               />
               <span class="help-text">启用后，系统会自动将录制文件上传到B站</span>
@@ -95,8 +95,8 @@
           <el-form-item label="自动投稿">
             <div class="switch-item">
               <el-switch 
-                v-model="config.AutoPublish" 
-                @change="toggleFeature('AutoPublish', $event)"
+                v-model="config.autoPublish" 
+                @change="toggleFeature('autoPublish', $event)"
                 size="large"
               />
               <span class="help-text">启用后，上传完成后自动提交投稿</span>
@@ -106,8 +106,8 @@
           <el-form-item label="自动删除">
             <div class="switch-item">
               <el-switch 
-                v-model="config.AutoDelete" 
-                @change="toggleFeature('AutoDelete', $event)"
+                v-model="config.autoDelete" 
+                @change="toggleFeature('autoDelete', $event)"
                 size="large"
               />
               <span class="help-text">启用后，投稿成功后自动删除本地文件</span>
@@ -117,8 +117,8 @@
           <el-form-item label="自动弹幕发送">
             <div class="switch-item">
               <el-switch 
-                v-model="config.AutoSendDanmaku" 
-                @change="toggleFeature('AutoSendDanmaku', $event)"
+                v-model="config.autoSendDanmaku" 
+                @change="toggleFeature('autoSendDanmaku', $event)"
                 size="large"
               />
               <span class="help-text">启用后，自动发送高能弹幕</span>
@@ -134,18 +134,18 @@
           <el-form-item label="自动扫盘录入">
             <div class="switch-item">
               <el-switch 
-                v-model="config.AutoFileScan" 
-                @change="toggleFeature('AutoFileScan', $event)"
+                v-model="config.autoFileScan" 
+                @change="toggleFeature('autoFileScan', $event)"
                 size="large"
               />
               <span class="help-text">启用后，定时扫描录制目录，自动录入新文件</span>
             </div>
           </el-form-item>
 
-          <el-form-item label="扫盘间隔（分钟）" v-if="config.AutoFileScan">
+          <el-form-item label="扫盘间隔（分钟）" v-if="config.autoFileScan">
             <div class="number-input-wrapper">
               <el-input-number 
-                v-model="config.FileScanInterval" 
+                v-model="config.fileScanInterval" 
                 :min="10" 
                 :max="1440"
                 :step="10"
@@ -155,10 +155,10 @@
             </div>
           </el-form-item>
 
-          <el-form-item label="文件最小年龄（小时）" v-if="config.AutoFileScan">
+          <el-form-item label="文件最小年龄（小时）" v-if="config.autoFileScan">
             <div class="number-input-wrapper">
               <el-input-number 
-                v-model="config.FileScanMinAge" 
+                v-model="config.fileScanMinAge" 
                 :min="1" 
                 :max="72"
                 size="large"
@@ -167,7 +167,7 @@
             </div>
           </el-form-item>
 
-          <el-form-item label="文件最小大小（MB）" v-if="config.AutoFileScan">
+          <el-form-item label="文件最小大小（MB）" v-if="config.autoFileScan">
             <div class="number-input-wrapper">
               <el-input-number 
                 v-model="fileScanMinSizeMB" 
@@ -180,7 +180,7 @@
             </div>
           </el-form-item>
 
-          <el-form-item label="文件最大年龄（小时）" v-if="config.AutoFileScan">
+          <el-form-item label="文件最大年龄（小时）" v-if="config.autoFileScan">
             <div class="number-input-wrapper">
               <el-input-number 
                 v-model="fileScanMaxAgeHours" 
@@ -225,18 +225,18 @@
           <el-form-item label="孤儿文件扫描">
             <div class="switch-item">
               <el-switch 
-                v-model="config.EnableOrphanScan" 
-                @change="toggleFeature('EnableOrphanScan', $event)"
+                v-model="config.enableOrphanScan" 
+                @change="toggleFeature('enableOrphanScan', $event)"
                 size="large"
               />
               <span class="help-text">启用后，定时清理无关联的历史记录</span>
             </div>
           </el-form-item>
 
-          <el-form-item label="孤儿扫描间隔（分钟）" v-if="config.EnableOrphanScan">
+          <el-form-item label="孤儿扫描间隔（分钟）" v-if="config.enableOrphanScan">
             <div class="number-input-wrapper">
               <el-input-number 
-                v-model="config.OrphanScanInterval" 
+                v-model="config.orphanScanInterval" 
                 :min="60" 
                 :max="1440"
                 :step="60"
@@ -249,7 +249,7 @@
           <el-form-item label="工作目录">
             <div class="path-input-wrapper">
               <el-input 
-                v-model="config.WorkPath" 
+                v-model="config.workPath" 
                 placeholder="/path/to/recordings"
                 size="large"
               />
@@ -277,18 +277,18 @@ const saving = ref(false)
 const scanning = ref(false)
 const fileScanDialogRef = ref(null)
 const config = ref({
-  AutoUpload: false,
-  AutoPublish: false,
-  AutoDelete: false,
-  AutoSendDanmaku: false,
-  AutoFileScan: true,
-  FileScanInterval: 60,
-  FileScanMinAge: 12,
-  FileScanMinSize: 1048576,
-  FileScanMaxAge: 720,
-  WorkPath: '',
-  EnableOrphanScan: true,
-  OrphanScanInterval: 360
+  autoUpload: false,
+  autoPublish: false,
+  autoDelete: false,
+  autoSendDanmaku: false,
+  autoFileScan: true,
+  fileScanInterval: 60,
+  fileScanMinAge: 12,
+  fileScanMinSize: 1048576,
+  fileScanMaxAge: 720,
+  workPath: '',
+  enableOrphanScan: true,
+  orphanScanInterval: 360
 })
 
 const stats = ref({
@@ -300,24 +300,24 @@ const stats = ref({
 
 // 计算属性：将字节转MB显示
 const fileScanMinSizeMB = computed({
-  get: () => Math.round(config.value.FileScanMinSize / (1024 * 1024)),
+  get: () => Math.round(config.value.fileScanMinSize / (1024 * 1024)),
   set: (val) => {} // 空setter，实际更新在updateFileScanMinSize中
 })
 
 // 计算属性：将小时转换显示
 const fileScanMaxAgeHours = computed({
-  get: () => config.value.FileScanMaxAge,
+  get: () => config.value.fileScanMaxAge,
   set: (val) => {} // 空setter，实际更新在updateFileScanMaxAge中
 })
 
 // 更新文件最小大小（MB转字节）
 const updateFileScanMinSize = (val) => {
-  config.value.FileScanMinSize = val * 1024 * 1024
+  config.value.fileScanMinSize = val * 1024 * 1024
 }
 
 // 更新文件最大年龄（小时）
 const updateFileScanMaxAge = (val) => {
-  config.value.FileScanMaxAge = val
+  config.value.fileScanMaxAge = val
 }
 
 // 加载配置
@@ -349,11 +349,8 @@ const loadStats = async () => {
 // 切换功能开关（实时生效）
 const toggleFeature = async (feature, enabled) => {
   try {
-    // 将大驼峰转换为小驼峰，以匹配后端的 JSON 标签
-    const key = feature.charAt(0).toLowerCase() + feature.slice(1)
-    
     const response = await api.post('/config/toggle', {
-      key: key,
+      key: feature,
       value: enabled
     })
     if (response.type === 'success') {
@@ -378,7 +375,10 @@ const saveConfig = async () => {
     const response = await api.put('/config/system', config.value)
     if (response.type === 'success') {
       ElMessage.success('配置保存成功')
-      loadConfig()
+      // 使用后端返回的最新配置更新前端
+      if (response.data) {
+        config.value = response.data
+      }
     } else {
       ElMessage.error(response.msg || '保存失败')
     }
@@ -393,12 +393,12 @@ const saveConfig = async () => {
 // 获取功能名称
 const getFeatureName = (feature) => {
   const names = {
-    AutoUpload: '自动上传',
-    AutoPublish: '自动投稿',
-    AutoDelete: '自动删除',
-    AutoSendDanmaku: '自动弹幕发送',
-    AutoFileScan: '自动扫盘录入',
-    EnableOrphanScan: '孤儿文件扫描'
+    autoUpload: '自动上传',
+    autoPublish: '自动投稿',
+    autoDelete: '自动删除',
+    autoSendDanmaku: '自动弹幕发送',
+    autoFileScan: '自动扫盘录入',
+    enableOrphanScan: '孤儿文件扫描'
   }
   return names[feature] || feature
 }
