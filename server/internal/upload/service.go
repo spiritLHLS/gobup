@@ -22,14 +22,17 @@ type Service struct {
 	wxPusher        *services.WxPusherService
 	templateSvc     *services.TemplateService
 	progressTracker *ProgressTracker
+	queueManager    *QueueManager
 }
 
 func NewService() *Service {
-	return &Service{
+	svc := &Service{
 		wxPusher:        services.NewWxPusherService(),
 		templateSvc:     services.NewTemplateService(),
 		progressTracker: NewProgressTracker(),
 	}
+	svc.queueManager = NewQueueManager(svc)
+	return svc
 }
 
 // GetProgressTracker 获取进度追踪器
@@ -37,8 +40,23 @@ func (s *Service) GetProgressTracker() *ProgressTracker {
 	return s.progressTracker
 }
 
-// UploadPart 上传分P
+// GetQueueManager 获取队列管理器
+func (s *Service) GetQueueManager() *QueueManager {
+	return s.queueManager
+}
+
+// UploadPart 上传分P（通过队列）
 func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) error {
+	// 将任务添加到用户的上传队列
+	if room.UploadUserID == 0 {
+		return fmt.Errorf("房间未配置上传用户")
+	}
+
+	return s.queueManager.AddTask(room.UploadUserID, part, history, room)
+}
+
+// uploadPartInternal 实际执行上传分P（内部方法，由队列调用）
+func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) error {
 	// 防止重复上传
 	if _, loaded := s.uploadingParts.LoadOrStore(part.ID, true); loaded {
 		return fmt.Errorf("分P %d 正在上传中", part.ID)

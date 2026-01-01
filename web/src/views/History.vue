@@ -5,7 +5,6 @@
         <div class="card-header">
           <span>录制历史</span>
           <div class="header-actions">
-            <el-button type="danger" size="small" plain @click="showCleanDialog = true">清理旧记录</el-button>
             <div class="search-box">
               <el-input
                 v-model="searchParams.roomId"
@@ -108,10 +107,43 @@
 
       <!-- 批量操作栏 -->
       <div v-if="selectedHistories.length > 0" class="batch-actions">
-        <span class="batch-info">已选择 {{ selectedHistories.length }} 项</span>
-        <el-button size="small" @click="handleBatchUpdate('publish')">批量标记已发布</el-button>
-        <el-button size="small" @click="handleBatchUpdate('unpublish')">批量取消发布</el-button>
-        <el-button size="small" type="danger" @click="handleBatchDelete">批量删除</el-button>
+        <div class="batch-header">
+          <span class="batch-info">已选择 {{ selectedHistories.length }} 项</span>
+        </div>
+        <div class="batch-buttons">
+          <el-button size="small" type="warning" @click="handleBatchUpload">
+            <el-icon><Upload /></el-icon>
+            上传视频
+          </el-button>
+          <el-button size="small" type="primary" @click="handleBatchPublish">
+            <el-icon><Promotion /></el-icon>
+            投稿视频
+          </el-button>
+          <el-button size="small" type="success" @click="handleBatchSendDanmaku">
+            <el-icon><ChatDotRound /></el-icon>
+            发送弹幕
+          </el-button>
+          <el-button size="small" type="info" @click="handleBatchSyncVideo">
+            <el-icon><Refresh /></el-icon>
+            同步信息
+          </el-button>
+          <el-button size="small" type="warning" @click="handleBatchMoveFiles">
+            <el-icon><FolderOpened /></el-icon>
+            移动文件
+          </el-button>
+          <el-button size="small" plain @click="handleBatchResetStatus">
+            <el-icon><RefreshLeft /></el-icon>
+            重置状态
+          </el-button>
+          <el-button size="small" type="danger" plain @click="handleBatchDeleteOnly">
+            <el-icon><Delete /></el-icon>
+            仅删除记录
+          </el-button>
+          <el-button size="small" type="danger" @click="handleBatchDeleteWithFiles">
+            <el-icon><DeleteFilled /></el-icon>
+            删除记录和文件
+          </el-button>
+        </div>
       </div>
 
       <div class="pagination">
@@ -252,19 +284,47 @@
       </template>
     </el-dialog>
 
-    <!-- 清理旧记录对话框 -->
-    <el-dialog v-model="showCleanDialog" title="清理旧记录" width="400px">
-      <el-form>
-        <el-form-item label="保留天数">
-          <el-input-number v-model="cleanDays" :min="7" :max="365" />
-          <div style="margin-top: 8px; font-size: 12px; color: #999;">
-            将删除{{ cleanDays }}天前的未上传、未发布记录
-          </div>
+    <!-- 批量重置状态选项对话框 -->
+    <el-dialog v-model="batchResetDialogVisible" title="批量重置状态选项" width="500px">
+      <div style="margin-bottom: 20px; color: #666;">
+        <el-icon><InfoFilled /></el-icon>
+        请选择要重置的状态项：
+      </div>
+      <el-form label-width="120px">
+        <el-form-item label="上传状态">
+          <el-checkbox v-model="batchResetOptions.upload">
+            将所有分P标记为未上传，清除CID等上传信息
+          </el-checkbox>
+        </el-form-item>
+        <el-form-item label="投稿状态">
+          <el-checkbox v-model="batchResetOptions.publish">
+            标记为未投稿，清除BV号、AV号等投稿信息
+          </el-checkbox>
+        </el-form-item>
+        <el-form-item label="弹幕状态">
+          <el-checkbox v-model="batchResetOptions.danmaku">
+            标记为未发送弹幕
+          </el-checkbox>
+        </el-form-item>
+        <el-form-item label="文件状态">
+          <el-checkbox v-model="batchResetOptions.files">
+            标记为未移动文件
+          </el-checkbox>
         </el-form-item>
       </el-form>
+      <div style="margin-top: 20px; padding: 12px; background: #fff3cd; border-radius: 4px; color: #856404;">
+        <el-icon><Warning /></el-icon>
+        <span style="margin-left: 8px;">提示：重置后需要重新执行相应的操作</span>
+      </div>
       <template #footer>
-        <el-button @click="showCleanDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleCleanOld">确定</el-button>
+        <el-button @click="batchResetDialogVisible = false">取消</el-button>
+        <el-button 
+          type="primary" 
+          @click="confirmBatchReset"
+          :disabled="!batchResetOptions.upload && !batchResetOptions.publish && !batchResetOptions.danmaku && !batchResetOptions.files"
+        >
+          确定重置
+        </el-button>
       </template>
     </el-dialog>
 
@@ -424,8 +484,6 @@ const histories = ref([])
 const loading = ref(false)
 const total = ref(0)
 const selectedHistories = ref([])
-const showCleanDialog = ref(false)
-const cleanDays = ref(30)
 
 // 计算是否有未上传的分P
 const hasUnuploadedParts = computed(() => {
@@ -456,6 +514,13 @@ const historyProgressMap = ref({})
 const historyProgressTimer = ref(null)
 const resetDialogVisible = ref(false)
 const resetOptions = ref({
+  upload: true,
+  publish: true,
+  danmaku: true,
+  files: true
+})
+const batchResetDialogVisible = ref(false)
+const batchResetOptions = ref({
   upload: true,
   publish: true,
   danmaku: true,
@@ -764,70 +829,320 @@ const handleSelectionChange = (selection) => {
   selectedHistories.value = selection
 }
 
-const handleBatchUpdate = async (status) => {
+// 批量上传
+const handleBatchUpload = async () => {
   if (selectedHistories.value.length === 0) {
     ElMessage.warning('请先选择记录')
     return
   }
 
-  const statusText = {
-    'publish': '标记已发布',
-    'unpublish': '取消发布',
-    'upload': '标记待上传',
-    'cancel': '取消上传'
-  }
-
   try {
-    await ElMessageBox.confirm(`确定要${statusText[status]}选中的 ${selectedHistories.value.length} 项吗？`, '批量操作', {
+    await ElMessageBox.confirm(`确定要批量上传选中的 ${selectedHistories.value.length} 项吗？`, '批量上传', {
       type: 'warning'
     })
 
-    const ids = selectedHistories.value.map(h => h.id)
-    await axios.post('/api/history/batchUpdate', { ids, status })
+    // 获取用户列表
+    const userResponse = await axios.get('/api/biliUser/list')
+    const users = userResponse.data || []
     
-    ElMessage.success('批量操作成功')
-    fetchHistories()
+    if (users.length === 0) {
+      ElMessage.warning('请先添加B站用户')
+      return
+    }
+    
+    const userId = users[0].id
+
+    const loadingInstance = ElLoading.service({ text: '批量上传中...' })
+    try {
+      for (const history of selectedHistories.value) {
+        try {
+          await axios.post(`/api/history/upload/${history.id}`, { userId })
+        } catch (error) {
+          console.error(`上传历史记录${history.id}失败:`, error)
+        }
+      }
+      ElMessage.success('批量上传任务已启动')
+      startHistoryProgressPolling()
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('批量操作失败:', error)
-      ElMessage.error('操作失败')
+      console.error('批量上传失败:', error)
+      ElMessage.error('批量上传失败')
     }
   }
 }
 
-const handleBatchDelete = async () => {
+// 批量投稿
+const handleBatchPublish = async () => {
   if (selectedHistories.value.length === 0) {
     ElMessage.warning('请先选择记录')
     return
   }
 
   try {
-    await ElMessageBox.confirm(`确定要删除选中的 ${selectedHistories.value.length} 项吗？`, '批量删除', {
+    await ElMessageBox.confirm(`确定要批量投稿选中的 ${selectedHistories.value.length} 项吗？`, '批量投稿', {
       type: 'warning'
     })
 
-    const ids = selectedHistories.value.map(h => h.id)
-    await axios.post('/api/history/batchDelete', { ids })
+    // 获取用户列表
+    const userResponse = await axios.get('/api/biliUser/list')
+    const users = userResponse.data || []
     
-    ElMessage.success('批量删除成功')
-    fetchHistories()
+    if (users.length === 0) {
+      ElMessage.warning('请先添加B站用户')
+      return
+    }
+    
+    const userId = users[0].id
+
+    const loadingInstance = ElLoading.service({ text: '批量投稿中...' })
+    try {
+      for (const history of selectedHistories.value) {
+        try {
+          await axios.post(`/api/history/publish/${history.id}`, { userId })
+        } catch (error) {
+          console.error(`投稿历史记录${history.id}失败:`, error)
+        }
+      }
+      ElMessage.success('批量投稿任务已提交')
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('批量投稿失败:', error)
+      ElMessage.error('批量投稿失败')
+    }
+  }
+}
+
+// 批量发送弹幕
+const handleBatchSendDanmaku = async () => {
+  if (selectedHistories.value.length === 0) {
+    ElMessage.warning('请先选择记录')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(`确定要批量发送弹幕到选中的 ${selectedHistories.value.length} 项吗？此操作可能需要较长时间。`, '批量发送弹幕', {
+      type: 'warning'
+    })
+
+    // 获取用户列表
+    const userResponse = await axios.get('/api/biliUser/list')
+    const users = userResponse.data || []
+    
+    if (users.length === 0) {
+      ElMessage.warning('请先添加B站用户')
+      return
+    }
+    
+    const userId = users[0].id
+
+    const loadingInstance = ElLoading.service({ text: '批量发送弹幕中...' })
+    try {
+      for (const history of selectedHistories.value) {
+        try {
+          await axios.post(`/api/history/sendDanmaku/${history.id}`, { userId })
+        } catch (error) {
+          console.error(`发送弹幕到历史记录${history.id}失败:`, error)
+        }
+      }
+      ElMessage.success('批量发送弹幕成功')
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('批量发送弹幕失败:', error)
+      ElMessage.error('批量发送弹幕失败')
+    }
+  }
+}
+
+// 批量同步视频
+const handleBatchSyncVideo = async () => {
+  if (selectedHistories.value.length === 0) {
+    ElMessage.warning('请先选择记录')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(`确定要批量同步选中的 ${selectedHistories.value.length} 项的视频信息吗？`, '批量同步', {
+      type: 'warning'
+    })
+
+    const loadingInstance = ElLoading.service({ text: '批量同步中...' })
+    try {
+      for (const history of selectedHistories.value) {
+        try {
+          await axios.post(`/api/history/syncVideo/${history.id}`)
+        } catch (error) {
+          console.error(`同步历史记录${history.id}失败:`, error)
+        }
+      }
+      ElMessage.success('批量同步成功')
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('批量同步失败:', error)
+      ElMessage.error('批量同步失败')
+    }
+  }
+}
+
+// 批量移动文件
+const handleBatchMoveFiles = async () => {
+  if (selectedHistories.value.length === 0) {
+    ElMessage.warning('请先选择记录')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(`确定要批量移动选中的 ${selectedHistories.value.length} 项的文件吗？`, '批量移动文件', {
+      type: 'warning'
+    })
+
+    const loadingInstance = ElLoading.service({ text: '批量移动文件中...' })
+    try {
+      for (const history of selectedHistories.value) {
+        try {
+          await axios.post(`/api/history/moveFiles/${history.id}`)
+        } catch (error) {
+          console.error(`移动历史记录${history.id}文件失败:`, error)
+        }
+      }
+      ElMessage.success('批量移动文件成功')
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('批量移动文件失败:', error)
+      ElMessage.error('批量移动文件失败')
+    }
+  }
+}
+
+// 批量重置状态
+const handleBatchResetStatus = () => {
+  if (selectedHistories.value.length === 0) {
+    ElMessage.warning('请先选择记录')
+    return
+  }
+
+  // 重置选项为默认值
+  batchResetOptions.value = {
+    upload: true,
+    publish: true,
+    danmaku: true,
+    files: true
+  }
+  batchResetDialogVisible.value = true
+}
+
+// 确认批量重置
+const confirmBatchReset = async () => {
+  try {
+    const loadingInstance = ElLoading.service({ text: '批量重置中...' })
+    try {
+      for (const history of selectedHistories.value) {
+        try {
+          await axios.post(`/api/history/resetStatus/${history.id}`, batchResetOptions.value)
+        } catch (error) {
+          console.error(`重置历史记录${history.id}失败:`, error)
+        }
+      }
+      ElMessage.success('批量重置成功')
+      batchResetDialogVisible.value = false
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
+  } catch (error) {
+    console.error('批量重置失败:', error)
+    ElMessage.error(error.response?.data?.msg || '批量重置失败')
+  }
+}
+
+// 批量仅删除记录
+const handleBatchDeleteOnly = async () => {
+  if (selectedHistories.value.length === 0) {
+    ElMessage.warning('请先选择记录')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `此操作将仅删除选中的 ${selectedHistories.value.length} 项数据库记录，不会删除文件。确定要删除吗？`,
+      '批量删除记录',
+      { type: 'warning' }
+    )
+    
+    const loadingInstance = ElLoading.service({ text: '批量删除中...' })
+    try {
+      for (const history of selectedHistories.value) {
+        try {
+          await axios.get(`/api/history/delete/${history.id}`)
+        } catch (error) {
+          console.error(`删除历史记录${history.id}失败:`, error)
+        }
+      }
+      ElMessage.success('批量删除记录成功')
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
   } catch (error) {
     if (error !== 'cancel') {
       console.error('批量删除失败:', error)
-      ElMessage.error('删除失败')
+      ElMessage.error(error.response?.data?.msg || '批量删除失败')
     }
   }
 }
 
-const handleCleanOld = async () => {
+// 批量删除记录和文件
+const handleBatchDeleteWithFiles = async () => {
+  if (selectedHistories.value.length === 0) {
+    ElMessage.warning('请先选择记录')
+    return
+  }
+
   try {
-    const result = await axios.post('/api/history/cleanOld', { days: cleanDays.value })
-    ElMessage.success(`已清理 ${result.data.deletedCount} 条旧记录`)
-    showCleanDialog.value = false
-    fetchHistories()
+    await ElMessageBox.confirm(
+      `此操作将删除选中的 ${selectedHistories.value.length} 项数据库记录和所有相关文件，不可恢复。确定要删除吗？`,
+      '批量删除记录和文件',
+      { type: 'error', confirmButtonText: '确定删除' }
+    )
+    
+    const loadingInstance = ElLoading.service({ text: '批量删除中...' })
+    try {
+      for (const history of selectedHistories.value) {
+        try {
+          await axios.post(`/api/history/deleteWithFiles/${history.id}`)
+        } catch (error) {
+          console.error(`删除历史记录${history.id}和文件失败:`, error)
+        }
+      }
+      ElMessage.success('批量删除记录和文件成功')
+      fetchHistories()
+    } finally {
+      loadingInstance.close()
+    }
   } catch (error) {
-    console.error('清理失败:', error)
-    ElMessage.error('清理失败')
+    if (error !== 'cancel') {
+      console.error('批量删除失败:', error)
+      ElMessage.error(error.response?.data?.msg || '批量删除失败')
+    }
   }
 }
 
@@ -1150,19 +1465,30 @@ onUnmounted(() => {
 }
 
 .batch-actions {
-  padding: 12px;
+  padding: 15px;
   background: #f5f7fa;
-  border-radius: 4px;
+  border-radius: 8px;
   margin-top: 15px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+}
+
+.batch-header {
+  margin-bottom: 12px;
 }
 
 .batch-info {
   font-size: 14px;
-  color: #606266;
-  margin-right: 10px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.batch-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.batch-buttons .el-button {
+  margin: 0;
 }
 
 .pagination {
@@ -1295,7 +1621,17 @@ onUnmounted(() => {
   justify-content: center;
 }
 
+@media (max-width: 1200px) {
+  .batch-buttons {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
 @media (max-width: 768px) {
+  .batch-buttons {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
   .status-grid,
   .actions-grid {
     grid-template-columns: 1fr;

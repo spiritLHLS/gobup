@@ -228,7 +228,9 @@ func (p *Processor) handleFileClosed(event WebhookEvent) error {
 		}
 
 		if room.Upload {
-			go p.uploadService.UploadPart(&part, &history, &room)
+			if err := p.uploadService.UploadPart(&part, &history, &room); err != nil {
+				log.Printf("添加上传任务到队列失败: %v", err)
+			}
 		}
 	}
 
@@ -296,7 +298,9 @@ func (p *Processor) processBlrecEvent(jsonData []byte) error {
 		}
 
 		if room.Upload {
-			go p.uploadService.UploadPart(&part, &history, &room)
+			if err := p.uploadService.UploadPart(&part, &history, &room); err != nil {
+				log.Printf("添加上传任务到队列失败: %v", err)
+			}
 		}
 	}
 

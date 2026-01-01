@@ -98,6 +98,12 @@ func SetupRoutes(router *gin.Engine) {
 				ratelimit.POST("/config", controllers.SetRateLimitConfig)
 			}
 
+			// 上传队列状态
+			queue := auth.Group("/queue")
+			{
+				queue.GET("/status", controllers.GetUploadQueueStatus)
+			}
+
 			// 配置导入导出
 			config := auth.Group("/config")
 			{

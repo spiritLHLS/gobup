@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -292,22 +293,28 @@ func UploadHistory(c *gin.Context) {
 
 	log.Printf("开始上传历史记录 %d 的 %d 个分P", historyID, len(parts))
 
-	// 异步上传所有分P
-	go func() {
-		for i := range parts {
-			log.Printf("正在上传分P: part_id=%d, file=%s", parts[i].ID, parts[i].FileName)
-			if err := historyUploadService.UploadPart(&parts[i], &history, &room); err != nil {
-				// 错误会在UploadPart中记录
-				log.Printf("分P上传失败: part_id=%d, error=%v", parts[i].ID, err)
-				continue
-			}
+	// 将所有分P添加到上传队列
+	var successCount int
+	for i := range parts {
+		log.Printf("添加分P到上传队列: part_id=%d, file=%s", parts[i].ID, parts[i].FileName)
+		if err := historyUploadService.UploadPart(&parts[i], &history, &room); err != nil {
+			log.Printf("添加分P到队列失败: part_id=%d, error=%v", parts[i].ID, err)
+			continue
 		}
-		log.Printf("历史记录 %d 的所有分P上传任务完成", historyID)
-	}()
+		successCount++
+	}
+
+	if successCount == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"type": "error",
+			"msg":  "所有分P添加到队列失败",
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"type":  "success",
-		"msg":   "上传任务已启动",
-		"count": len(parts),
+		"msg":   fmt.Sprintf("已将%d个分P添加到上传队列", successCount),
+		"count": successCount,
 	})
 }
