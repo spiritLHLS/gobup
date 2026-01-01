@@ -1,163 +1,126 @@
 <template>
-  <el-container class="layout-container">
-    <el-aside width="200px">
-      <div class="logo">
-        <h2>GoBup</h2>
-      </div>
-      <el-menu
-        :default-active="activeMenu"
-        router
-        class="sidebar-menu"
-      >
-        <el-menu-item index="/dashboard">
-          <el-icon><Odometer /></el-icon>
-          <span>控制面板</span>
-        </el-menu-item>
-        <el-menu-item index="/rooms">
-          <el-icon><VideoCamera /></el-icon>
-          <span>房间管理</span>
-        </el-menu-item>
-        <el-menu-item index="/history">
-          <el-icon><DocumentCopy /></el-icon>
-          <span>录制历史</span>
-        </el-menu-item>
-        <el-menu-item index="/users">
-          <el-icon><User /></el-icon>
-          <span>用户管理</span>
-        </el-menu-item>
-        <el-menu-item index="/logs">
-          <el-icon><Document /></el-icon>
-          <span>系统日志</span>
-        </el-menu-item>
-      </el-menu>
-    </el-aside>
-
-    <el-container>
-      <el-header>
-        <div class="header-content">
-          <h3>{{ currentTitle }}</h3>
-          <div class="header-actions">
-            <el-dropdown @command="handleCommand">
-              <span class="user-info">
-                <el-icon><User /></el-icon>
-                {{ username }}
-                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-              </span>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="logout">退出登录</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </div>
-        </div>
-      </el-header>
-      <el-main>
-        <router-view />
-      </el-main>
-    </el-container>
-  </el-container>
+  <div class="layout-container" :class="{ 'is-mobile': isMobile }">
+    <!-- 侧边栏 -->
+    <Sidebar 
+      :is-collapse="isCollapse" 
+      :is-mobile="isMobile"
+    />
+    
+    <!-- 主内容区域 -->
+    <div class="main-container" :class="{ 'is-collapse': isCollapse }">
+      <!-- 导航栏 -->
+      <Navbar 
+        :is-collapse="isCollapse"
+        @toggle-sidebar="handleToggleSidebar" 
+      />
+      
+      <!-- 主要内容 -->
+      <AppMain />
+    </div>
+    
+    <!-- 移动端遮罩 -->
+    <div 
+      v-if="isMobile && !isCollapse"
+      class="mobile-mask"
+      @click="handleToggleSidebar"
+    />
+  </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox, ElMessage } from 'element-plus'
-import { ArrowDown, Odometer, VideoCamera, DocumentCopy, User, Document } from '@element-plus/icons-vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { Sidebar, Navbar, AppMain } from '@/components/layout'
 
-const route = useRoute()
-const router = useRouter()
+const isCollapse = ref(false)
+const isMobile = ref(false)
 
-const activeMenu = computed(() => route.path)
-const currentTitle = computed(() => route.meta.title || 'GoBup')
-const username = ref(localStorage.getItem('username') || 'admin')
-
-const handleCommand = (command) => {
-  if (command === 'logout') {
-    ElMessageBox.confirm('确定要退出登录吗？', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    }).then(() => {
-      localStorage.removeItem('username')
-      localStorage.removeItem('password')
-      ElMessage.success('已退出登录')
-      router.push('/login')
-    }).catch(() => {})
+// 检测设备类型
+const checkDevice = () => {
+  const width = window.innerWidth
+  isMobile.value = width < 768
+  
+  // 移动端默认折叠侧边栏
+  if (isMobile.value) {
+    isCollapse.value = true
   }
 }
+
+// 切换侧边栏
+const handleToggleSidebar = () => {
+  isCollapse.value = !isCollapse.value
+}
+
+// 响应式监听
+let resizeTimer = null
+const handleResize = () => {
+  if (resizeTimer) clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(() => {
+    checkDevice()
+  }, 100)
+}
+
+onMounted(() => {
+  checkDevice()
+  window.addEventListener('resize', handleResize)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  if (resizeTimer) clearTimeout(resizeTimer)
+})
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .layout-container {
-  min-height: 100vh;
-}
-
-.el-aside {
-  background-color: #001529;
-}
-
-.logo {
-  height: 60px;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 20px;
-}
-
-.sidebar-menu {
-  border-right: none;
-  background-color: #001529;
-}
-
-.sidebar-menu :deep(.el-menu-item:hover),
-.sidebar-menu :deep(.el-menu-item.is-active) {
-  color: #fff;
-  background-color: #1890ff !important;
-}
-
-.el-header {
-  background-color: #fff;
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
-  display: flex;
-  align-items: center;
-  padding: 0 20px;
-}
-
-.header-content {
   width: 100%;
+  min-height: 100vh;
+  background-color: var(--bg-color-primary);
+  
+  &.is-mobile {
+    .main-container {
+      margin-left: 0;
+    }
+  }
+}
+
+.main-container {
+  flex: 1;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  margin-left: var(--sidebar-width);
+  transition: margin-left var(--transition-normal);
+  min-height: 100vh;
+  
+  &.is-collapse {
+    margin-left: var(--sidebar-width-collapsed);
+  }
 }
 
-.header-content h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 500;
+.mobile-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: calc(var(--z-sidebar) - 1);
+  animation: fadeIn 0.3s;
 }
 
-.header-actions {
-  display: flex;
-  align-items: center;
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 8px 12px;
-  border-radius: 4px;
-  transition: background-color 0.3s;
-}
-
-.user-info:hover {
-  background-color: #f5f5f5;
-}
-
-.el-main {
-  padding: 20px;
+/* 响应式 */
+@media (max-width: 768px) {
+  .main-container {
+    margin-left: 0 !important;
+  }
 }
 </style>

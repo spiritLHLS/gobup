@@ -1,18 +1,21 @@
 <template>
-  <div class="dashboard">
-    <el-card class="header-card">
+  <div class="dashboard-container">
+    <!-- 页面标题 -->
+    <div class="page-header">
       <h2>系统控制面板</h2>
-      <p class="subtitle">管理系统功能开关和查看运行状态</p>
-    </el-card>
+      <p>管理系统功能开关和查看运行状态</p>
+    </div>
 
     <!-- 统计卡片 -->
     <el-row :gutter="20" class="stats-row">
       <el-col :xs="24" :sm="12" :md="6">
         <el-card shadow="hover" class="stat-card">
-          <div class="stat-item">
-            <el-icon class="stat-icon" color="#409EFF"><VideoCamera /></el-icon>
-            <div class="stat-content">
-              <div class="stat-value">{{ stats.totalRecordings || 0 }}</div>
+          <div class="stat-content">
+            <div class="stat-icon primary-icon">
+              <el-icon><VideoCamera /></el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-number">{{ stats.totalRecordings || 0 }}</div>
               <div class="stat-label">总录制数</div>
             </div>
           </div>
@@ -20,11 +23,13 @@
       </el-col>
       
       <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-item">
-            <el-icon class="stat-icon" color="#67C23A"><Upload /></el-icon>
-            <div class="stat-content">
-              <div class="stat-value">{{ stats.uploadedCount || 0 }}</div>
+        <el-card shadow="hover" class="stat-card success-card">
+          <div class="stat-content">
+            <div class="stat-icon success-icon">
+              <el-icon><Upload /></el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-number">{{ stats.uploadedCount || 0 }}</div>
               <div class="stat-label">已上传</div>
             </div>
           </div>
@@ -32,11 +37,13 @@
       </el-col>
       
       <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-item">
-            <el-icon class="stat-icon" color="#E6A23C"><Clock /></el-icon>
-            <div class="stat-content">
-              <div class="stat-value">{{ stats.pendingCount || 0 }}</div>
+        <el-card shadow="hover" class="stat-card warning-card">
+          <div class="stat-content">
+            <div class="stat-icon warning-icon">
+              <el-icon><Clock /></el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-number">{{ stats.pendingCount || 0 }}</div>
               <div class="stat-label">待处理</div>
             </div>
           </div>
@@ -44,11 +51,13 @@
       </el-col>
       
       <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-item">
-            <el-icon class="stat-icon" color="#F56C6C"><Warning /></el-icon>
-            <div class="stat-content">
-              <div class="stat-value">{{ stats.failedCount || 0 }}</div>
+        <el-card shadow="hover" class="stat-card danger-card">
+          <div class="stat-content">
+            <div class="stat-icon danger-icon">
+              <el-icon><Warning /></el-icon>
+            </div>
+            <div class="stat-info">
+              <div class="stat-number">{{ stats.failedCount || 0 }}</div>
               <div class="stat-label">失败</div>
             </div>
           </div>
@@ -61,131 +70,171 @@
       <template #header>
         <div class="card-header">
           <span>功能开关</span>
-          <el-button type="primary" size="small" @click="saveConfig" :loading="saving">
+          <el-button type="primary" size="default" @click="saveConfig" :loading="saving">
+            <el-icon><Check /></el-icon>
             保存配置
           </el-button>
         </div>
       </template>
 
-      <el-form label-width="200px" v-loading="loading">
-        <el-form-item label="自动上传">
-          <el-switch 
-            v-model="config.AutoUpload" 
-            @change="toggleFeature('AutoUpload', $event)"
-            active-text="开启"
-            inactive-text="关闭"
-          />
-          <span class="help-text">启用后，系统会自动将录制文件上传到B站</span>
-        </el-form-item>
+      <el-form label-width="180px" v-loading="loading" label-position="left">
+        <div class="form-section">
+          <div class="section-title">上传与投稿</div>
+          
+          <el-form-item label="自动上传">
+            <div class="switch-item">
+              <el-switch 
+                v-model="config.AutoUpload" 
+                @change="toggleFeature('AutoUpload', $event)"
+                size="large"
+              />
+              <span class="help-text">启用后，系统会自动将录制文件上传到B站</span>
+            </div>
+          </el-form-item>
 
-        <el-form-item label="自动投稿">
-          <el-switch 
-            v-model="config.AutoPublish" 
-            @change="toggleFeature('AutoPublish', $event)"
-            active-text="开启"
-            inactive-text="关闭"
-          />
-          <span class="help-text">启用后，上传完成后自动提交投稿</span>
-        </el-form-item>
+          <el-form-item label="自动投稿">
+            <div class="switch-item">
+              <el-switch 
+                v-model="config.AutoPublish" 
+                @change="toggleFeature('AutoPublish', $event)"
+                size="large"
+              />
+              <span class="help-text">启用后，上传完成后自动提交投稿</span>
+            </div>
+          </el-form-item>
 
-        <el-form-item label="自动删除">
-          <el-switch 
-            v-model="config.AutoDelete" 
-            @change="toggleFeature('AutoDelete', $event)"
-            active-text="开启"
-            inactive-text="关闭"
-          />
-          <span class="help-text">启用后，投稿成功后自动删除本地文件</span>
-        </el-form-item>
+          <el-form-item label="自动删除">
+            <div class="switch-item">
+              <el-switch 
+                v-model="config.AutoDelete" 
+                @change="toggleFeature('AutoDelete', $event)"
+                size="large"
+              />
+              <span class="help-text">启用后，投稿成功后自动删除本地文件</span>
+            </div>
+          </el-form-item>
 
-        <el-form-item label="自动弹幕发送">
-          <el-switch 
-            v-model="config.AutoSendDanmaku" 
-            @change="toggleFeature('AutoSendDanmaku', $event)"
-            active-text="开启"
-            inactive-text="关闭"
-          />
-          <span class="help-text">启用后，自动发送高能弹幕</span>
-        </el-form-item>
-
-        <el-divider />
-
-        <el-form-item label="自动扫盘录入">
-          <el-switch 
-            v-model="config.AutoFileScan" 
-            @change="toggleFeature('AutoFileScan', $event)"
-            active-text="开启"
-            inactive-text="关闭"
-          />
-          <span class="help-text">启用后，定时扫描录制目录，自动录入新文件</span>
-        </el-form-item>
-
-        <el-form-item label="扫盘间隔（分钟）" v-if="config.AutoFileScan">
-          <el-input-number 
-            v-model="config.FileScanInterval" 
-            :min="10" 
-            :max="1440"
-            :step="10"
-          />
-          <span class="help-text">扫描间隔时间，最小10分钟</span>
-        </el-form-item>
-
-        <el-form-item label="文件最小年龄（小时）" v-if="config.AutoFileScan">
-          <el-input-number 
-            v-model="config.FileScanMinAge" 
-            :min="1" 
-            :max="72"
-          />
-          <span class="help-text">文件创建超过此时间才录入，避免扫描正在写入的文件（推荐12小时）</span>
-        </el-form-item>
-
-        <el-form-item label="文件最小大小（MB）" v-if="config.AutoFileScan">
-          <el-input-number 
-            v-model="fileScanMinSizeMB" 
-            :min="1" 
-            :max="10240"
-            @change="updateFileScanMinSize"
-          />
-          <span class="help-text">小于此大小的文件将被忽略</span>
-        </el-form-item>
-
-        <el-form-item label="文件最大年龄（小时）" v-if="config.AutoFileScan">
-          <el-input-number 
-            v-model="fileScanMaxAgeHours" 
-            :min="24" 
-            :max="8760"
-            :step="24"
-            @change="updateFileScanMaxAge"
-          />
-          <span class="help-text">超过此时间的文件将被忽略（默认30天）</span>
-        </el-form-item>
+          <el-form-item label="自动弹幕发送">
+            <div class="switch-item">
+              <el-switch 
+                v-model="config.AutoSendDanmaku" 
+                @change="toggleFeature('AutoSendDanmaku', $event)"
+                size="large"
+              />
+              <span class="help-text">启用后，自动发送高能弹幕</span>
+            </div>
+          </el-form-item>
+        </div>
 
         <el-divider />
 
-        <el-form-item label="孤儿文件扫描">
-          <el-switch 
-            v-model="config.EnableOrphanScan" 
-            @change="toggleFeature('EnableOrphanScan', $event)"
-            active-text="开启"
-            inactive-text="关闭"
-          />
-          <span class="help-text">启用后，定时清理无关联的历史记录</span>
-        </el-form-item>
+        <div class="form-section">
+          <div class="section-title">文件扫描</div>
+          
+          <el-form-item label="自动扫盘录入">
+            <div class="switch-item">
+              <el-switch 
+                v-model="config.AutoFileScan" 
+                @change="toggleFeature('AutoFileScan', $event)"
+                size="large"
+              />
+              <span class="help-text">启用后，定时扫描录制目录，自动录入新文件</span>
+            </div>
+          </el-form-item>
 
-        <el-form-item label="孤儿扫描间隔（分钟）" v-if="config.EnableOrphanScan">
-          <el-input-number 
-            v-model="config.OrphanScanInterval" 
-            :min="60" 
-            :max="1440"
-            :step="60"
-          />
-          <span class="help-text">孤儿文件扫描间隔时间，最小1小时</span>
-        </el-form-item>
+          <el-form-item label="扫盘间隔（分钟）" v-if="config.AutoFileScan">
+            <div class="number-input-wrapper">
+              <el-input-number 
+                v-model="config.FileScanInterval" 
+                :min="10" 
+                :max="1440"
+                :step="10"
+                size="large"
+              />
+              <span class="help-text">扫描间隔时间，最小10分钟</span>
+            </div>
+          </el-form-item>
 
-        <el-form-item label="工作目录">
-          <el-input v-model="config.WorkPath" placeholder="/path/to/recordings" />
-          <span class="help-text">录制文件存放的根目录</span>
-        </el-form-item>
+          <el-form-item label="文件最小年龄（小时）" v-if="config.AutoFileScan">
+            <div class="number-input-wrapper">
+              <el-input-number 
+                v-model="config.FileScanMinAge" 
+                :min="1" 
+                :max="72"
+                size="large"
+              />
+              <span class="help-text">文件创建超过此时间才录入，避免扫描正在写入的文件（推荐12小时）</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="文件最小大小（MB）" v-if="config.AutoFileScan">
+            <div class="number-input-wrapper">
+              <el-input-number 
+                v-model="fileScanMinSizeMB" 
+                :min="1" 
+                :max="10240"
+                size="large"
+                @change="updateFileScanMinSize"
+              />
+              <span class="help-text">小于此大小的文件将被忽略</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="文件最大年龄（小时）" v-if="config.AutoFileScan">
+            <div class="number-input-wrapper">
+              <el-input-number 
+                v-model="fileScanMaxAgeHours" 
+                :min="24" 
+                :max="8760"
+                :step="24"
+                size="large"
+                @change="updateFileScanMaxAge"
+              />
+              <span class="help-text">超过此时间的文件将被忽略（默认30天）</span>
+            </div>
+          </el-form-item>
+        </div>
+
+        <el-divider />
+
+        <div class="form-section">
+          <div class="section-title">维护与清理</div>
+          
+          <el-form-item label="孤儿文件扫描">
+            <div class="switch-item">
+              <el-switch 
+                v-model="config.EnableOrphanScan" 
+                @change="toggleFeature('EnableOrphanScan', $event)"
+                size="large"
+              />
+              <span class="help-text">启用后，定时清理无关联的历史记录</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="孤儿扫描间隔（分钟）" v-if="config.EnableOrphanScan">
+            <div class="number-input-wrapper">
+              <el-input-number 
+                v-model="config.OrphanScanInterval" 
+                :min="60" 
+                :max="1440"
+                :step="60"
+                size="large"
+              />
+              <span class="help-text">孤儿文件扫描间隔时间，最小1小时</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="工作目录">
+            <div class="path-input-wrapper">
+              <el-input 
+                v-model="config.WorkPath" 
+                placeholder="/path/to/recordings"
+                size="large"
+              />
+              <span class="help-text">录制文件存放的根目录</span>
+            </div>
+          </el-form-item>
+        </div>
       </el-form>
     </el-card>
   </div>
@@ -194,7 +243,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { VideoCamera, Upload, Clock, Warning } from '@element-plus/icons-vue'
+import { VideoCamera, Upload, Clock, Warning, Check } from '@element-plus/icons-vue'
 import api from '../api'
 
 const loading = ref(false)
@@ -336,98 +385,272 @@ onMounted(() => {
 })
 </script>
 
-<style scoped>
-.dashboard {
-  padding: 20px;
+<style scoped lang="scss">
+.dashboard-container {
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
-.header-card {
-  margin-bottom: 20px;
-}
-
-.header-card h2 {
-  margin: 0 0 10px 0;
-  font-size: 24px;
-  color: #303133;
-}
-
-.subtitle {
-  margin: 0;
-  color: #909399;
-  font-size: 14px;
+.page-header {
+  margin-bottom: var(--spacing-lg);
+  
+  h2 {
+    font-size: var(--font-size-3xl);
+    color: var(--text-color-primary);
+    font-weight: var(--font-weight-bold);
+    margin: 0 0 8px 0;
+  }
+  
+  p {
+    font-size: var(--font-size-base);
+    color: var(--text-color-secondary);
+    margin: 0;
+  }
 }
 
 .stats-row {
-  margin-bottom: 20px;
+  margin-bottom: var(--spacing-xl);
 }
 
 .stat-card {
-  margin-bottom: 20px;
-}
-
-.stat-item {
-  display: flex;
-  align-items: center;
-}
-
-.stat-icon {
-  font-size: 48px;
-  margin-right: 20px;
+  height: 140px;
+  border-radius: var(--border-radius-xl);
+  transition: var(--transition-normal);
+  cursor: pointer;
+  border: 2px solid transparent;
+  
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--box-shadow-hover);
+  }
+  
+  &.success-card {
+    border-color: rgba(103, 194, 58, 0.2);
+  }
+  
+  &.warning-card {
+    border-color: rgba(230, 162, 60, 0.2);
+  }
+  
+  &.danger-card {
+    border-color: rgba(245, 108, 108, 0.2);
+  }
+  
+  :deep(.el-card__body) {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    padding: 24px;
+  }
 }
 
 .stat-content {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  width: 100%;
+}
+
+.stat-icon {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  flex-shrink: 0;
+  
+  &.primary-icon {
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-color-light));
+    color: white;
+  }
+  
+  &.success-icon {
+    background: linear-gradient(135deg, #67c23a, #85ce61);
+    color: white;
+  }
+  
+  &.warning-icon {
+    background: linear-gradient(135deg, #e6a23c, #f0c78a);
+    color: white;
+  }
+  
+  &.danger-icon {
+    background: linear-gradient(135deg, #f56c6c, #f89898);
+    color: white;
+  }
+}
+
+.stat-info {
   flex: 1;
 }
 
-.stat-value {
-  font-size: 32px;
-  font-weight: bold;
-  color: #303133;
-  line-height: 1;
+.stat-number {
+  font-size: var(--font-size-4xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-color-primary);
+  line-height: 1.2;
   margin-bottom: 8px;
 }
 
 .stat-label {
-  font-size: 14px;
-  color: #909399;
+  font-size: var(--font-size-sm);
+  color: var(--text-color-secondary);
+  font-weight: var(--font-weight-medium);
 }
 
 .config-card {
-  margin-bottom: 20px;
+  margin-bottom: var(--spacing-xl);
+  
+  :deep(.el-card__header) {
+    background-color: var(--bg-color-tertiary);
+  }
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  
+  > span {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-color-primary);
+  }
+}
+
+.form-section {
+  margin-bottom: var(--spacing-xl);
+  
+  .section-title {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-color-primary);
+    margin-bottom: var(--spacing-lg);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 2px solid var(--primary-color);
+    display: inline-block;
+  }
+}
+
+.switch-item,
+.number-input-wrapper,
+.path-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
 }
 
 .help-text {
-  margin-left: 10px;
-  color: #909399;
-  font-size: 12px;
+  flex: 1;
+  min-width: 200px;
+  color: var(--text-color-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
 }
 
 :deep(.el-form-item) {
-  margin-bottom: 24px;
+  margin-bottom: var(--spacing-lg);
+  
+  .el-form-item__label {
+    color: var(--text-color-primary);
+    font-weight: var(--font-weight-medium);
+  }
 }
 
 :deep(.el-divider) {
-  margin: 30px 0;
+  margin: var(--spacing-2xl) 0;
+  border-color: var(--border-color-light);
 }
 
-@media (max-width: 768px) {
-  .dashboard {
-    padding: 10px;
+:deep(.el-input-number) {
+  width: 180px;
+}
+
+:deep(.el-input) {
+  max-width: 500px;
+}
+
+/* 响应式 */
+@media (max-width: 1024px) {
+  .stat-card {
+    height: 120px;
+    margin-bottom: var(--spacing-md);
   }
   
   .stat-icon {
-    font-size: 36px;
-    margin-right: 15px;
+    width: 60px;
+    height: 60px;
+    font-size: 28px;
   }
   
-  .stat-value {
+  .stat-number {
+    font-size: var(--font-size-3xl);
+  }
+}
+
+@media (max-width: 768px) {
+  .page-header h2 {
+    font-size: var(--font-size-2xl);
+  }
+  
+  .stat-card {
+    height: auto;
+    min-height: 100px;
+    
+    :deep(.el-card__body) {
+      padding: 16px;
+    }
+  }
+  
+  .stat-content {
+    gap: var(--spacing-md);
+  }
+  
+  .stat-icon {
+    width: 50px;
+    height: 50px;
     font-size: 24px;
+  }
+  
+  .stat-number {
+    font-size: var(--font-size-2xl);
+  }
+  
+  .stat-label {
+    font-size: var(--font-size-xs);
+  }
+  
+  :deep(.el-form) {
+    .el-form-item__label {
+      font-size: var(--font-size-sm);
+    }
+  }
+  
+  .switch-item,
+  .number-input-wrapper {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .stat-icon {
+    width: 45px;
+    height: 45px;
+    font-size: 20px;
+  }
+  
+  .stat-number {
+    font-size: var(--font-size-xl);
+  }
+  
+  .card-header {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    align-items: flex-start;
   }
 }
 </style>
