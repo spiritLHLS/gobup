@@ -281,37 +281,68 @@ const showActionsDialog = (row) => {
 }
 
 const handleUploadInDialog = async () => {
-  await handleUpload(currentHistory.value, () => {
-    fetchHistories()
+  const historyId = currentHistory.value.id
+  await handleUpload(currentHistory.value, async () => {
+    await fetchHistories()
     startHistoryProgressPolling()
+    
+    // 刷新对话框内的数据
+    const updatedHistory = histories.value.find(h => h.id === historyId)
+    if (updatedHistory) {
+      currentHistory.value = updatedHistory
+    }
   })
 }
 
 const handlePublishInDialog = async () => {
-  await handlePublish(currentHistory.value, () => {
-    actionsDialogVisible.value = false
-    fetchHistories()
+  const historyId = currentHistory.value.id
+  await handlePublish(currentHistory.value, async () => {
+    await fetchHistories()
+    
+    // 刷新对话框内的数据
+    const updatedHistory = histories.value.find(h => h.id === historyId)
+    if (updatedHistory) {
+      currentHistory.value = updatedHistory
+    }
   })
 }
 
 const handleSendDanmakuInDialog = async () => {
-  await handleSendDanmaku(currentHistory.value, () => {
-    actionsDialogVisible.value = false
-    fetchHistories()
+  const historyId = currentHistory.value.id
+  await handleSendDanmaku(currentHistory.value, async () => {
+    await fetchHistories()
+    
+    // 刷新对话框内的数据
+    const updatedHistory = histories.value.find(h => h.id === historyId)
+    if (updatedHistory) {
+      currentHistory.value = updatedHistory
+    }
   })
 }
 
 const handleSyncVideoInDialog = async () => {
-  await handleSyncVideo(currentHistory.value, () => {
-    actionsDialogVisible.value = false
-    fetchHistories()
+  const historyId = currentHistory.value.id
+  await handleSyncVideo(currentHistory.value, async () => {
+    await fetchHistories()
+    
+    // 刷新对话框内的数据
+    const updatedHistory = histories.value.find(h => h.id === historyId)
+    if (updatedHistory) {
+      currentHistory.value = updatedHistory
+    }
   })
 }
 
 const handleMoveFilesInDialog = async () => {
-  await handleMoveFiles(currentHistory.value, () => {
-    actionsDialogVisible.value = false
-    fetchHistories()
+  const historyId = currentHistory.value.id
+  await handleMoveFiles(currentHistory.value, async () => {
+    await fetchHistories()
+    
+    // 刷新对话框内的数据
+    const updatedHistory = histories.value.find(h => h.id === historyId)
+    if (updatedHistory) {
+      currentHistory.value = updatedHistory
+    }
   })
 }
 
@@ -326,10 +357,16 @@ const handleResetStatus = () => {
 }
 
 const confirmReset = async (options) => {
-  await resetHistoryStatus(currentHistory.value.id, options, () => {
+  const historyId = currentHistory.value.id
+  await resetHistoryStatus(historyId, options, async () => {
     resetDialogVisible.value = false
-    actionsDialogVisible.value = false
-    fetchHistories()
+    await fetchHistories()
+    
+    // 刷新对话框内的数据
+    const updatedHistory = histories.value.find(h => h.id === historyId)
+    if (updatedHistory) {
+      currentHistory.value = updatedHistory
+    }
   })
 }
 

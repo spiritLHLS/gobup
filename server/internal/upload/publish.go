@@ -94,11 +94,22 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		}
 		partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
 
+		// 调试日志：检查CID值
+		log.Printf("构建分P[%d]: filename=%s, cid=%d", i, part.FileName, part.CID)
+
+		// 只有CID大于0时才传递（参考biliupforjava实现）
+		var cid int64
+		if part.CID > 0 {
+			cid = int64(part.CID)
+		} else {
+			log.Printf("警告: 分P[%d]的CID为0，可能导致投稿失败", i)
+		}
+
 		videoParts = append(videoParts, bili.PublishVideoPartRequest{
 			Title:    partTitle,
 			Desc:     "",
 			Filename: part.FileName,
-			Cid:      part.CID,
+			Cid:      cid,
 		})
 	}
 
