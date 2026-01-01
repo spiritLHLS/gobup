@@ -80,6 +80,10 @@ func (p *Processor) Process(eventData interface{}) error {
 	}
 
 	switch event.EventType {
+	case SessionStarted:
+		return p.handleSessionStarted(event)
+	case SessionEnded:
+		return p.handleSessionEnded(event)
 	case FileOpened:
 		return p.handleFileOpened(event)
 	case FileClosed:
@@ -91,18 +95,135 @@ func (p *Processor) Process(eventData interface{}) error {
 	return nil
 }
 
+func (p *Processor) handleSessionStarted(event WebhookEvent) error {
+	var data FileEventData
+	if err := json.Unmarshal(event.EventData, &data); err != nil {
+		return err
+	}
+
+	log.Printf("[INFO] 录制会话开始: 房间%d - %s, SessionID=%s", data.RoomID, data.Title, data.SessionID)
+
+	db := database.GetDB()
+	roomID := fmt.Sprintf("%d", data.RoomID)
+
+	// 查找或创建房间
+	var room models.RecordRoom
+	if err := db.Where("room_id = ?", roomID).First(&room).Error; err != nil {
+		room = models.RecordRoom{
+			RoomID: roomID,
+			Uname:  data.Name,
+			Title:  data.Title,
+			Upload: true,
+		}
+		if err := db.Create(&room).Error; err != nil {
+			log.Printf("[ERROR] 创建房间失败: %v", err)
+			return err
+		}
+		log.Printf("[INFO] 创建新房间: RoomID=%s, Uname=%s", roomID, data.Name)
+	} else {
+		// 更新房间信息
+		room.Uname = data.Name
+		room.Title = data.Title
+		room.SessionID = data.SessionID
+		room.Recording = true
+		db.Save(&room)
+		log.Printf("[INFO] 更新房间信息: RoomID=%s", roomID)
+	}
+
+	// 检查是否已存在该 SessionID 的历史记录
+	var existingHistory models.RecordHistory
+	if err := db.Where("session_id = ?", data.SessionID).First(&existingHistory).Error; err == nil {
+		log.Printf("[WARN] 历史记录已存在，跳过创建: SessionID=%s, HistoryID=%d", data.SessionID, existingHistory.ID)
+		// 更新 room 的 historyId 关联
+		room.HistoryID = existingHistory.ID
+		db.Save(&room)
+		return nil
+	}
+
+	// 创建新的历史记录
+	startTime := time.Now()
+	history := models.RecordHistory{
+		RoomID:    roomID,
+		SessionID: data.SessionID,
+		EventID:   event.EventID,
+		Title:     data.Title,
+		Uname:     data.Name,
+		AreaName:  data.AreaNameChild,
+		StartTime: startTime,
+		EndTime:   startTime,
+		Recording: true,
+		Streaming: true,
+		Upload:    room.Upload,
+	}
+
+	if err := db.Create(&history).Error; err != nil {
+		log.Printf("[ERROR] 创建历史记录失败: %v", err)
+		return err
+	}
+
+	log.Printf("[INFO] 成功创建历史记录: ID=%d, SessionID=%s, RoomID=%s", history.ID, history.SessionID, roomID)
+
+	// 更新房间的 historyId 关联
+	room.HistoryID = history.ID
+	db.Save(&room)
+
+	return nil
+}
+
+func (p *Processor) handleSessionEnded(event WebhookEvent) error {
+	var data FileEventData
+	if err := json.Unmarshal(event.EventData, &data); err != nil {
+		return err
+	}
+
+	log.Printf("[INFO] 录制会话结束: 房间%d - %s, SessionID=%s", data.RoomID, data.Title, data.SessionID)
+
+	db := database.GetDB()
+	roomID := fmt.Sprintf("%d", data.RoomID)
+
+	// 查找历史记录
+	var history models.RecordHistory
+	if err := db.Where("session_id = ?", data.SessionID).First(&history).Error; err != nil {
+		log.Printf("[WARN] 未找到对应的历史记录: SessionID=%s", data.SessionID)
+		return nil
+	}
+
+	// 更新历史记录状态
+	history.EndTime = time.Now()
+	history.Recording = false
+	history.Streaming = false
+	if err := db.Save(&history).Error; err != nil {
+		log.Printf("[ERROR] 更新历史记录失败: %v", err)
+		return err
+	}
+
+	log.Printf("[INFO] 成功更新历史记录结束状态: HistoryID=%d", history.ID)
+
+	// 更新房间状态
+	var room models.RecordRoom
+	if err := db.Where("room_id = ?", roomID).First(&room).Error; err == nil {
+		room.Recording = false
+		room.Streaming = false
+		room.SessionID = ""
+		db.Save(&room)
+	}
+
+	return nil
+}
+
 func (p *Processor) handleFileOpened(event WebhookEvent) error {
 	var data FileEventData
 	if err := json.Unmarshal(event.EventData, &data); err != nil {
 		return err
 	}
 
-	log.Printf("录制开始: 房间%d - %s", data.RoomID, data.Title)
+	log.Printf("[INFO] 文件开始录制: 房间%d - %s, 文件: %s", data.RoomID, data.Title, data.RelativePath)
 
-	var room models.RecordRoom
 	db := database.GetDB()
-
 	roomID := fmt.Sprintf("%d", data.RoomID)
+
+	// 查找或创建房间
+	var room models.RecordRoom
 	if err := db.Where("room_id = ?", roomID).First(&room).Error; err != nil {
 		room = models.RecordRoom{
 			RoomID: roomID,
@@ -111,16 +232,42 @@ func (p *Processor) handleFileOpened(event WebhookEvent) error {
 			Upload: true,
 		}
 		db.Create(&room)
+		log.Printf("[INFO] 创建新房间: RoomID=%s", roomID)
 	}
 
-	history := models.RecordHistory{
-		RoomID:    roomID,
-		SessionID: data.SessionID,
-		Title:     data.Title,
-		StartTime: time.Now(),
-		Recording: true,
+	// 查找对应的历史记录
+	var history models.RecordHistory
+	if err := db.Where("session_id = ?", data.SessionID).First(&history).Error; err != nil {
+		// 如果没有找到，创建一个新的历史记录（兼容没有 SessionStarted 事件的情况）
+		log.Printf("[WARN] 未找到SessionID对应的历史记录，创建新记录: SessionID=%s", data.SessionID)
+		startTime := time.Now()
+		if data.FileOpenTime != "" {
+			if t, err := time.Parse(time.RFC3339, data.FileOpenTime); err == nil {
+				startTime = t
+			}
+		}
+		history = models.RecordHistory{
+			RoomID:    roomID,
+			SessionID: data.SessionID,
+			EventID:   data.SessionID,
+			Title:     data.Title,
+			Uname:     data.Name,
+			AreaName:  data.AreaNameChild,
+			StartTime: startTime,
+			EndTime:   startTime,
+			Recording: true,
+			Upload:    room.Upload,
+		}
+		if err := db.Create(&history).Error; err != nil {
+			log.Printf("[ERROR] 创建历史记录失败: %v", err)
+			return err
+		}
+		log.Printf("[INFO] 成功创建历史记录: ID=%d", history.ID)
+
+		// 更新房间的 historyId 关联
+		room.HistoryID = history.ID
+		db.Save(&room)
 	}
-	db.Create(&history)
 
 	return nil
 }
@@ -146,9 +293,25 @@ func (p *Processor) handleFileClosed(event WebhookEvent) error {
 		return nil // 不返回错误，因为这是正常的跳过情况
 	}
 
+	// 优先通过 SessionID 查找历史记录
 	var history models.RecordHistory
-	if err := db.Where("session_id = ?", data.SessionID).First(&history).Error; err != nil {
-		log.Printf("[INFO] 未找到已有历史记录，创建新记录: SessionID=%s", data.SessionID)
+	found := false
+	if err := db.Where("session_id = ?", data.SessionID).First(&history).Error; err == nil {
+		found = true
+		log.Printf("[INFO] 通过SessionID找到历史记录: ID=%d, SessionID=%s", history.ID, data.SessionID)
+	} else {
+		// 如果通过 SessionID 找不到，尝试通过 room 的 historyId 查找
+		var room models.RecordRoom
+		if err := db.Where("room_id = ?", roomID).First(&room).Error; err == nil && room.HistoryID > 0 {
+			if err := db.First(&history, room.HistoryID).Error; err == nil {
+				found = true
+				log.Printf("[INFO] 通过Room.HistoryID找到历史记录: ID=%d", history.ID)
+			}
+		}
+	}
+
+	if !found {
+		log.Printf("[WARN] 未找到已有历史记录，创建新记录: SessionID=%s", data.SessionID)
 
 		// 解析时间
 		startTime := time.Now().Add(-time.Hour)
@@ -164,17 +327,19 @@ func (p *Processor) handleFileClosed(event WebhookEvent) error {
 		history = models.RecordHistory{
 			RoomID:    roomID,
 			SessionID: data.SessionID,
-			Title:     data.Title,
-			StartTime: startTime,
 			EventID:   data.SessionID,
+			Title:     data.Title,
+			Uname:     data.Name,
+			AreaName:  data.AreaNameChild,
+			StartTime: startTime,
+			Recording: false,
+			Upload:    true,
 		}
 		if err := db.Create(&history).Error; err != nil {
 			log.Printf("[ERROR] 创建历史记录失败: %v, RoomID=%s, SessionID=%s", err, roomID, data.SessionID)
 			return err
 		}
 		log.Printf("[INFO] 成功创建历史记录: ID=%d, SessionID=%s", history.ID, data.SessionID)
-	} else {
-		log.Printf("[INFO] 找到已有历史记录: ID=%d, SessionID=%s", history.ID, data.SessionID)
 	}
 
 	// 解析结束时间

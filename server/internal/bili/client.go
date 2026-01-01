@@ -42,12 +42,20 @@ type UploadResult struct {
 	BizID    int64
 }
 
+type DescV2Item struct {
+	BizID   string `json:"biz_id"`
+	RawText string `json:"raw_text"`
+	Type    int    `json:"type"`
+}
+
 type PublishVideoRequest struct {
 	Copyright    int                       `json:"copyright"`
 	Cover        string                    `json:"cover"`
 	Desc         string                    `json:"desc"`
 	DescFormatID int                       `json:"desc_format_id"`
+	DescV2       []DescV2Item              `json:"desc_v2,omitempty"`
 	Dynamic      string                    `json:"dynamic"`
+	DynamicV2    []DescV2Item              `json:"dynamic_v2,omitempty"`
 	Interactive  int                       `json:"interactive"`
 	NoReprint    int                       `json:"no_reprint"`
 	OpenElec     int                       `json:"open_elec"`
@@ -57,6 +65,9 @@ type PublishVideoRequest struct {
 	Title        string                    `json:"title"`
 	Videos       []PublishVideoPartRequest `json:"videos"`
 	CSRF         string                    `json:"csrf"`
+	UpCloseReply bool                      `json:"up_close_reply"`
+	UpCloseDanmu bool                      `json:"up_close_danmu"`
+	WebOS        int                       `json:"web_os"`
 }
 
 type PublishVideoPartRequest struct {
@@ -109,22 +120,33 @@ func (c *BiliClient) PreUpload(filename string, filesize int64) (*PreUploadResp,
 }
 
 // PublishVideo 投稿视频
-func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, cover string) (int64, error) {
+func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, cover string, videos []PublishVideoPartRequest) (int64, error) {
 	csrf := GetCookieValue(c.Cookies, "bili_jct")
 	if csrf == "" {
 		return 0, fmt.Errorf("未找到CSRF token (bili_jct)")
 	}
 
+	// 构建source字段
+	source := ""
+	if copyright == 2 {
+		// 转载时source为空或由调用方提供
+		source = ""
+	}
+
 	req := PublishVideoRequest{
-		Copyright: copyright,
-		Cover:     cover,
-		Desc:      desc,
-		Tag:       tags,
-		Tid:       tid,
-		Title:     title,
-		CSRF:      csrf,
-		NoReprint: 1,
-		OpenElec:  1,
+		Copyright:    copyright,
+		Cover:        cover,
+		Desc:         desc,
+		DescFormatID: 0,
+		Tag:          tags,
+		Tid:          tid,
+		Title:        title,
+		Videos:       videos,
+		Source:       source,
+		CSRF:         csrf,
+		NoReprint:    1,
+		OpenElec:     1,
+		WebOS:        1,
 	}
 
 	var resp PublishResponse
@@ -204,6 +226,54 @@ func (c *BiliClient) GetSeasons(mid int64) ([]Season, error) {
 	}
 
 	return result.Data.ItemsList, nil
+}
+
+// AddToSeason 将视频加入合集
+func (c *BiliClient) AddToSeason(sectionID int64, aid, cid int64, title string) error {
+	csrf := GetCookieValue(c.Cookies, "bili_jct")
+	if csrf == "" {
+		return fmt.Errorf("未找到CSRF token")
+	}
+
+	// 构建 episode 数据
+	episode := map[string]interface{}{
+		"aid":          aid,
+		"cid":          cid,
+		"title":        title,
+		"charging_pay": 0,
+	}
+
+	// 构建请求体
+	requestBody := map[string]interface{}{
+		"csrf":      csrf,
+		"sectionId": sectionID,
+		"episodes":  []map[string]interface{}{episode},
+	}
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+	}
+
+	apiURL := fmt.Sprintf("https://member.bilibili.com/x2/creative/web/season/section/episodes/add?t=%d&csrf=%s",
+		time.Now().UnixMilli(), csrf)
+
+	_, err := c.ReqClient.R().
+		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame?page_from=creative_home_top_upload").
+		SetHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36").
+		SetBody(requestBody).
+		SetSuccessResult(&result).
+		Post(apiURL)
+
+	if err != nil {
+		return fmt.Errorf("加入合集失败: %w", err)
+	}
+
+	if result.Code != 0 {
+		return fmt.Errorf("加入合集失败: %s", result.Msg)
+	}
+
+	return nil
 }
 
 // UploadCover 上传封面

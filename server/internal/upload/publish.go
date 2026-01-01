@@ -102,8 +102,8 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		})
 	}
 
-	// 投稿（简化版，实际需要构建完整请求）
-	avID, err := client.PublishVideo(title, desc, tagsStr, tid, room.Copyright, coverURL)
+	// 投稿
+	avID, err := client.PublishVideo(title, desc, tagsStr, tid, room.Copyright, coverURL, videoParts)
 	if err != nil {
 		// 检查是否是验证码错误
 		captchaService := services.NewCaptchaService()
@@ -122,14 +122,36 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("投稿失败: %w", err)
 	}
 
+	// 通过AID获取真实的BV号
+	bvid := ""
+	videoInfo, err := client.GetVideoInfo("") // 先通过aid查询
+	if err == nil && videoInfo != nil && videoInfo.Bvid != "" {
+		bvid = videoInfo.Bvid
+	} else {
+		// 如果获取失败，尝试通过同步任务获取
+		log.Printf("首次获取BV号失败，将在同步任务中更新: %v", err)
+		bvid = fmt.Sprintf("av%d", avID) // 临时使用AV号格式
+	}
+
 	// 更新历史记录
 	history.AvID = fmt.Sprintf("%d", avID)
-	history.BvID = fmt.Sprintf("BV%d", avID) // 简化，实际需要转换
+	history.BvID = bvid
 	history.Publish = true
 	history.Message = "投稿成功"
 	db.Save(&history)
 
 	log.Printf("投稿成功: AV%d", avID)
+
+	// 加入合集
+	if room.SeasonID > 0 && len(videoParts) > 0 {
+		// 使用第一个分P的CID
+		cid := videoParts[0].Cid
+		if err := client.AddToSeason(room.SeasonID, avID, cid, title); err != nil {
+			log.Printf("加入合集失败: %v", err)
+		} else {
+			log.Printf("加入合集成功: SeasonID=%d, AID=%d", room.SeasonID, avID)
+		}
+	}
 
 	// 创建视频同步任务
 	syncService := services.NewVideoSyncService()
