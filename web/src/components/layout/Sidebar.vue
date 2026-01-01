@@ -91,17 +91,21 @@ const activeMenu = computed(() => route.path)
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
   transition: width var(--transition-normal);
   overflow: hidden;
-  position: relative;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: var(--z-sidebar);
   
   &.is-collapse {
     width: var(--sidebar-width-collapsed);
   }
   
   &.is-mobile {
-    position: fixed;
-    left: 0;
-    top: 0;
-    z-index: var(--z-sidebar);
+    transform: translateX(-100%);
+    
+    &:not(.is-collapse) {
+      transform: translateX(0);
+    }
   }
 }
 
@@ -200,11 +204,8 @@ const activeMenu = computed(() => route.path)
 /* 响应式 */
 @media (max-width: 768px) {
   .sidebar-container {
-    transform: translateX(-100%);
-    transition: transform var(--transition-normal);
-    
     &:not(.is-collapse) {
-      transform: translateX(0);
+      box-shadow: 2px 0 16px rgba(0, 0, 0, 0.2);
     }
   }
 }

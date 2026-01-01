@@ -349,8 +349,11 @@ const loadStats = async () => {
 // 切换功能开关（实时生效）
 const toggleFeature = async (feature, enabled) => {
   try {
+    // 将大驼峰转换为小驼峰，以匹配后端的 JSON 标签
+    const key = feature.charAt(0).toLowerCase() + feature.slice(1)
+    
     const response = await api.post('/config/toggle', {
-      key: feature,
+      key: key,
       value: enabled
     })
     if (response.type === 'success') {
