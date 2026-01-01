@@ -193,6 +193,28 @@
               <span class="help-text">超过此时间的文件将被忽略（默认30天）</span>
             </div>
           </el-form-item>
+
+          <el-form-item label="手动扫盘">
+            <div class="button-group">
+              <el-button 
+                type="primary" 
+                @click="triggerFileScan(false)" 
+                :loading="scanning"
+                :icon="Refresh"
+              >
+                扫描录入
+              </el-button>
+              <el-button 
+                type="warning" 
+                @click="openFileScanDialog" 
+                :loading="scanning"
+                :icon="FolderOpened"
+              >
+                强制扫盘（选择）
+              </el-button>
+              <span class="help-text">立即扫描录制目录。强制扫盘可以手动选择要入库的文件</span>
+            </div>
+          </el-form-item>
         </div>
 
         <el-divider />
@@ -237,17 +259,23 @@
         </div>
       </el-form>
     </el-card>
+
+    <!-- 文件扫描对话框 -->
+    <FileScanDialog ref="fileScanDialogRef" @imported="handleFilesImported" />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { ElMessage } from 'element-plus'
-import { VideoCamera, Upload, Clock, Warning, Check } from '@element-plus/icons-vue'
-import api from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { VideoCamera, Upload, Clock, Warning, Check, Refresh, FolderOpened } from '@element-plus/icons-vue'
+import api, { filescanAPI } from '../api'
+import FileScanDialog from '../components/filescan/FileScanDialog.vue'
 
 const loading = ref(false)
 const saving = ref(false)
+const scanning = ref(false)
+const fileScanDialogRef = ref(null)
 const config = ref({
   AutoUpload: false,
   AutoPublish: false,
@@ -370,6 +398,64 @@ const getFeatureName = (feature) => {
     EnableOrphanScan: '孤儿文件扫描'
   }
   return names[feature] || feature
+}
+
+// 触发文件扫描
+const triggerFileScan = async (force = false) => {
+  const action = force ? '强制扫盘' : '扫描录入'
+  const confirmMessage = force 
+    ? '强制扫盘将无视文件年龄限制，可能导入正在写入的文件。是否继续？' 
+    : '确定要立即扫描录制目录吗？'
+  
+  try {
+    await ElMessageBox.confirm(confirmMessage, '确认' + action, {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: force ? 'warning' : 'info'
+    })
+    
+    scanning.value = true
+    const response = await filescanAPI.trigger(force)
+    
+    if (response.type === 'success') {
+      const message = `扫描完成！总文件: ${response.totalFiles}, 新导入: ${response.newFiles}, 跳过: ${response.skippedFiles}, 失败: ${response.failedFiles}`
+      
+      if (response.failedFiles > 0 && response.errors && response.errors.length > 0) {
+        ElMessageBox.alert(
+          message + '\n\n失败文件：\n' + response.errors.join('\n'),
+          '扫描结果',
+          { type: 'warning' }
+        )
+      } else {
+        ElMessage.success(message)
+      }
+      
+      // 刷新统计数据
+      loadStats()
+    } else {
+      ElMessage.error(response.msg || action + '失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error(action + '失败:', error)
+      ElMessage.error(action + '失败: ' + (error.message || '网络错误'))
+    }
+  } finally {
+    scanning.value = false
+  }
+}
+
+// 打开文件扫描对话框
+const openFileScanDialog = () => {
+  if (fileScanDialogRef.value) {
+    fileScanDialogRef.value.open()
+  }
+}
+
+// 文件导入完成后的处理
+const handleFilesImported = () => {
+  // 刷新统计数据
+  loadStats()
 }
 
 onMounted(() => {
@@ -533,11 +619,18 @@ onMounted(() => {
 
 .switch-item,
 .number-input-wrapper,
-.path-input-wrapper {
+.path-input-wrapper,
+.button-group {
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
   flex-wrap: wrap;
+}
+
+.button-group {
+  .el-button {
+    min-width: 120px;
+  }
 }
 
 .help-text {

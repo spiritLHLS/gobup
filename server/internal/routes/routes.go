@@ -131,6 +131,14 @@ func SetupRoutes(router *gin.Engine) {
 				logs.GET("", controllers.GetLogs)
 				logs.POST("/clear", controllers.ClearLogs)
 			}
+
+			// 文件扫描API
+			filescan := auth.Group("/filescan")
+			{
+				filescan.POST("/trigger", controllers.TriggerFileScan)
+				filescan.GET("/preview", controllers.PreviewFileScan)
+				filescan.POST("/import", controllers.ImportSelectedFiles)
+			}
 		}
 	}
 

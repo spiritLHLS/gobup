@@ -87,4 +87,11 @@ export const configAPI = {
   }
 }
 
+// 文件扫描
+export const filescanAPI = {
+  trigger: (force = false) => request.post('/filescan/trigger', null, { params: { force } }),
+  preview: () => request.get('/filescan/preview'),
+  import: (filePaths) => request.post('/filescan/import', { filePaths })
+}
+
 export default request

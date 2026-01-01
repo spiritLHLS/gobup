@@ -28,6 +28,7 @@ type ScanConfig struct {
 	MinFileAge        int      // 最小文件年龄（小时），避免扫描正在写入的文件
 	MaxFileAge        int      // 最大文件年龄（天），超过此天数的文件会被忽略
 	ScanIntervalHours int      // 扫描间隔（小时）
+	ForceImport       bool     // 强制导入，无视文件年龄限制（但保留1分钟安全检查）
 }
 
 // DefaultScanConfig 返回默认的扫描配置
@@ -42,6 +43,34 @@ func DefaultScanConfig(workPath string) *ScanConfig {
 	}
 }
 
+// findValidWorkPath 查找有效的工作目录，按优先级尝试多个可能的路径
+func findValidWorkPath() string {
+	// 可能的路径列表，按优先级排序
+	possiblePaths := []string{
+		os.Getenv("WORK_PATH"), // 环境变量优先
+		"/rec",                 // Docker部署的默认路径
+		"./rec",                // Docker部署的相对路径
+		"./data/recordings",    // 裸机部署的默认路径
+		"/app/data/recordings", // Docker内部的另一个可能路径
+		"/recordings",          // 另一种相对路径
+		"./recordings",         // 另一种相对路径
+		"/root/recordings",     // 另一种相对路径
+	}
+
+	for _, path := range possiblePaths {
+		if path == "" {
+			continue
+		}
+		if _, err := os.Stat(path); err == nil {
+			log.Printf("[FileScan] 找到有效的工作目录: %s", path)
+			return path
+		}
+	}
+
+	log.Printf("[FileScan] 未找到有效的工作目录，使用默认值: ./data/recordings")
+	return "./data/recordings"
+}
+
 // LoadConfigFromDB 从数据库加载扫描配置
 func LoadConfigFromDB() *ScanConfig {
 	db := database.GetDB()
@@ -50,14 +79,17 @@ func LoadConfigFromDB() *ScanConfig {
 	if err := db.First(&sysConfig).Error; err != nil {
 		// 如果获取失败，返回默认配置
 		log.Printf("[FileScan] 从数据库加载配置失败，使用默认配置: %v", err)
-		return DefaultScanConfig(os.Getenv("WORK_PATH"))
+		return DefaultScanConfig(findValidWorkPath())
 	}
 
 	workPath := sysConfig.WorkPath
 	if workPath == "" {
-		workPath = os.Getenv("WORK_PATH")
-		if workPath == "" {
-			workPath = "./data/recordings"
+		workPath = findValidWorkPath()
+	} else {
+		// 即使配置了工作目录，也要验证其是否存在
+		if _, err := os.Stat(workPath); os.IsNotExist(err) {
+			log.Printf("[FileScan] 配置的工作目录不存在: %s，尝试查找其他有效路径", workPath)
+			workPath = findValidWorkPath()
 		}
 	}
 
@@ -91,11 +123,15 @@ func (s *FileScanService) ScanAndImport(config *ScanConfig) (*ScanResult, error)
 	}
 
 	if _, err := os.Stat(config.WorkPath); os.IsNotExist(err) {
-		return result, fmt.Errorf("工作目录不存在: %s", config.WorkPath)
+		return result, fmt.Errorf("工作目录不存在: %s (提示: Docker部署请检查是否挂载了录播目录到/rec，裸机部署请确保./data/recordings存在)", config.WorkPath)
 	}
 
-	log.Printf("[FileScan] 开始扫描目录: %s (最小文件年龄=%d小时, 最大年龄=%d天)",
-		config.WorkPath, config.MinFileAge, config.MaxFileAge/24)
+	if config.ForceImport {
+		log.Printf("[FileScan] 开始强制扫描目录: %s (无视文件年龄限制，仅保留1分钟安全检查)", config.WorkPath)
+	} else {
+		log.Printf("[FileScan] 开始扫描目录: %s (最小文件年龄=%d小时, 最大年龄=%d天)",
+			config.WorkPath, config.MinFileAge, config.MaxFileAge/24)
+	}
 
 	// 遍历工作目录
 	err := filepath.Walk(config.WorkPath, func(path string, info os.FileInfo, err error) error {
@@ -127,17 +163,17 @@ func (s *FileScanService) ScanAndImport(config *ScanConfig) (*ScanResult, error)
 		// 计算文件年龄（小时）
 		fileAgeHours := int(time.Since(info.ModTime()).Hours())
 
-		// 检查文件是否太新（可能正在写入）
-		if config.MinFileAge > 0 && fileAgeHours < config.MinFileAge {
+		// 检查文件是否太新（可能正在写入）- 除非是强制导入模式
+		if !config.ForceImport && config.MinFileAge > 0 && fileAgeHours < config.MinFileAge {
 			log.Printf("[FileScan] 跳过新文件（可能正在写入）: %s (年龄=%d小时, 需要>%d小时)",
 				filepath.Base(path), fileAgeHours, config.MinFileAge)
 			result.SkippedFiles++
 			return nil
 		}
 
-		// 检查文件年龄是否过大
+		// 检查文件年龄是否过大 - 除非是强制导入模式
 		fileAgeDays := fileAgeHours / 24
-		if config.MaxFileAge > 0 && fileAgeDays > config.MaxFileAge {
+		if !config.ForceImport && config.MaxFileAge > 0 && fileAgeDays > config.MaxFileAge {
 			log.Printf("[FileScan] 跳过旧文件: %s (年龄=%d天, 最大=%d天)",
 				filepath.Base(path), fileAgeDays, config.MaxFileAge)
 			result.SkippedFiles++
@@ -182,6 +218,130 @@ func (s *FileScanService) isVideoFile(ext string, extensions []string) bool {
 		}
 	}
 	return false
+}
+
+// FilePreviewInfo 文件预览信息
+type FilePreviewInfo struct {
+	FilePath   string    `json:"filePath"`
+	FileName   string    `json:"fileName"`
+	FileSize   int64     `json:"fileSize"`
+	ModTime    time.Time `json:"modTime"`
+	RoomID     string    `json:"roomId"`
+	Uname      string    `json:"uname"`
+	Title      string    `json:"title"`
+	InDatabase bool      `json:"inDatabase"` // 是否已在数据库中
+}
+
+// PreviewFiles 预览待导入的文件（不实际导入）
+func (s *FileScanService) PreviewFiles(config *ScanConfig) ([]*FilePreviewInfo, error) {
+	db := database.GetDB()
+	var previews []*FilePreviewInfo
+
+	if config.WorkPath == "" {
+		return previews, fmt.Errorf("工作目录未配置")
+	}
+
+	if _, err := os.Stat(config.WorkPath); os.IsNotExist(err) {
+		return previews, fmt.Errorf("工作目录不存在: %s", config.WorkPath)
+	}
+
+	log.Printf("[FileScan] 预览扫描目录: %s", config.WorkPath)
+
+	// 遍历工作目录
+	err := filepath.Walk(config.WorkPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		// 跳过目录
+		if info.IsDir() {
+			return nil
+		}
+
+		// 检查文件扩展名
+		ext := strings.ToLower(filepath.Ext(path))
+		if !s.isVideoFile(ext, config.VideoExtensions) {
+			return nil
+		}
+
+		// 检查文件大小
+		if info.Size() < config.MinFileSize {
+			return nil
+		}
+
+		// 额外安全检查：最近1分钟内修改过的文件不扫描
+		if time.Since(info.ModTime()) < time.Minute {
+			return nil
+		}
+
+		// 检查文件是否已在数据库
+		var existingPart models.RecordHistoryPart
+		inDatabase := db.Where("file_path = ?", path).First(&existingPart).Error == nil
+
+		// 解析文件元数据
+		metadata := s.parseFileMetadata(path, info)
+		if metadata == nil {
+			metadata = &FileMetadata{
+				RoomID: "unknown",
+				Uname:  "未知主播",
+				Title:  filepath.Base(path),
+			}
+		}
+
+		preview := &FilePreviewInfo{
+			FilePath:   path,
+			FileName:   filepath.Base(path),
+			FileSize:   info.Size(),
+			ModTime:    info.ModTime(),
+			RoomID:     metadata.RoomID,
+			Uname:      metadata.Uname,
+			Title:      metadata.Title,
+			InDatabase: inDatabase,
+		}
+
+		previews = append(previews, preview)
+
+		return nil
+	})
+
+	if err != nil {
+		return previews, fmt.Errorf("预览扫描失败: %w", err)
+	}
+
+	log.Printf("[FileScan] 预览完成: 发现 %d 个文件", len(previews))
+	return previews, nil
+}
+
+// ImportSelectedFiles 导入选中的文件
+func (s *FileScanService) ImportSelectedFiles(filePaths []string) (*ScanResult, error) {
+	result := &ScanResult{
+		Errors: make([]string, 0),
+	}
+
+	for _, filePath := range filePaths {
+		info, err := os.Stat(filePath)
+		if err != nil {
+			log.Printf("[FileScan] 文件不存在: %s, error: %v", filePath, err)
+			result.FailedFiles++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: 文件不存在", filepath.Base(filePath)))
+			continue
+		}
+
+		// 尝试导入文件
+		if err := s.importFile(filePath, info); err != nil {
+			log.Printf("[FileScan] 导入文件失败: %s, error: %v", filePath, err)
+			result.FailedFiles++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", filepath.Base(filePath), err))
+		} else {
+			result.NewFiles++
+		}
+		result.TotalFiles++
+	}
+
+	log.Printf("[FileScan] 选择性导入完成: 总文件=%d, 新导入=%d, 失败=%d",
+		result.TotalFiles, result.NewFiles, result.FailedFiles)
+
+	return result, nil
 }
 
 // importFile 导入单个文件
