@@ -98,11 +98,18 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 	if err := u.completeUpload(preResp, lineResp, int(totalParts)); err != nil {
 		return nil, fmt.Errorf("完成上传失败: %w", err)
 	}
-	log.Printf("[UPOS] 上传完成: file=%s, biz_id=%d, bili_filename=%s", fileName, preResp.BizID, preResp.BiliFilename)
 
-	// 使用B站返回的BiliFilename而不是本地文件名
+	// 从 lineResp.Key 中提取文件名（参考 biliupforjava 的 LineUploadBean.getFileName()）
+	// Key 格式类似: "/upos/xxx.flv" 或 "xxx.flv"
+	resultFileName := extractFileNameFromKey(lineResp.Key)
+	if resultFileName == "" {
+		log.Printf("[UPOS] 警告: 无法从Key提取文件名，使用原始文件名: key=%s, file=%s", lineResp.Key, fileName)
+		resultFileName = fileName
+	}
+	log.Printf("[UPOS] 上传完成: file=%s, biz_id=%d, server_filename=%s", fileName, preResp.BizID, resultFileName)
+
 	return &UploadResult{
-		FileName: preResp.BiliFilename,
+		FileName: resultFileName,
 		BizID:    preResp.BizID,
 	}, nil
 }
@@ -204,7 +211,8 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 		return nil, fmt.Errorf("预上传返回失败: OK=%d", preResp.OK)
 	}
 
-	log.Printf("[UPOS] 预上传响应: endpoint=%s", preResp.Endpoint)
+	log.Printf("[UPOS] 预上传响应: endpoint=%s, biz_id=%d, bili_filename=%s, upos_uri=%s",
+		preResp.Endpoint, preResp.BizID, preResp.BiliFilename, preResp.UposURI)
 
 	return &preResp, nil
 }
@@ -391,4 +399,31 @@ func (u *UposUploader) completeUpload(pre *PreUploadResp, line *LineUploadResp, 
 	}
 
 	return nil
+}
+
+// extractFileNameFromKey 从 Key 中提取文件名
+// 参考 biliupforjava 的 LineUploadBean.getFileName()
+// Key 格式类似: "/upos/xxx.flv" 或 "xxx.flv"
+// 返回去掉路径和扩展名的文件名，例如: "/upos/n123456.flv" -> "n123456"
+func extractFileNameFromKey(key string) string {
+	if key == "" {
+		return ""
+	}
+
+	// 去掉开头的 /
+	key = strings.TrimPrefix(key, "/")
+
+	// 查找最后一个 / 后的部分（文件名）
+	lastSlash := strings.LastIndex(key, "/")
+	if lastSlash >= 0 {
+		key = key[lastSlash+1:]
+	}
+
+	// 查找第一个 . 的位置（扩展名开始）
+	dotIndex := strings.Index(key, ".")
+	if dotIndex > 0 {
+		return key[:dotIndex]
+	}
+
+	return key
 }

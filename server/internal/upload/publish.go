@@ -3,6 +3,7 @@ package upload
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 
 	"github.com/gobup/server/internal/bili"
@@ -94,8 +95,21 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		}
 		partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
 
-		// 调试日志：检查CID值
-		log.Printf("构建分P[%d]: filename=%s, cid=%d", i, part.FileName, part.CID)
+		// 获取文件名：优先使用数据库中的 FileName（从上传响应获取），如果为空则从 FilePath 提取
+		filename := part.FileName
+		if filename == "" {
+			// 兼容旧数据：从文件路径提取文件名（不含扩展名）
+			baseName := filepath.Base(part.FilePath)
+			if ext := filepath.Ext(baseName); ext != "" {
+				filename = baseName[:len(baseName)-len(ext)]
+			} else {
+				filename = baseName
+			}
+			log.Printf("警告: 分P[%d]的FileName为空，从FilePath提取: %s", i, filename)
+		}
+
+		// 调试日志：检查关键参数
+		log.Printf("构建分P[%d]: filename=%s, cid=%d", i, filename, part.CID)
 
 		// 只有CID大于0时才传递（参考biliupforjava实现）
 		var cid int64
@@ -108,7 +122,7 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		videoParts = append(videoParts, bili.PublishVideoPartRequest{
 			Title:    partTitle,
 			Desc:     "",
-			Filename: part.FileName,
+			Filename: filename,
 			Cid:      cid,
 		})
 	}

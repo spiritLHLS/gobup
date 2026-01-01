@@ -75,9 +75,15 @@ func (u *AppUploader) Upload(filePath string) (*UploadResult, error) {
 	}
 	log.Printf("[APP] 上传完成: file=%s, biz_id=%d, bili_filename=%s", fileName, preResp.BizID, preResp.BiliFilename)
 
-	// 使用B站返回的BiliFilename而不是本地文件名
+	// 使用B站返回的BiliFilename，如果为空则使用原始文件名
+	resultFileName := preResp.BiliFilename
+	if resultFileName == "" {
+		log.Printf("[APP] 警告: B站返回的bili_filename为空，使用原始文件名: %s", fileName)
+		resultFileName = fileName
+	}
+
 	return &UploadResult{
-		FileName: preResp.BiliFilename,
+		FileName: resultFileName,
 		BizID:    preResp.BizID,
 	}, nil
 }

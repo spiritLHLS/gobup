@@ -159,6 +159,7 @@ func ResetHistoryStatus(c *gin.Context) {
 	// 重置上传状态时，设置UploadStatus为0
 	if options.Upload {
 		history.UploadStatus = 0
+		history.UploadRetryCount = 0
 	}
 
 	db.Save(&history)
@@ -166,11 +167,15 @@ func ResetHistoryStatus(c *gin.Context) {
 	// 重置分P的上传状态
 	if options.Upload {
 		partUpdates := map[string]interface{}{
-			"upload":      false,
-			"uploading":   false,
-			"cid":         0,
-			"page":        0,
-			"xcode_state": 0,
+			"upload":             false,
+			"uploading":          false,
+			"file_name":          "", // 清空服务器文件名，重新上传时会重新获取
+			"c_id":               0,
+			"page":               0,
+			"xcode_state":        0,
+			"upload_retry_count": 0,  // 清空重试次数
+			"upload_error_msg":   "", // 清空错误信息
+			"upload_line":        "", // 清空上传线路
 		}
 		if options.Files {
 			partUpdates["file_delete"] = false
