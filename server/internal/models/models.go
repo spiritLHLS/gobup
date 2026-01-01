@@ -82,6 +82,7 @@ type RecordHistory struct {
 	FilePath         string         `json:"filePath"`
 	FileSize         int64          `gorm:"default:0" json:"fileSize"`
 	UploadRetryCount int            `gorm:"default:0" json:"uploadRetryCount"`
+	UploadStatus     int            `gorm:"default:0;index" json:"uploadStatus"`    // 上传状态: 0未上传, 1上传中, 2已上传
 	VideoState       int            `gorm:"default:-1;index" json:"videoState"`     // 视频状态: -1未知, 0审核中, 1已通过, 2未通过
 	VideoStateDesc   string         `json:"videoStateDesc"`                         // 视频状态描述
 	DanmakuSent      bool           `gorm:"default:false;index" json:"danmakuSent"` // 弹幕是否已发送

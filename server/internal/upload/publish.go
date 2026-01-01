@@ -149,6 +149,7 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	history.BvID = bvid
 	history.Publish = true
 	history.Message = "投稿成功"
+	// 注意：投稿后不修改UploadStatus，保持为2（已上传）
 	db.Save(&history)
 
 	log.Printf("投稿成功: AV%d", avID)

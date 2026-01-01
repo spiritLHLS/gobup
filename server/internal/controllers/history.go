@@ -54,14 +54,27 @@ func ListHistories(c *gin.Context) {
 		var partCount int64
 		var uploadPartCount int64
 		var recordPartCount int64
+		var uploadingPartCount int64
 
 		db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", histories[i].ID).Count(&partCount)
 		db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND upload = ?", histories[i].ID, true).Count(&uploadPartCount)
 		db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND recording = ?", histories[i].ID, true).Count(&recordPartCount)
+		db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND uploading = ?", histories[i].ID, true).Count(&uploadingPartCount)
 
 		histories[i].PartCount = int(partCount)
 		histories[i].UploadPartCount = int(uploadPartCount)
 		histories[i].RecordPartCount = int(recordPartCount)
+
+		// 计算上传状态
+		if uploadingPartCount > 0 {
+			histories[i].UploadStatus = 1 // 上传中
+		} else if uploadPartCount > 0 && uploadPartCount == partCount {
+			histories[i].UploadStatus = 2 // 全部已上传
+		} else if uploadPartCount > 0 {
+			histories[i].UploadStatus = 2 // 部分已上传，也标记为已上传
+		} else {
+			histories[i].UploadStatus = 0 // 未上传
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

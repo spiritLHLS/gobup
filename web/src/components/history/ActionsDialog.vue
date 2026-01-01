@@ -13,7 +13,9 @@
           <div class="status-item">
             <span class="status-label">上传状态：</span>
             <el-tag v-if="history?.bvId" type="success">已发布</el-tag>
+            <el-tag v-else-if="history?.uploadPartCount > 0 && history?.uploadPartCount === history?.partCount" type="success">已上传{{ history.uploadPartCount }}P</el-tag>
             <el-tag v-else-if="history?.uploadPartCount > 0" type="warning">已上传{{ history.uploadPartCount }}P</el-tag>
+            <el-tag v-else-if="history?.uploadStatus === 1" type="info">上传中</el-tag>
             <el-tag v-else type="info">未上传</el-tag>
           </div>
           <div class="status-item">

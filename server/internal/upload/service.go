@@ -68,6 +68,13 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	// 标记为上传中
 	part.Uploading = true
 	db.Save(part)
+
+	// 更新历史记录的上传状态为“上传中”
+	if history.UploadStatus == 0 {
+		history.UploadStatus = 1
+		db.Save(history)
+	}
+
 	defer func() {
 		part.Uploading = false
 		db.Save(part)
@@ -155,6 +162,22 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		// 标记上传失败
 		s.progressTracker.MarkFailed(int64(part.ID), uploadErr.Error())
 
+		// 检查是否还有其他分P在上传
+		var uploadingCount int64
+		db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND uploading = ?", history.ID, true).Count(&uploadingCount)
+
+		// 如果没有其他分P在上传了，根据已上传数量更新状态
+		if uploadingCount <= 1 { // <=1 因为当前分P还在uploading中，defer还没执行
+			var uploadedCount int64
+			db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND upload = ?", history.ID, true).Count(&uploadedCount)
+			if uploadedCount > 0 {
+				history.UploadStatus = 2 // 有已上传的，设为已上传
+			} else {
+				history.UploadStatus = 0 // 没有已上传的，设为未上传
+			}
+			db.Save(history)
+		}
+
 		// 推送失败通知
 		if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
 			s.wxPusher.NotifyUploadFailed(room.UploadUserID, room.Wxuid, room.Uname, part.FileName, uploadErr.Error())
@@ -169,6 +192,22 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	db.Save(part)
 
 	log.Printf("上传完成: part_id=%d, cid=%d", part.ID, part.CID)
+
+	// 检查是否所有分P都已上传，更新History的UploadStatus
+	var totalCount int64
+	var uploadedCount int64
+	db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", history.ID).Count(&totalCount)
+	db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND upload = ?", history.ID, true).Count(&uploadedCount)
+
+	if totalCount > 0 && uploadedCount == totalCount {
+		// 所有分P已上传完成
+		history.UploadStatus = 2
+		db.Save(history)
+	} else if uploadedCount > 0 {
+		// 部分已上传
+		history.UploadStatus = 2
+		db.Save(history)
+	}
 
 	// 标记上传成功并移除进度
 	s.progressTracker.MarkSuccessAndRemove(int64(part.ID))

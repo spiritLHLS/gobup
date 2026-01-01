@@ -44,7 +44,7 @@
               </div>
             </div>
             <el-tag v-else-if="row.bvId" type="success">已发布</el-tag>
-            <el-tag v-else-if="row.uploadStatus === 2" type="warning">已上传</el-tag>
+            <el-tag v-else-if="row.uploadPartCount > 0" type="warning">已上传{{ row.uploadPartCount }}P</el-tag>
             <el-tag v-else-if="row.uploadStatus === 1" type="info">上传中</el-tag>
             <el-tag v-else type="info">未上传</el-tag>
           </template>

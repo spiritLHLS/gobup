@@ -145,12 +145,20 @@ func ResetHistoryStatus(c *gin.Context) {
 
 	if options.Danmaku {
 		history.DanmakuSent = false
+		history.DanmakuCount = 0
+		// 同时重置所有弹幕的sent状态
+		db.Model(&models.LiveMsg{}).Where("session_id = ?", history.SessionID).Update("sent", false)
 		resetItems = append(resetItems, "弹幕状态")
 	}
 
 	if options.Files {
 		history.FilesMoved = false
 		resetItems = append(resetItems, "文件状态")
+	}
+
+	// 重置上传状态时，设置UploadStatus为0
+	if options.Upload {
+		history.UploadStatus = 0
 	}
 
 	db.Save(&history)
