@@ -282,18 +282,31 @@ func (s *VideoSyncService) ProcessPendingTasks() error {
 			task.RetryCount++
 			task.LastError = err.Error()
 
-			// 设置下次重试时间（指数退避）
-			retryDelay := time.Duration(task.RetryCount*task.RetryCount) * time.Minute
-			if retryDelay > 60*time.Minute {
-				retryDelay = 60 * time.Minute
-			}
-			nextRun := time.Now().Add(retryDelay)
-			task.NextRunAt = &nextRun
+			// 检查是否是永久性错误（不应该重试）
+			isPermanentError := strings.Contains(err.Error(), "历史记录不存在") ||
+				strings.Contains(err.Error(), "record not found") ||
+				strings.Contains(err.Error(), "房间配置不存在") ||
+				strings.Contains(err.Error(), "用户不存在")
 
-			// 如果重试次数过多，标记为失败不再重试
-			if task.RetryCount >= 5 {
+			if isPermanentError {
+				// 永久性错误，直接标记为失败不再重试
+				log.Printf("检测到永久性错误，不再重试 (history=%d): %v", task.HistoryID, err)
 				task.Status = "failed"
 				task.NextRunAt = nil
+			} else {
+				// 设置下次重试时间（指数退避）
+				retryDelay := time.Duration(task.RetryCount*task.RetryCount) * time.Minute
+				if retryDelay > 60*time.Minute {
+					retryDelay = 60 * time.Minute
+				}
+				nextRun := time.Now().Add(retryDelay)
+				task.NextRunAt = &nextRun
+
+				// 如果重试次数过多，标记为失败不再重试
+				if task.RetryCount >= 5 {
+					task.Status = "failed"
+					task.NextRunAt = nil
+				}
 			}
 		} else {
 			task.Status = "completed"
