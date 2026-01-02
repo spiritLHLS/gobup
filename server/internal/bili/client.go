@@ -120,10 +120,10 @@ func (c *BiliClient) PreUpload(filename string, filesize int64) (*PreUploadResp,
 }
 
 // PublishVideo 投稿视频
-func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, cover string, videos []PublishVideoPartRequest) (int64, error) {
+func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, cover string, videos []PublishVideoPartRequest) (int64, string, error) {
 	csrf := GetCookieValue(c.Cookies, "bili_jct")
 	if csrf == "" {
-		return 0, fmt.Errorf("未找到CSRF token (bili_jct)")
+		return 0, "", fmt.Errorf("未找到CSRF token (bili_jct)")
 	}
 
 	// 构建source字段
@@ -198,14 +198,15 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 	})
 
 	if err != nil {
-		return 0, fmt.Errorf("投稿请求失败: %w", err)
+		return 0, "", fmt.Errorf("投稿请求失败: %w", err)
 	}
 
 	if resp.Code != 0 {
-		return 0, fmt.Errorf("投稿失败: %s", resp.Msg)
+		return 0, "", fmt.Errorf("投稿失败: %s", resp.Msg)
 	}
 
-	return resp.Data.Aid, nil
+	// 返回AID和BvID
+	return resp.Data.Aid, resp.Data.Bvid, nil
 }
 
 // GetSeasons 获取合集列表

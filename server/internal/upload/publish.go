@@ -164,8 +164,8 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		})
 	}
 
-	// 投稿
-	avID, err := client.PublishVideo(title, desc, tagsStr, tid, room.Copyright, coverURL, videoParts)
+	// 投稿，同时获取AID和BV号
+	avID, bvid, err := client.PublishVideo(title, desc, tagsStr, tid, room.Copyright, coverURL, videoParts)
 	if err != nil {
 		// 检查是否是验证码错误
 		captchaService := services.NewCaptchaService()
@@ -184,18 +184,7 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("投稿失败: %w", err)
 	}
 
-	// 通过AID获取真实的BV号
-	bvid := ""
-	videoInfo, err := client.GetVideoInfo("") // 先通过aid查询
-	if err == nil && videoInfo != nil && videoInfo.Bvid != "" {
-		bvid = videoInfo.Bvid
-	} else {
-		// 如果获取失败，尝试通过同步任务获取
-		log.Printf("首次获取BV号失败，将在同步任务中更新: %v", err)
-		bvid = fmt.Sprintf("av%d", avID) // 临时使用AV号格式
-	}
-
-	// 更新历史记录
+	// 更新历史记录，使用API直接返回的BV号
 	history.AvID = fmt.Sprintf("%d", avID)
 	history.BvID = bvid
 	history.Publish = true
@@ -203,7 +192,7 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	// 注意：投稿后不修改UploadStatus，保持为2（已上传）
 	db.Save(&history)
 
-	log.Printf("投稿成功: AV%d", avID)
+	log.Printf("投稿成功: AV%d, BV%s", avID, bvid)
 
 	// 加入合集
 	if room.SeasonID > 0 && len(videoParts) > 0 {
