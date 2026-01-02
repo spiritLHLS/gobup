@@ -4,14 +4,12 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/services"
@@ -63,69 +61,6 @@ func DeleteRoom(c *gin.Context) {
 	db := database.GetDB()
 	db.Delete(&models.RecordRoom{}, id)
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "删除成功"})
-}
-
-func UploadCover(c *gin.Context) {
-	roomIDStr := c.PostForm("id")
-	if roomIDStr == "" {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "房间ID不能为空"})
-		return
-	}
-
-	// 获取上传文件
-	file, _, err := c.Request.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "获取文件失败"})
-		return
-	}
-	defer file.Close()
-
-	// 读取文件内容
-	fileData, err := io.ReadAll(file)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "读取文件失败"})
-		return
-	}
-
-	// 获取房间信息
-	db := database.GetDB()
-	var room models.RecordRoom
-	if err := db.Where("id = ?", roomIDStr).First(&room).Error; err != nil {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "房间不存在"})
-		return
-	}
-
-	// 检查是否配置了上传用户
-	if room.UploadUserID == 0 {
-		c.JSON(http.StatusOK, gin.H{"type": "warning", "msg": "房间未绑定上传用户"})
-		return
-	}
-
-	// 获取用户信息
-	var user models.BiliBiliUser
-	if err := db.First(&user, room.UploadUserID).Error; err != nil {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "用户不存在"})
-		return
-	}
-
-	// 创建客户端并上传封面
-	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
-	coverURL, err := client.UploadCover(fileData)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "上传封面失败: " + err.Error()})
-		return
-	}
-
-	// 更新房间封面配置
-	room.CoverURL = coverURL
-	room.CoverType = "diy"
-	db.Save(&room)
-
-	c.JSON(http.StatusOK, gin.H{
-		"type":     "success",
-		"msg":      "封面上传成功",
-		"coverUrl": coverURL,
-	})
 }
 
 // UploadLine 上传线路

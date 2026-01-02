@@ -25,7 +25,7 @@ func SetupRoutes(router *gin.Engine) {
 				rooms.POST("/add", controllers.AddRoom)
 				rooms.POST("/update", controllers.UpdateRoom)
 				rooms.GET("/delete/:id", controllers.DeleteRoom)
-				rooms.POST("/uploadCover", controllers.UploadCover)
+
 				rooms.GET("/lines", controllers.GetUploadLines)
 				rooms.GET("/recommendedLines", controllers.GetRecommendedLines)
 				rooms.GET("/testLines", controllers.TestAllLines)

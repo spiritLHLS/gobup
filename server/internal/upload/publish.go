@@ -83,32 +83,77 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 
 	// 获取封面
 	coverURL := room.CoverURL
-	if coverURL == "live" && len(parts) > 0 {
-		// 从录制文件路径查找封面文件
-		lastPartPath := parts[len(parts)-1].FilePath
-		basePath := strings.TrimSuffix(lastPartPath, filepath.Ext(lastPartPath))
+	coverType := room.CoverType
 
-		// 尝试多种封面文件格式
-		coverPaths := []string{
-			basePath + ".cover.jpg",
-			basePath + ".jpg",
-			basePath + ".cover.png",
-			basePath + ".png",
-		}
+	// 处理不同类型的封面
+	if coverType == "diy" && coverURL != "" {
+		// 自定义封面：直接使用用户提供的URL
+		log.Printf("使用自定义封面URL: %s", coverURL)
+	} else if coverType == "live" && len(parts) > 0 {
+		// 使用直播首帧：从录制文件查找封面图片并上传
+		// 根据直播标题查找同一房间内最早录制的封面文件
+		// 查找同一房间、同一直播标题的最早一次录制分P
+		var oldestPart models.RecordHistoryPart
+		err := db.Where("room_id = ? AND live_title = ?", history.RoomID, history.Title).
+			Order("start_time ASC").
+			First(&oldestPart).Error
 
-		for _, coverPath := range coverPaths {
-			if _, err := os.Stat(coverPath); err == nil {
-				// 找到封面文件，上传到B站
-				coverData, err := os.ReadFile(coverPath)
-				if err == nil {
-					log.Printf("找到封面文件: %s", coverPath)
-					uploadedURL, err := client.UploadCover(coverData)
+		if err == nil && oldestPart.FilePath != "" {
+			// 使用最早录制的分P文件路径查找封面
+			basePath := strings.TrimSuffix(oldestPart.FilePath, filepath.Ext(oldestPart.FilePath))
+			log.Printf("找到同标题最早录制: %s (开始时间: %s)", oldestPart.FilePath, oldestPart.StartTime)
+
+			// 尝试多种封面文件格式
+			coverPaths := []string{
+				basePath + ".cover.jpg",
+				basePath + ".jpg",
+				basePath + ".cover.png",
+				basePath + ".png",
+			}
+
+			for _, coverPath := range coverPaths {
+				if _, err := os.Stat(coverPath); err == nil {
+					// 找到封面文件，上传到B站
+					coverData, err := os.ReadFile(coverPath)
 					if err == nil {
-						coverURL = uploadedURL
-						log.Printf("封面上传成功: %s", coverURL)
-						break
-					} else {
-						log.Printf("封面上传失败: %v", err)
+						log.Printf("找到封面文件: %s", coverPath)
+						uploadedURL, err := client.UploadCover(coverData)
+						if err == nil {
+							coverURL = uploadedURL
+							log.Printf("封面上传成功: %s", coverURL)
+							break
+						} else {
+							log.Printf("封面上传失败: %v", err)
+						}
+					}
+				}
+			}
+		} else {
+			log.Printf("未找到同标题的历史录制，尝试使用当前录制的封面")
+			// 如果没有找到同标题的历史录制，使用当前录制的第一个分P
+			firstPartPath := parts[0].FilePath
+			basePath := strings.TrimSuffix(firstPartPath, filepath.Ext(firstPartPath))
+
+			coverPaths := []string{
+				basePath + ".cover.jpg",
+				basePath + ".jpg",
+				basePath + ".cover.png",
+				basePath + ".png",
+			}
+
+			for _, coverPath := range coverPaths {
+				if _, err := os.Stat(coverPath); err == nil {
+					coverData, err := os.ReadFile(coverPath)
+					if err == nil {
+						log.Printf("找到封面文件: %s", coverPath)
+						uploadedURL, err := client.UploadCover(coverData)
+						if err == nil {
+							coverURL = uploadedURL
+							log.Printf("封面上传成功: %s", coverURL)
+							break
+						} else {
+							log.Printf("封面上传失败: %v", err)
+						}
 					}
 				}
 			}
@@ -119,8 +164,9 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 			coverURL = ""
 			log.Printf("未找到封面文件，将使用默认封面或从视频截取")
 		}
-	} else if coverURL == "" {
-		coverURL = "" // 使用默认封面或从视频截取
+	} else {
+		// 默认：不使用封面或从视频截取
+		coverURL = ""
 	}
 
 	// 构建分P信息

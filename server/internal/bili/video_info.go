@@ -324,27 +324,19 @@ func (c *BiliClient) GetUserArchiveList(mid int64, pn, ps int) ([]UserArchive, e
 	return resp.Data.List.Vlist, nil
 }
 
-// GetBvidByAid 从用户投稿列表中查找AID对应的BVID
+// GetBvidByAid 通过AID获取对应的BVID
 func (c *BiliClient) GetBvidByAid(mid int64, aid int64) (string, error) {
-	// 获取最近的投稿（一般最多查询前50个）
-	for pn := 1; pn <= 2; pn++ {
-		archives, err := c.GetUserArchiveList(mid, pn, 30)
-		if err != nil {
-			return "", err
-		}
-
-		if len(archives) == 0 {
-			break
-		}
-
-		for _, archive := range archives {
-			if archive.Aid == aid {
-				return archive.Bvid, nil
-			}
-		}
+	// 直接使用视频信息API获取BVID，无需查询投稿列表
+	videoInfo, err := c.GetVideoInfoByAid(aid)
+	if err != nil {
+		return "", fmt.Errorf("获取视频信息失败: %w", err)
 	}
 
-	return "", fmt.Errorf("未在用户投稿列表中找到AID=%d对应的视频", aid)
+	if videoInfo.Bvid == "" {
+		return "", fmt.Errorf("视频信息中未包含BVID (AID=%d)", aid)
+	}
+
+	return videoInfo.Bvid, nil
 }
 
 // GetBuvid 获取buvid

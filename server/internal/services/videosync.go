@@ -33,9 +33,9 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 		return fmt.Errorf("视频尚未投稿")
 	}
 
-	// 检查BV号格式，如果是错误的av格式（如"av115818859857681"），尝试从投稿列表修正
+	// 检查BV号格式，如果是错误的av格式（如"av115818859857681"），通过API获取正确的BV号
 	if strings.HasPrefix(history.BvID, "av") && len(history.BvID) > 12 {
-		log.Printf("检测到错误的BV号格式: %s，尝试从投稿列表获取正确的BV号", history.BvID)
+		log.Printf("检测到错误的BV号格式: %s，尝试通过AID获取正确的BV号", history.BvID)
 
 		// 从BV号中提取AID
 		avIDStr := strings.TrimPrefix(history.BvID, "av")
@@ -54,14 +54,14 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 				if err := db.First(&user, room.UploadUserID).Error; err == nil && user.Login && user.UID > 0 {
 					client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
 
-					// 从用户投稿列表中查找正确的BV号
+					// 通过API查找正确的BV号
 					correctBvid, bvidErr := client.GetBvidByAid(user.UID, avID)
 					if bvidErr == nil && correctBvid != "" && strings.HasPrefix(correctBvid, "BV") {
-						log.Printf("成功从投稿列表获取正确的BV号: %s -> %s (AID=%d)", history.BvID, correctBvid, avID)
+						log.Printf("成功通过API获取正确的BV号: %s -> %s (AID=%d)", history.BvID, correctBvid, avID)
 						history.BvID = correctBvid
 						db.Save(&history)
 					} else {
-						log.Printf("从投稿列表获取BV号失败: %v", bvidErr)
+						log.Printf("通过API获取BV号失败: %v", bvidErr)
 					}
 				}
 			}

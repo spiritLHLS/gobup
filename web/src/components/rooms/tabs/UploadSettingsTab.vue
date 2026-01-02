@@ -24,23 +24,16 @@
         </el-radio-group>
       </el-form-item>
       
-      <el-form-item v-if="localForm.coverType === 'diy'" label="上传封面">
+      <el-form-item v-if="localForm.coverType === 'diy'" label="封面地址">
         <div class="upload-area">
-          <el-upload
-            :action="`/api/rooms/${localForm.id}/cover`"
-            :show-file-list="false"
-            :on-success="handleCoverUploadSuccess"
-            :before-upload="beforeCoverUpload"
-            accept="image/*"
-          >
-            <el-button>
-              <el-icon><Upload /></el-icon>
-              选择图片
-            </el-button>
-          </el-upload>
-          <div class="help-text">支持jpg/png，建议尺寸：960x600，不超过2MB</div>
+          <el-input
+            v-model="localForm.coverUrl"
+            placeholder="请输入图片URL地址，例如：https://example.com/cover.jpg"
+            clearable
+          />
+          <div class="help-text">输入图片URL地址，建议尺寸：960x600</div>
           <div v-if="localForm.coverUrl" class="cover-preview">
-            <img :src="localForm.coverUrl" alt="封面预览" />
+            <img :src="localForm.coverUrl" alt="封面预览" @error="handleImageError" />
           </div>
         </div>
       </el-form-item>
@@ -73,7 +66,7 @@
 <script setup>
 import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Upload, View } from '@element-plus/icons-vue'
+import { View } from '@element-plus/icons-vue'
 import LineSelector from '../LineSelector.vue'
 
 const props = defineProps({
@@ -115,27 +108,9 @@ const localForm = computed({
   set: (val) => emit('update:modelValue', val)
 })
 
-const handleCoverUploadSuccess = (response) => {
-  if (response.code === 0) {
-    localForm.value.coverUrl = response.data.url
-    ElMessage.success('封面上传成功')
-  } else {
-    ElMessage.error(response.msg || '封面上传失败')
-  }
-}
-
-const beforeCoverUpload = (file) => {
-  const isImage = file.type.startsWith('image/')
-  if (!isImage) {
-    ElMessage.error('只能上传图片文件')
-    return false
-  }
-  const isLt2M = file.size / 1024 / 1024 < 2
-  if (!isLt2M) {
-    ElMessage.error('图片大小不能超过2MB')
-    return false
-  }
-  return true
+const handleImageError = (e) => {
+  console.error('封面图片加载失败:', e)
+  ElMessage.warning('封面图片加载失败，请检查URL是否正确')
 }
 </script>
 
