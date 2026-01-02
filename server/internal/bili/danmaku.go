@@ -53,6 +53,11 @@ func (c *BiliClient) SendDanmaku(cid int64, bvid string, progress int, message s
 
 	var resp SendDanmakuResponse
 	r, err := c.ReqClient.R().
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
+		SetHeader("Referer", "https://www.bilibili.com/video/"+bvid).
+		SetHeader("Cookie", c.Cookies).
+		SetHeader("x-bili-aurora-eid", "UlMFQVcABlAH").
+		SetHeader("x-bili-aurora-zone", "sh001").
 		SetFormData(map[string]string{
 			"type":     strconv.Itoa(req.Type),
 			"oid":      strconv.FormatInt(req.OID, 10),

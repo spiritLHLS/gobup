@@ -3,6 +3,8 @@ package bili
 import (
 	"fmt"
 	"time"
+
+	"github.com/imroc/req/v3"
 )
 
 // VideoInfo 视频基本信息
@@ -32,10 +34,30 @@ type VideoInfoResponse struct {
 // GetVideoInfo 获取视频信息
 func (c *BiliClient) GetVideoInfo(bvid string) (*VideoInfo, error) {
 	var resp VideoInfoResponse
-	r, err := c.ReqClient.R().
+
+	// 构建请求，带上Cookie获取更准确的状态信息
+	req := c.ReqClient.R().
 		SetQueryParam("bvid", bvid).
-		SetSuccessResult(&resp).
-		Get("https://api.bilibili.com/x/web-interface/view")
+		SetSuccessResult(&resp)
+
+	// 如果有Cookie，添加buvid以获取更准确的状态
+	if c.Cookies != "" {
+		// 获取buvid
+		buvid, err := GetBuvid()
+		if err == nil && buvid != nil {
+			// 添加buvid到Cookie中
+			cookieStr := c.Cookies
+			if buvid.Data.B3 != "" {
+				cookieStr += ";buvid3=" + buvid.Data.B3
+			}
+			if buvid.Data.B4 != "" {
+				cookieStr += ";buvid4=" + buvid.Data.B4
+			}
+			req.SetHeader("Cookie", cookieStr)
+		}
+	}
+
+	r, err := req.Get("https://api.bilibili.com/x/web-interface/view")
 
 	if err != nil {
 		return nil, fmt.Errorf("获取视频信息失败: %w", err)
@@ -212,4 +234,32 @@ func (c *BiliClient) UpdateVideoVisibility(aid int64, isOnlySelf bool) error {
 	}
 
 	return nil
+}
+
+// GetBuvid 获取buvid
+func GetBuvid() (*BuvIdResponse, error) {
+	var resp BuvIdResponse
+
+	// 创建新的req客户端
+	client := req.C().
+		SetCommonHeader("Referer", "https://live.bilibili.com/").
+		SetCommonHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	r, err := client.R().
+		SetSuccessResult(&resp).
+		Get("https://api.bilibili.com/x/frontend/finger/spi")
+
+	if err != nil {
+		return nil, err
+	}
+
+	if !r.IsSuccessState() {
+		return nil, fmt.Errorf("获取buvid失败: HTTP %d", r.StatusCode)
+	}
+
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("获取buvid失败: code=%d", resp.Code)
+	}
+
+	return &resp, nil
 }

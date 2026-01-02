@@ -3,7 +3,9 @@ package services
 import (
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gobup/server/internal/bili"
@@ -53,7 +55,48 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 	// 获取视频基本信息
 	videoInfo, err := client.GetVideoInfo(history.BvID)
 	if err != nil {
-		return fmt.Errorf("获取视频信息失败: %w", err)
+		// 如果获取失败，尝试使用Member API二次确认
+		if strings.Contains(err.Error(), "code=-400") || strings.Contains(err.Error(), "code=-404") {
+			log.Printf("获取视频信息失败(code=%s)，尝试使用Member API二次确认 BV号: %s",
+				extractCodeFromError(err), history.BvID)
+
+			// 使用Member API获取分P信息
+			partInfo, partErr := client.GetVideoPartInfo(history.BvID)
+			if partErr != nil {
+				// Member API也失败，可能视频已被删除
+				if strings.Contains(partErr.Error(), "code=-404") {
+					log.Printf("Member API确认视频已删除: %s", history.BvID)
+					history.VideoState = -404
+					history.VideoStateDesc = "视频已删除"
+					db.Save(&history)
+					return fmt.Errorf("视频已删除: %w", err)
+				}
+				return fmt.Errorf("获取视频信息失败: %w", err)
+			}
+
+			// Member API返回成功但可能state不稳定，需要再次用带Cookie的API确认真实state
+			if partInfo != nil && len(partInfo.Videos) > 0 {
+				// 更新Aid信息
+				if history.AvID == "" {
+					history.AvID = strconv.FormatInt(partInfo.Videos[0].Aid, 10)
+				}
+
+				// 等待一下避免请求过快
+				time.Sleep(800 * time.Millisecond)
+
+				// 再次尝试获取视频信息（带Cookie）
+				videoInfo, err = client.GetVideoInfo(history.BvID)
+				if err != nil {
+					// 仍然失败，保守处理，保持原状态
+					log.Printf("二次确认仍失败，保持原状态: %s, error: %v", history.BvID, err)
+					return fmt.Errorf("获取视频信息失败: %w", err)
+				}
+			} else {
+				return fmt.Errorf("获取视频信息失败: %w", err)
+			}
+		} else {
+			return fmt.Errorf("获取视频信息失败: %w", err)
+		}
 	}
 
 	// 更新Aid
@@ -252,4 +295,20 @@ func (s *VideoSyncService) CleanCompletedTasks() error {
 
 	log.Printf("清理了 %d 个已完成的同步任务", result.RowsAffected)
 	return result.Error
+}
+
+// extractCodeFromError 从错误信息中提取code值
+func extractCodeFromError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	// 匹配 "code=-400" 或 "code=-404" 等格式
+	re := regexp.MustCompile(`code=(-?\d+)`)
+	matches := re.FindStringSubmatch(err.Error())
+	if len(matches) > 1 {
+		return matches[1]
+	}
+
+	return ""
 }
