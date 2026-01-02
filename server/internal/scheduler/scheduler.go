@@ -71,6 +71,15 @@ func InitScheduler() {
 		}
 	})
 
+	// 直播状态监控 - 每5分钟执行一次
+	cronJob.AddFunc("*/5 * * * *", func() {
+		log.Println("执行定时任务: 直播状态监控")
+		liveStatusService := services.NewLiveStatusService()
+		if err := liveStatusService.UpdateAllRoomsStatus(); err != nil {
+			log.Printf("直播状态监控失败: %v", err)
+		}
+	})
+
 	// 清理已完成的同步任务 - 每天凌晨3点执行
 	cronJob.AddFunc("0 3 * * *", func() {
 		log.Println("执行定时任务: 清理已完成的同步任务")

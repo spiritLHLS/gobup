@@ -56,6 +56,8 @@ type RecordRoom struct {
 	Streaming          bool           `gorm:"default:false;index" json:"streaming"`
 	SessionID          string         `gorm:"index" json:"sessionId"`
 	SeasonID           int64          `json:"seasonId"`
+	LiveStatus         int            `gorm:"default:0;index" json:"liveStatus"` // 直播状态: 0未开播 1正在直播 2轮播中
+	LastCheckTime      *time.Time     `json:"lastCheckTime"`                     // 最后检查时间
 }
 
 // RecordHistory 录制历史

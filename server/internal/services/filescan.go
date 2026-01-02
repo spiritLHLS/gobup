@@ -222,12 +222,57 @@ func (s *FileScanService) scanDirectory(dirPath string, config *ScanConfig, resu
 		// 计算文件年龄（小时）
 		fileAgeHours := int(time.Since(info.ModTime()).Hours())
 
-		// 检查文件是否太新（可能正在写入）- 除非是强制导入模式
-		if !config.ForceImport && config.MinFileAge > 0 && fileAgeHours < config.MinFileAge {
-			log.Printf("[FileScan] 跳过新文件（可能正在写入）: %s (年龄=%d小时, 需要>%d小时)",
-				filepath.Base(path), fileAgeHours, config.MinFileAge)
-			result.SkippedFiles++
-			return nil
+		// 尝试从文件路径解析房间号
+		metadata := s.parseFileMetadata(path, info)
+
+		// 如果解析到房间号，检查直播状态（智能判断）
+		if metadata != nil && metadata.RoomID != "" && metadata.RoomID != "unknown" {
+			liveStatusService := NewLiveStatusService()
+			isFinished, usedFallback, err := liveStatusService.IsRoomRecordingFinished(metadata.RoomID, info.ModTime())
+
+			if err == nil {
+				if !isFinished {
+					// 直播未结束或文件未稳定，跳过
+					if usedFallback {
+						log.Printf("[FileScan] 跳过文件（保底逻辑：文件修改时间 < 1小时）: %s",
+							filepath.Base(path))
+					} else {
+						log.Printf("[FileScan] 跳过文件（房间 %s 直播未结束或文件未稳定）: %s",
+							metadata.RoomID, filepath.Base(path))
+					}
+					result.SkippedFiles++
+					return nil
+				}
+				// 直播已结束且文件已稳定，继续处理
+				if usedFallback {
+					log.Printf("[FileScan] 文件可处理（保底逻辑：文件修改时间 >= 1小时）: %s",
+						filepath.Base(path))
+				} else {
+					log.Printf("[FileScan] 文件可处理（房间 %s 直播已结束）: %s",
+						metadata.RoomID, filepath.Base(path))
+				}
+			} else {
+				// 理论上不应该到这里，因为新的实现总是返回 err == nil
+				log.Printf("[FileScan] 检查房间 %s 状态异常: %v，使用配置的时间判断",
+					metadata.RoomID, err)
+
+				// 回退到配置的时间判断
+				if !config.ForceImport && config.MinFileAge > 0 && fileAgeHours < config.MinFileAge {
+					log.Printf("[FileScan] 跳过新文件（可能正在写入）: %s (年龄=%d小时, 需要>%d小时)",
+						filepath.Base(path), fileAgeHours, config.MinFileAge)
+					result.SkippedFiles++
+					return nil
+				}
+			}
+		} else {
+			// 无法解析房间号，使用传统的时间判断
+			// 检查文件是否太新（可能正在写入）- 除非是强制导入模式
+			if !config.ForceImport && config.MinFileAge > 0 && fileAgeHours < config.MinFileAge {
+				log.Printf("[FileScan] 跳过新文件（无房间号，使用时间判断）: %s (年龄=%d小时, 需要>%d小时)",
+					filepath.Base(path), fileAgeHours, config.MinFileAge)
+				result.SkippedFiles++
+				return nil
+			}
 		}
 
 		// 检查文件年龄是否过大 - 除非是强制导入模式

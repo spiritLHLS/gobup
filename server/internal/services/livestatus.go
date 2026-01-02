@@ -1,0 +1,199 @@
+package services
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/gobup/server/internal/database"
+	"github.com/gobup/server/internal/models"
+	"github.com/imroc/req/v3"
+)
+
+// LiveRoomInfo B站直播间信息
+type LiveRoomInfo struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    struct {
+		UID            int64  `json:"uid"`
+		RoomID         int64  `json:"room_id"`
+		ShortID        int    `json:"short_id"`
+		LiveStatus     int    `json:"live_status"` // 0:未开播 1:正在直播 2:轮播中
+		RoomStatus     int    `json:"room_status"` // 0:房间封禁 1:房间正常
+		Title          string `json:"title"`       // 直播标题
+		UserCover      string `json:"user_cover"`  // 直播封面
+		ParentAreaID   int    `json:"parent_area_id"`
+		AreaID         int    `json:"area_id"`
+		AreaName       string `json:"area_name"`
+		ParentAreaName string `json:"parent_area_name"`
+	} `json:"data"`
+}
+
+// LiveStatusService 直播状态服务
+type LiveStatusService struct {
+	client *req.Client
+}
+
+// NewLiveStatusService 创建直播状态服务实例
+func NewLiveStatusService() *LiveStatusService {
+	client := req.C().
+		SetTimeout(10 * time.Second).
+		SetCommonRetryCount(2)
+
+	return &LiveStatusService{
+		client: client,
+	}
+}
+
+// GetRoomInfo 获取直播间信息
+func (s *LiveStatusService) GetRoomInfo(roomID string) (*LiveRoomInfo, error) {
+	url := fmt.Sprintf("https://api.live.bilibili.com/room/v1/Room/get_info?room_id=%s", roomID)
+
+	var roomInfo LiveRoomInfo
+	resp, err := s.client.R().
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
+		Get(url)
+
+	if err != nil {
+		return nil, fmt.Errorf("请求直播间信息失败: %w", err)
+	}
+
+	if err := json.Unmarshal(resp.Bytes(), &roomInfo); err != nil {
+		return nil, fmt.Errorf("解析直播间信息失败: %w", err)
+	}
+
+	if roomInfo.Code != 0 {
+		return nil, fmt.Errorf("获取直播间信息失败: %s", roomInfo.Message)
+	}
+
+	return &roomInfo, nil
+}
+
+// UpdateRoomLiveStatus 更新房间的直播状态
+func (s *LiveStatusService) UpdateRoomLiveStatus(room *models.RecordRoom) error {
+	roomInfo, err := s.GetRoomInfo(room.RoomID)
+	if err != nil {
+		log.Printf("[LiveStatus] 获取房间 %s 的直播状态失败: %v", room.RoomID, err)
+		return err
+	}
+
+	db := database.GetDB()
+
+	// 记录之前的状态
+	wasStreaming := room.Streaming
+
+	// 更新房间状态
+	updates := map[string]interface{}{
+		"streaming":        roomInfo.Data.LiveStatus == 1,
+		"title":            roomInfo.Data.Title,
+		"uname":            room.Uname, // 保持原有主播名，或从其他接口获取
+		"area_name":        roomInfo.Data.AreaName,
+		"area_name_parent": roomInfo.Data.ParentAreaName,
+		"live_status":      roomInfo.Data.LiveStatus,
+		"last_check_time":  time.Now(),
+	}
+
+	if err := db.Model(room).Updates(updates).Error; err != nil {
+		return fmt.Errorf("更新房间状态失败: %w", err)
+	}
+
+	// 检测直播状态变化
+	isStreaming := roomInfo.Data.LiveStatus == 1
+
+	if wasStreaming && !isStreaming {
+		log.Printf("[LiveStatus] 房间 %s 直播结束，可以处理录播文件", room.RoomID)
+		// 这里可以触发文件扫描或其他处理逻辑
+	} else if !wasStreaming && isStreaming {
+		log.Printf("[LiveStatus] 房间 %s 开始直播: %s", room.RoomID, roomInfo.Data.Title)
+	}
+
+	log.Printf("[LiveStatus] 房间 %s 状态更新: live_status=%d, streaming=%v, title=%s",
+		room.RoomID, roomInfo.Data.LiveStatus, isStreaming, roomInfo.Data.Title)
+
+	return nil
+}
+
+// UpdateAllRoomsStatus 更新所有房间的直播状态
+func (s *LiveStatusService) UpdateAllRoomsStatus() error {
+	db := database.GetDB()
+
+	var rooms []models.RecordRoom
+	if err := db.Where("upload = ?", true).Find(&rooms).Error; err != nil {
+		return fmt.Errorf("查询房间列表失败: %w", err)
+	}
+
+	log.Printf("[LiveStatus] 开始更新 %d 个房间的直播状态", len(rooms))
+
+	successCount := 0
+	failCount := 0
+
+	for i := range rooms {
+		if err := s.UpdateRoomLiveStatus(&rooms[i]); err != nil {
+			log.Printf("[LiveStatus] 更新房间 %s 状态失败: %v", rooms[i].RoomID, err)
+			failCount++
+		} else {
+			successCount++
+		}
+
+		// 避免请求过快，每个请求间隔一下
+		if i < len(rooms)-1 {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	log.Printf("[LiveStatus] 状态更新完成: 成功=%d, 失败=%d", successCount, failCount)
+
+	return nil
+}
+
+// IsRoomRecordingFinished 判断房间的录播是否已完成（直播已结束且录制文件稳定）
+// 返回值: (是否可以处理, 是否使用了保底逻辑, 错误)
+func (s *LiveStatusService) IsRoomRecordingFinished(roomID string, fileModTime time.Time) (bool, bool, error) {
+	// 保底逻辑：文件修改时间超过1小时才处理
+	const fallbackDuration = 1 * time.Hour
+	timeSinceModified := time.Since(fileModTime)
+
+	roomInfo, err := s.GetRoomInfo(roomID)
+	if err != nil {
+		// 如果无法获取直播状态，使用保底逻辑：1小时时间判断
+		log.Printf("[LiveStatus] 无法获取房间 %s 状态，使用保底逻辑（1小时）: %v", roomID, err)
+		canProcess := timeSinceModified >= fallbackDuration
+		if canProcess {
+			log.Printf("[LiveStatus] 文件修改时间 %v >= 1小时，允许处理", timeSinceModified)
+		} else {
+			log.Printf("[LiveStatus] 文件修改时间 %v < 1小时，跳过处理", timeSinceModified)
+		}
+		return canProcess, true, nil
+	}
+
+	// 检查响应数据是否有效
+	if roomInfo.Data.RoomID == 0 {
+		log.Printf("[LiveStatus] 房间 %s 返回数据无效，使用保底逻辑（1小时）", roomID)
+		canProcess := timeSinceModified >= fallbackDuration
+		return canProcess, true, nil
+	}
+
+	isLive := roomInfo.Data.LiveStatus == 1
+
+	if isLive {
+		// 正在直播，录播文件可能还在写入
+		log.Printf("[LiveStatus] 房间 %s 正在直播（live_status=%d），跳过文件处理",
+			roomID, roomInfo.Data.LiveStatus)
+		return false, false, nil
+	}
+
+	// 直播已结束，检查文件修改时间
+	// 给予一定的缓冲时间（如5分钟），确保录播软件已完成文件写入
+	bufferTime := 5 * time.Minute
+
+	if timeSinceModified < bufferTime {
+		log.Printf("[LiveStatus] 房间 %s 直播已结束（live_status=%d），但文件修改时间过近（%v），等待稳定",
+			roomID, roomInfo.Data.LiveStatus, timeSinceModified)
+		return false, false, nil
+	}
+
+	log.Printf("[LiveStatus] 房间 %s 直播已结束（live_status=%d）且文件已稳定（%v），可以处理",
+		roomID, roomInfo.Data.LiveStatus, timeSinceModified)
+	return true, false, nil
+}

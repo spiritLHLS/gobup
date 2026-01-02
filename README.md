@@ -197,10 +197,14 @@ GoBup会自动扫描录制文件并入库，无需配置Webhook：
 4. 系统会自动按设置的扫盘间隔扫描这些目录
 5. 也可以手动点击"扫描录入"按钮立即扫描
 
-> 提示：
+> **智能文件扫描机制**：
+> - 系统会**自动检测直播状态**，通过B站API实时判断直播是否已结束
+> - 只有当直播结束且文件稳定后（5分钟缓冲时间），才会处理录播文件
+> - **保底机制**：如果API调用失败，自动回退到1小时时间判断，确保不会误扫描正在写入的文件
+> - 系统每5分钟自动更新所有房间的直播状态
 > - Docker部署时，确保已将录播目录挂载到容器（如 `-v /path/to/recordings:/rec`）
 > - 系统会优先扫描自定义目录，然后扫描工作目录
-> - 默认会跳过12小时内修改的文件（防止扫描正在写入的文件）
+> - 配置的"最小文件年龄"（默认12小时）作为无房间信息时的兜底策略
 
 ### 添加B站账号
 
@@ -266,73 +270,6 @@ GoBup会自动扫描录制文件并入库，无需配置Webhook：
 | `${yyyy年MM月dd日HH点mm分}` | 完整日期时间 | 2025年12月30日20点30分 |
 | `${MM月dd日HH点mm分}` | 简短日期时间 | 12月30日20点30分 |
 | `${@uid}` | @用户格式 | @uid:123456 |
-
-#### 示例
-
-```
-标题模板: ${uname}的${areaName}直播录像 ${MM月dd日HH点mm分}
-结果: 某某主播的网络游戏直播录像 12月30日20点30分
-
-简介模板: 
-主播：${uname}
-直播间：https://live.bilibili.com/${roomId}
-录制时间：${yyyy年MM月dd日HH点mm分}
-```
-
-### 分P标题模板
-
-当启用分P上传时，每个分P的标题可以使用：
-
-| 变量 | 说明 |
-|------|------|
-| `${index}` | 分P序号（从1开始） |
-| `${MM月dd日HH点mm分}` | 日期时间 |
-| `${areaName}` | 分区名称 |
-
-#### 示例
-
-```
-分P标题模板: P${index} ${MM月dd日HH点mm分}
-结果: P1 12月30日20点30分
-```
-
-## 项目结构
-
-```
-gobup/
-├── server/                 # 后端服务
-│   ├── main.go            # 程序入口
-│   ├── go.mod             # Go依赖管理
-│   ├── Dockerfile         # 后端Docker配置
-│   └── internal/          # 内部包
-│       ├── bili/          # B站API客户端
-│       │   ├── auth.go    # 认证相关
-│       │   ├── client.go  # HTTP客户端
-│       │   ├── upload_app.go   # App上传
-│       │   ├── upload_kodo.go  # Kodo上传
-│       │   └── upload_upos.go  # Upos上传
-│       ├── config/        # 配置管理
-│       ├── controllers/   # HTTP控制器
-│       ├── database/      # 数据库操作
-│       ├── middleware/    # 中间件
-│       ├── models/        # 数据模型
-│       ├── routes/        # 路由配置
-│       ├── scheduler/     # 定时任务
-│       ├── services/      # 业务服务
-│       ├── upload/        # 上传服务
-│       └── webhook/       # Webhook处理
-├── web/                   # 前端界面
-│   ├── src/
-│   │   ├── views/         # 页面组件
-│   │   ├── api/           # API调用
-│   │   ├── router/        # 路由配置
-│   │   └── App.vue        # 根组件
-│   ├── package.json       # npm依赖
-│   ├── vite.config.js     # Vite配置
-│   ├── Dockerfile         # 前端Docker配置
-│   └── nginx.conf         # Nginx配置
-└── README.md              # 本文档
-```
 
 ## 致谢
 
