@@ -79,56 +79,6 @@
 
       <el-form label-width="180px" v-loading="loading" label-position="left">
         <div class="form-section">
-          <div class="section-title">上传与投稿</div>
-          
-          <el-form-item label="自动上传">
-            <div class="switch-item">
-              <el-switch 
-                v-model="config.autoUpload" 
-                @change="toggleFeature('autoUpload', $event)"
-                size="large"
-              />
-              <span class="help-text">启用后，系统会自动将录制文件上传到B站</span>
-            </div>
-          </el-form-item>
-
-          <el-form-item label="自动投稿">
-            <div class="switch-item">
-              <el-switch 
-                v-model="config.autoPublish" 
-                @change="toggleFeature('autoPublish', $event)"
-                size="large"
-              />
-              <span class="help-text">启用后，上传完成后自动提交投稿</span>
-            </div>
-          </el-form-item>
-
-          <el-form-item label="自动删除">
-            <div class="switch-item">
-              <el-switch 
-                v-model="config.autoDelete" 
-                @change="toggleFeature('autoDelete', $event)"
-                size="large"
-              />
-              <span class="help-text">启用后，投稿成功后自动删除本地文件</span>
-            </div>
-          </el-form-item>
-
-          <el-form-item label="自动弹幕发送">
-            <div class="switch-item">
-              <el-switch 
-                v-model="config.autoSendDanmaku" 
-                @change="toggleFeature('autoSendDanmaku', $event)"
-                size="large"
-              />
-              <span class="help-text">启用后，自动发送高能弹幕</span>
-            </div>
-          </el-form-item>
-        </div>
-
-        <el-divider />
-
-        <div class="form-section">
           <div class="section-title">文件扫描</div>
           
           <el-form-item label="自动扫盘录入">
@@ -194,6 +144,30 @@
             </div>
           </el-form-item>
 
+          <el-form-item label="工作目录">
+            <div class="path-input-wrapper">
+              <el-input 
+                v-model="config.workPath" 
+                placeholder="/rec 或 /path/to/recordings"
+                size="large"
+              />
+              <span class="help-text">录制文件存放的根目录（Docker默认/rec，裸机默认./data/recordings）</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="自定义扫描目录">
+            <div class="path-input-wrapper">
+              <el-input 
+                v-model="config.customScanPaths" 
+                placeholder="/path1,/path2,/path3"
+                size="large"
+                type="textarea"
+                :rows="2"
+              />
+              <span class="help-text">额外的扫描目录，多个路径用逗号分隔，优先扫描这些目录，然后扫描工作目录</span>
+            </div>
+          </el-form-item>
+
           <el-form-item label="手动扫盘">
             <div class="button-group">
               <el-button 
@@ -245,17 +219,6 @@
               <span class="help-text">孤儿文件扫描间隔时间，最小1小时</span>
             </div>
           </el-form-item>
-
-          <el-form-item label="工作目录">
-            <div class="path-input-wrapper">
-              <el-input 
-                v-model="config.workPath" 
-                placeholder="/path/to/recordings"
-                size="large"
-              />
-              <span class="help-text">录制文件存放的根目录</span>
-            </div>
-          </el-form-item>
         </div>
       </el-form>
     </el-card>
@@ -277,16 +240,13 @@ const saving = ref(false)
 const scanning = ref(false)
 const fileScanDialogRef = ref(null)
 const config = ref({
-  autoUpload: false,
-  autoPublish: false,
-  autoDelete: false,
-  autoSendDanmaku: false,
   autoFileScan: true,
   fileScanInterval: 60,
   fileScanMinAge: 12,
   fileScanMinSize: 1048576,
   fileScanMaxAge: 720,
   workPath: '',
+  customScanPaths: '',
   enableOrphanScan: true,
   orphanScanInterval: 360
 })
@@ -393,10 +353,6 @@ const saveConfig = async () => {
 // 获取功能名称
 const getFeatureName = (feature) => {
   const names = {
-    autoUpload: '自动上传',
-    autoPublish: '自动投稿',
-    autoDelete: '自动删除',
-    autoSendDanmaku: '自动弹幕发送',
     autoFileScan: '自动扫盘录入',
     enableOrphanScan: '孤儿文件扫描'
   }

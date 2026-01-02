@@ -13,6 +13,16 @@
         <div class="help-text">开启后将自动上传录制的视频到B站</div>
       </el-form-item>
       
+      <el-form-item label="自动上传分P">
+        <el-switch v-model="localForm.autoUpload" />
+        <div class="help-text">开启后，录制完成的分P将自动上传到B站（需要先开启"是否上传"）</div>
+      </el-form-item>
+      
+      <el-form-item label="自动投稿">
+        <el-switch v-model="localForm.autoPublish" />
+        <div class="help-text">开启后，所有分P上传完成后将自动提交投稿</div>
+      </el-form-item>
+      
       <el-form-item label="上传用户">
         <el-select 
           v-model="localForm.uploadUserId" 

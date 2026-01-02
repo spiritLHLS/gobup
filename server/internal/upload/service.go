@@ -274,9 +274,9 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 	db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", history.ID).Count(&totalCount)
 	db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND upload = ?", history.ID, true).Count(&uploadedCount)
 
-	// 如果所有分P都上传完成且未投稿，则自动投稿
-	if totalCount > 0 && totalCount == uploadedCount && !history.Publish && room.AutoUpload {
-		log.Printf("所有分P上传完成，开始投稿: history_id=%d", history.ID)
+	// 如果所有分P都上传完成且未投稿，根据房间的AutoPublish设置决定是否自动投稿
+	if totalCount > 0 && totalCount == uploadedCount && !history.Publish && room.AutoPublish {
+		log.Printf("所有分P上传完成，房间设置允许自动投稿，开始投稿: history_id=%d", history.ID)
 
 		if room.UploadUserID > 0 {
 			if err := s.PublishHistory(history.ID, room.UploadUserID); err != nil {

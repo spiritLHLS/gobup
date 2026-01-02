@@ -49,15 +49,12 @@ func InitDB(dbPath string) error {
 	if err := DB.First(&config).Error; err != nil {
 		// 创建默认配置
 		config = models.SystemConfig{
-			AutoUpload:         true,
-			AutoPublish:        false,
-			AutoDelete:         false,
-			AutoSendDanmaku:    false,
 			AutoFileScan:       true,
 			FileScanInterval:   60,
 			FileScanMinAge:     12,
 			FileScanMinSize:    1048576, // 1MB
 			FileScanMaxAge:     720,     // 30天
+			CustomScanPaths:    "",      // 默认为空
 			EnableOrphanScan:   true,
 			OrphanScanInterval: 360, // 6小时
 		}

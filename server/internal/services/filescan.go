@@ -93,7 +93,7 @@ func LoadConfigFromDB() *ScanConfig {
 		}
 	}
 
-	return &ScanConfig{
+	config := &ScanConfig{
 		WorkPath:          workPath,
 		VideoExtensions:   []string{".flv", ".mp4", ".mkv", ".ts"},
 		MinFileSize:       sysConfig.FileScanMinSize,
@@ -101,6 +101,38 @@ func LoadConfigFromDB() *ScanConfig {
 		MaxFileAge:        sysConfig.FileScanMaxAge / 24,   // 转换为天
 		ScanIntervalHours: sysConfig.FileScanInterval / 60, // 转换为小时
 	}
+
+	return config
+}
+
+// getCustomScanPaths 获取自定义扫描路径列表
+func getCustomScanPaths() []string {
+	db := database.GetDB()
+	var sysConfig models.SystemConfig
+	if err := db.First(&sysConfig).Error; err != nil {
+		return []string{}
+	}
+
+	if sysConfig.CustomScanPaths == "" {
+		return []string{}
+	}
+
+	// 分割路径，支持逗号分隔
+	paths := strings.Split(sysConfig.CustomScanPaths, ",")
+	validPaths := []string{}
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path != "" {
+			// 验证路径是否存在
+			if _, err := os.Stat(path); err == nil {
+				validPaths = append(validPaths, path)
+			} else {
+				log.Printf("[FileScan] 自定义扫描路径不存在，跳过: %s", path)
+			}
+		}
+	}
+
+	return validPaths
 }
 
 // ScanResult 扫描结果
@@ -118,6 +150,21 @@ func (s *FileScanService) ScanAndImport(config *ScanConfig) (*ScanResult, error)
 		Errors: make([]string, 0),
 	}
 
+	// 获取自定义扫描路径
+	customPaths := getCustomScanPaths()
+
+	// 先扫描自定义路径（优先）
+	if len(customPaths) > 0 {
+		log.Printf("[FileScan] 开始扫描自定义目录，共%d个路径", len(customPaths))
+		for _, customPath := range customPaths {
+			log.Printf("[FileScan] 扫描自定义目录: %s", customPath)
+			if err := s.scanDirectory(customPath, config, result); err != nil {
+				log.Printf("[FileScan] 扫描自定义目录失败: %s, error: %v", customPath, err)
+			}
+		}
+	}
+
+	// 然后扫描默认工作目录
 	if config.WorkPath == "" {
 		return result, fmt.Errorf("工作目录未配置")
 	}
@@ -127,14 +174,26 @@ func (s *FileScanService) ScanAndImport(config *ScanConfig) (*ScanResult, error)
 	}
 
 	if config.ForceImport {
-		log.Printf("[FileScan] 开始强制扫描目录: %s (无视文件年龄限制，仅保留1分钟安全检查)", config.WorkPath)
+		log.Printf("[FileScan] 开始强制扫描默认目录: %s (无视文件年龄限制，仅保留1分钟安全检查)", config.WorkPath)
 	} else {
-		log.Printf("[FileScan] 开始扫描目录: %s (最小文件年龄=%d小时, 最大年龄=%d天)",
-			config.WorkPath, config.MinFileAge, config.MaxFileAge/24)
+		log.Printf("[FileScan] 开始扫描默认目录: %s (最小文件年龄=%d小时, 最大年龄=%d天)",
+			config.WorkPath, config.MinFileAge, config.MaxFileAge)
 	}
 
+	if err := s.scanDirectory(config.WorkPath, config, result); err != nil {
+		return result, err
+	}
+
+	log.Printf("[FileScan] 扫描完成: 总文件=%d, 新导入=%d, 跳过=%d, 失败=%d",
+		result.TotalFiles, result.NewFiles, result.SkippedFiles, result.FailedFiles)
+
+	return result, nil
+}
+
+// scanDirectory 扫描单个目录
+func (s *FileScanService) scanDirectory(dirPath string, config *ScanConfig, result *ScanResult) error {
 	// 遍历工作目录
-	err := filepath.Walk(config.WorkPath, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			log.Printf("[FileScan] 访问路径失败: %s, error: %v", path, err)
 			return nil // 继续扫描其他文件
@@ -200,14 +259,7 @@ func (s *FileScanService) ScanAndImport(config *ScanConfig) (*ScanResult, error)
 		return nil
 	})
 
-	if err != nil {
-		return result, fmt.Errorf("扫描目录失败: %w", err)
-	}
-
-	log.Printf("[FileScan] 扫描完成: 总文件=%d, 新导入=%d, 跳过=%d, 失败=%d",
-		result.TotalFiles, result.NewFiles, result.SkippedFiles, result.FailedFiles)
-
-	return result, nil
+	return err
 }
 
 // isVideoFile 检查是否是视频文件

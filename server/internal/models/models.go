@@ -21,7 +21,8 @@ type RecordRoom struct {
 	HistoryID          uint           `json:"historyId"`
 	UploadUserID       uint           `gorm:"index" json:"uploadUserId"`
 	Upload             bool           `gorm:"default:true;index" json:"upload"`
-	AutoUpload         bool           `gorm:"default:true" json:"autoUpload"`
+	AutoUpload         bool           `gorm:"default:true" json:"autoUpload"`   // 是否自动上传分P
+	AutoPublish        bool           `gorm:"default:false" json:"autoPublish"` // 所有分P上传完成后是否自动投稿
 	TitleTemplate      string         `gorm:"type:text" json:"titleTemplate"`
 	PartTitleTemplate  string         `gorm:"type:text" json:"partTitleTemplate"`
 	DescTemplate       string         `gorm:"type:text" json:"descTemplate"`
@@ -197,16 +198,13 @@ type SystemConfig struct {
 	ID                 uint      `gorm:"primarykey" json:"id"`
 	CreatedAt          time.Time `json:"createdAt"`
 	UpdatedAt          time.Time `json:"updatedAt"`
-	AutoUpload         bool      `gorm:"default:true" json:"autoUpload"`         // 自动上传
-	AutoPublish        bool      `gorm:"default:false" json:"autoPublish"`       // 自动投稿
-	AutoDelete         bool      `gorm:"default:false" json:"autoDelete"`        // 自动删除
-	AutoSendDanmaku    bool      `gorm:"default:false" json:"autoSendDanmaku"`   // 自动发送弹幕
 	AutoFileScan       bool      `gorm:"default:true" json:"autoFileScan"`       // 自动扫盘录入
 	FileScanInterval   int       `gorm:"default:60" json:"fileScanInterval"`     // 文件扫描间隔（分钟）
 	FileScanMinAge     int       `gorm:"default:12" json:"fileScanMinAge"`       // 文件最小年龄（小时），避免扫描正在写入的文件
 	FileScanMinSize    int64     `gorm:"default:1048576" json:"fileScanMinSize"` // 文件最小大小（字节）
 	FileScanMaxAge     int       `gorm:"default:720" json:"fileScanMaxAge"`      // 文件最大年龄（小时），30天
 	WorkPath           string    `gorm:"type:text" json:"workPath"`              // 录制文件工作目录
+	CustomScanPaths    string    `gorm:"type:text" json:"customScanPaths"`       // 自定义扫盘目录，逗号分隔，优先扫描
 	EnableOrphanScan   bool      `gorm:"default:true" json:"enableOrphanScan"`   // 启用孤儿文件扫描
 	OrphanScanInterval int       `gorm:"default:360" json:"orphanScanInterval"`  // 孤儿文件扫描间隔（分钟）
 }

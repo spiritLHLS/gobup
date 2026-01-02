@@ -187,20 +187,20 @@ docker network connect bili-net brec  # 或 blrec
 docker network connect bili-net gobup
 ```
 
-### 配置录播软件Webhook
+### 配置扫盘目录
 
-在录播姬中配置Webhook地址：
+GoBup会自动扫描录制文件并入库，无需配置Webhook：
 
-| 录播软件 | Webhook地址 |
-|---------|-------------|
-| BililiveRecorder | `http://gobup/api/recordWebHook` 或 `http://192.168.x.x:12380/api/recordWebHook` |
-| blrec | `http://gobup/api/recordWebHook` 或 `http://192.168.x.x:12380/api/recordWebHook` |
+1. 访问Web界面 -> 控制面板
+2. 在"工作目录"中配置录播软件的录制目录（如 `/rec`）
+3. （可选）在"自定义扫描目录"中添加额外的扫描路径，用逗号分隔
+4. 系统会自动按设置的扫盘间隔扫描这些目录
+5. 也可以手动点击"扫描录入"按钮立即扫描
 
-> 重要提示：
-> - 使用容器名称 `gobup`（需配置Docker网络）
-> - 或使用局域网IP：`http://192.168.x.x:12380/api/recordWebHook`
-> - 不要使用 `localhost` 或 `127.0.0.1`
-> - 不要使用容器内部IP
+> 提示：
+> - Docker部署时，确保已将录播目录挂载到容器（如 `-v /path/to/recordings:/rec`）
+> - 系统会优先扫描自定义目录，然后扫描工作目录
+> - 默认会跳过12小时内修改的文件（防止扫描正在写入的文件）
 
 ### 添加B站账号
 
@@ -243,10 +243,10 @@ docker network connect bili-net gobup
 
 ### 工作原理
 
-1. **录播软件录制** - 录播姬/blrec监控直播并录制视频文件
-2. **Webhook通知** - 录制完成后发送Webhook到GoBup（携带文件路径）
-3. **自动处理** - GoBup接收事件，读取房间配置
-4. **上传投稿** - 根据配置自动上传视频并投稿到B站
+1. **录播软件录制** - 录播姬/blrec监控直播并录制视频文件到指定目录
+2. **自动扫盘入库** - GoBup定时扫描录制目录，自动发现并入库新文件
+3. **自动上传** - 根据房间配置，自动上传录制文件到B站
+4. **自动投稿** - 根据房间的自动投稿设置，上传完成后自动提交投稿
 5. **消息推送** - 完成后通过WxPusher推送通知（如已配置）
 
 > 关键提示：录播姬和本项目必须能访问同一个文件路径（Docker部署需映射同一宿主机目录）

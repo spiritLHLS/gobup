@@ -16,9 +16,6 @@ func SetupRoutes(router *gin.Engine) {
 
 	api := router.Group("/api")
 	{
-		api.POST("/recordWebHook", controllers.RecordWebHook)
-		api.GET("/recordWebHook", controllers.RecordWebHookGet)
-
 		auth := api.Group("")
 		auth.Use(middleware.BasicAuth())
 		{

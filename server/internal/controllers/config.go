@@ -238,16 +238,13 @@ func UpdateSystemConfig(c *gin.Context) {
 	}
 
 	// 更新配置
-	config.AutoUpload = req.AutoUpload
-	config.AutoPublish = req.AutoPublish
-	config.AutoDelete = req.AutoDelete
-	config.AutoSendDanmaku = req.AutoSendDanmaku
 	config.AutoFileScan = req.AutoFileScan
 	config.FileScanInterval = req.FileScanInterval
 	config.FileScanMinAge = req.FileScanMinAge
 	config.FileScanMinSize = req.FileScanMinSize
 	config.FileScanMaxAge = req.FileScanMaxAge
 	config.WorkPath = req.WorkPath
+	config.CustomScanPaths = req.CustomScanPaths
 	config.EnableOrphanScan = req.EnableOrphanScan
 	config.OrphanScanInterval = req.OrphanScanInterval
 
@@ -288,14 +285,6 @@ func ToggleSystemConfig(c *gin.Context) {
 	}
 
 	switch req.Key {
-	case "autoUpload":
-		config.AutoUpload = req.Value
-	case "autoPublish":
-		config.AutoPublish = req.Value
-	case "autoDelete":
-		config.AutoDelete = req.Value
-	case "autoSendDanmaku":
-		config.AutoSendDanmaku = req.Value
 	case "autoFileScan":
 		config.AutoFileScan = req.Value
 	case "enableOrphanScan":

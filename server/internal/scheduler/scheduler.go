@@ -18,11 +18,6 @@ func InitScheduler() {
 
 	// 视频同步任务 - 每5分钟执行一次
 	cronJob.AddFunc("*/5 * * * *", func() {
-		// 检查是否启用自动上传
-		if !isFeatureEnabled("AutoUpload") {
-			return
-		}
-
 		log.Println("执行定时任务: 视频同步")
 		syncService := services.NewVideoSyncService()
 		if err := syncService.ProcessPendingTasks(); err != nil {
@@ -108,14 +103,6 @@ func isFeatureEnabled(feature string) bool {
 	}
 
 	switch feature {
-	case "AutoUpload":
-		return config.AutoUpload
-	case "AutoPublish":
-		return config.AutoPublish
-	case "AutoDelete":
-		return config.AutoDelete
-	case "AutoSendDanmaku":
-		return config.AutoSendDanmaku
 	case "AutoFileScan":
 		return config.AutoFileScan
 	case "EnableOrphanScan":
