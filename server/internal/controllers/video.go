@@ -29,14 +29,23 @@ func SendDanmaku(c *gin.Context) {
 
 	danmakuService := services.NewDanmakuService()
 
-	// 异步执行弹幕发送
-	go func() {
-		if err := danmakuService.SendDanmakuForHistory(uint(historyID), req.UserID); err != nil {
-			log.Printf("弹幕发送失败 (history_id=%d): %v", historyID, err)
-		}
-	}()
+	log.Printf("=== 开始启动弹幕发送任务 (history_id=%d, user_id=%d) ===", historyID, req.UserID)
 
-	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "弹幕发送任务已启动"})
+	// 添加到队列（队列会自动异步处理）
+	if err := danmakuService.SendDanmakuForHistory(uint(historyID), req.UserID); err != nil {
+		log.Printf("[弹幕发送] ❌ 加入队列失败 (history_id=%d): %v", historyID, err)
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": err.Error()})
+		return
+	}
+
+	queueLength := danmakuService.GetQueueManager().GetQueueLength(req.UserID)
+	log.Printf("[弹幕发送] ✅ 任务已加入队列 (history_id=%d, 队列长度=%d)", historyID, queueLength)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":        "success",
+		"msg":         "弹幕发送任务已加入队列",
+		"queueLength": queueLength,
+	})
 }
 
 // MoveFiles 移动历史记录的文件

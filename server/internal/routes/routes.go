@@ -106,10 +106,11 @@ func SetupRoutes(router *gin.Engine) {
 				captcha.POST("/clear", controllers.ClearCaptcha)
 			}
 
-			// 上传队列状态
+			// 队列状态
 			queue := auth.Group("/queue")
 			{
-				queue.GET("/status", controllers.GetUploadQueueStatus)
+				queue.GET("/upload/status", controllers.GetUploadQueueStatus)
+				queue.GET("/danmaku/status", controllers.GetDanmakuQueueStatus)
 			}
 
 			// 配置导入导出
