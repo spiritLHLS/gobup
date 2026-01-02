@@ -236,6 +236,74 @@ func (c *BiliClient) UpdateVideoVisibility(aid int64, isOnlySelf bool) error {
 	return nil
 }
 
+// UserArchive 用户投稿视频
+type UserArchive struct {
+	Aid   int64  `json:"aid"`
+	Bvid  string `json:"bvid"`
+	Title string `json:"title"`
+}
+
+type UserArchiveListResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    struct {
+		List struct {
+			Vlist []UserArchive `json:"vlist"`
+		} `json:"list"`
+	} `json:"data"`
+}
+
+// GetUserArchiveList 获取用户投稿列表
+func (c *BiliClient) GetUserArchiveList(mid int64, pn, ps int) ([]UserArchive, error) {
+	var resp UserArchiveListResponse
+
+	r, err := c.ReqClient.R().
+		SetQueryParams(map[string]string{
+			"mid": fmt.Sprintf("%d", mid),
+			"pn":  fmt.Sprintf("%d", pn),
+			"ps":  fmt.Sprintf("%d", ps),
+		}).
+		SetSuccessResult(&resp).
+		Get("https://api.bilibili.com/x/space/wbi/arc/search")
+
+	if err != nil {
+		return nil, fmt.Errorf("获取用户投稿列表失败: %w", err)
+	}
+
+	if !r.IsSuccessState() {
+		return nil, fmt.Errorf("获取用户投稿列表失败: HTTP %d", r.StatusCode)
+	}
+
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("获取用户投稿列表失败: %s (code=%d)", resp.Message, resp.Code)
+	}
+
+	return resp.Data.List.Vlist, nil
+}
+
+// GetBvidByAid 从用户投稿列表中查找AID对应的BVID
+func (c *BiliClient) GetBvidByAid(mid int64, aid int64) (string, error) {
+	// 获取最近的投稿（一般最多查询前50个）
+	for pn := 1; pn <= 2; pn++ {
+		archives, err := c.GetUserArchiveList(mid, pn, 30)
+		if err != nil {
+			return "", err
+		}
+
+		if len(archives) == 0 {
+			break
+		}
+
+		for _, archive := range archives {
+			if archive.Aid == aid {
+				return archive.Bvid, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("未在用户投稿列表中找到AID=%d对应的视频", aid)
+}
+
 // GetBuvid 获取buvid
 func GetBuvid() (*BuvIdResponse, error) {
 	var resp BuvIdResponse
