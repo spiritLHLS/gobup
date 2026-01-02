@@ -109,7 +109,7 @@ func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID ui
 	// 应用弹幕过滤规则
 	if room.DmUlLevel > 0 {
 		// 用户等级过滤（佩戴勋章的不受影响）
-		query = query.Where("ulevel >= ? OR medal_level > 0", room.DmUlLevel)
+		query = query.Where("u_level >= ? OR medal_level > 0", room.DmUlLevel)
 	}
 
 	if room.DmMedalLevel == 1 {
