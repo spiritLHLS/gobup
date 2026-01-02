@@ -163,3 +163,14 @@ func getUpUrl(uposURI string) string {
 	// 如果没有/或/在最后，返回原字符串
 	return uposURI
 }
+
+// CalculateChunkCount 计算文件的分片数量
+func CalculateChunkCount(fileSize int64, chunkSize int64) int64 {
+	return (fileSize + chunkSize - 1) / chunkSize
+}
+
+// ShouldSplitFile 判断文件是否需要分割（分片数超过10000）
+func ShouldSplitFile(fileSize int64, chunkSize int64) bool {
+	chunkCount := CalculateChunkCount(fileSize, chunkSize)
+	return chunkCount > 10000
+}

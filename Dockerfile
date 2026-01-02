@@ -38,7 +38,7 @@ FROM alpine:latest
 ARG TARGETARCH
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata sqlite
+RUN apk add --no-cache ca-certificates tzdata sqlite ffmpeg
 
 ENV TZ=Asia/Shanghai
 WORKDIR /app

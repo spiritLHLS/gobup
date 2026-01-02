@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -121,6 +123,34 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		return fmt.Errorf("文件不存在: %s", part.FilePath)
 	}
 
+	// 检查文件是否需要分割（分片数超过10000）
+	fileInfo, err := os.Stat(part.FilePath)
+	if err != nil {
+		return fmt.Errorf("获取文件信息失败: %w", err)
+	}
+
+	var chunkSize int64
+	switch room.Line {
+	case "app":
+		chunkSize = 2 * 1024 * 1024 // 2MB
+	default: // upos
+		chunkSize = 5 * 1024 * 1024 // 5MB
+	}
+
+	// 如果分片数超过10000，需要将文件分割成多个Part
+	if bili.ShouldSplitFile(fileInfo.Size(), chunkSize) {
+		chunkCount := bili.CalculateChunkCount(fileInfo.Size(), chunkSize)
+		log.Printf("[自动分P] 文件 %s 分片数为 %d，超过10000限制，将自动分割成多个Part", part.FileName, chunkCount)
+
+		// 调用分割函数
+		if err := s.splitLargeFile(part, history, room); err != nil {
+			return fmt.Errorf("文件分割失败: %w", err)
+		}
+
+		log.Printf("[自动分P] 文件分割完成，已创建多个Part，原Part标记为已上传")
+		return nil
+	}
+
 	log.Printf("开始上传: room=%s, file=%s, line=%s", room.RoomID, part.FilePath, room.Line)
 
 	// 推送上传开始通知
@@ -138,11 +168,7 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		SetProgressCallback(bili.ProgressCallback)
 	}
 
-	// 计算总分片数
-	fileInfo, err := os.Stat(part.FilePath)
-	if err != nil {
-		return fmt.Errorf("获取文件信息失败: %w", err)
-	}
+	// 计算总分片数（复用前面已获取的fileInfo）
 	var chunkTotal int
 	switch room.Line {
 	case "app":
@@ -300,4 +326,135 @@ func containsTag(tags, target string) bool {
 // contains 检查字符串是否包含子串
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
+}
+
+// splitLargeFile 将大文件分割成多个Part（当分片数超过10000时）
+func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) error {
+	db := database.GetDB()
+
+	// 获取文件信息
+	fileInfo, err := os.Stat(originalPart.FilePath)
+	if err != nil {
+		return fmt.Errorf("获取文件信息失败: %w", err)
+	}
+
+	var chunkSize int64
+	switch room.Line {
+	case "app":
+		chunkSize = 2 * 1024 * 1024 // 2MB
+	default: // upos
+		chunkSize = 5 * 1024 * 1024 // 5MB
+	}
+
+	totalChunks := bili.CalculateChunkCount(fileInfo.Size(), chunkSize)
+
+	// 计算需要分成多少个Part（每个Part最多9000个分片，留一些余量）
+	maxChunksPerPart := int64(9000)
+	numParts := (totalChunks + maxChunksPerPart - 1) / maxChunksPerPart
+
+	// 计算每个Part的时长（假设视频时长均匀分布）
+	totalDuration := originalPart.Duration
+	if totalDuration == 0 {
+		// 如果没有时长信息，使用文件大小比例来估算
+		log.Printf("[自动分P] 警告：原始Part没有时长信息，将平均分割")
+		totalDuration = int(numParts) * 3600 // 假设每个Part 1小时
+	}
+
+	durationPerPart := totalDuration / int(numParts)
+
+	log.Printf("[自动分P] 将文件分割成 %d 个Part，每个Part约 %d 秒", numParts, durationPerPart)
+
+	// 使用ffmpeg分割文件
+	baseDir := filepath.Dir(originalPart.FilePath)
+	baseNameWithoutExt := strings.TrimSuffix(filepath.Base(originalPart.FilePath), filepath.Ext(originalPart.FilePath))
+	ext := filepath.Ext(originalPart.FilePath)
+
+	// 创建新的Part记录
+	var newParts []*models.RecordHistoryPart
+	for i := int64(0); i < numParts; i++ {
+		startTime := int(i) * durationPerPart
+		duration := durationPerPart
+		if i == numParts-1 {
+			// 最后一个Part包含剩余的所有时间
+			duration = totalDuration - startTime
+		}
+
+		// 生成输出文件名
+		outputFileName := fmt.Sprintf("%s_part%d%s", baseNameWithoutExt, i+1, ext)
+		outputPath := filepath.Join(baseDir, outputFileName)
+
+		// 使用ffmpeg切割视频
+		// -ss: 开始时间 -t: 持续时间 -c copy: 不重新编码
+		var ffmpegArgs []string
+		if startTime > 0 {
+			ffmpegArgs = append(ffmpegArgs, "-ss", fmt.Sprintf("%d", startTime))
+		}
+		ffmpegArgs = append(ffmpegArgs,
+			"-i", originalPart.FilePath,
+			"-t", fmt.Sprintf("%d", duration),
+			"-c", "copy",
+			"-avoid_negative_ts", "1",
+			outputPath,
+		)
+
+		log.Printf("[自动分P] 正在切割Part %d/%d: %s (时长: %ds)", i+1, numParts, outputFileName, duration)
+
+		cmd := exec.Command("ffmpeg", ffmpegArgs...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("[自动分P] ffmpeg输出: %s", string(output))
+			return fmt.Errorf("ffmpeg切割失败 (Part %d): %w", i+1, err)
+		}
+
+		// 获取切割后的文件大小
+		splitFileInfo, err := os.Stat(outputPath)
+		if err != nil {
+			return fmt.Errorf("获取切割文件信息失败: %w", err)
+		}
+
+		// 创建新的Part记录
+		newPart := &models.RecordHistoryPart{
+			HistoryID:  originalPart.HistoryID,
+			RoomID:     originalPart.RoomID,
+			SessionID:  originalPart.SessionID,
+			Title:      originalPart.Title,
+			LiveTitle:  originalPart.LiveTitle,
+			AreaName:   originalPart.AreaName,
+			FilePath:   outputPath,
+			FileName:   outputFileName,
+			FileSize:   splitFileInfo.Size(),
+			Duration:   duration,
+			StartTime:  originalPart.StartTime.Add(time.Duration(startTime) * time.Second),
+			EndTime:    originalPart.StartTime.Add(time.Duration(startTime+duration) * time.Second),
+			Recording:  false,
+			Upload:     false,
+			Uploading:  false,
+			Page:       0,
+			XcodeState: 0,
+		}
+
+		if err := db.Create(newPart).Error; err != nil {
+			return fmt.Errorf("创建新Part记录失败: %w", err)
+		}
+
+		newParts = append(newParts, newPart)
+		log.Printf("[自动分P] 创建Part %d/%d 成功: id=%d, size=%d, duration=%d", i+1, numParts, newPart.ID, newPart.FileSize, newPart.Duration)
+	}
+
+	// 标记原始Part为已上传（实际上是被分割了）
+	originalPart.Upload = true
+	originalPart.UploadErrorMsg = fmt.Sprintf("文件过大(分片数%d>10000)，已自动分割成%d个Part", totalChunks, numParts)
+	db.Save(originalPart)
+
+	log.Printf("[自动分P] 文件分割完成，已创建 %d 个新Part，原Part(id=%d)标记为已处理", len(newParts), originalPart.ID)
+
+	// 将新创建的Part添加到上传队列
+	for _, newPart := range newParts {
+		if err := s.UploadPart(newPart, history, room); err != nil {
+			log.Printf("[自动分P] 将新Part(id=%d)加入上传队列失败: %v", newPart.ID, err)
+		} else {
+			log.Printf("[自动分P] 新Part(id=%d)已加入上传队列", newPart.ID)
+		}
+	}
+
+	return nil
 }
