@@ -98,7 +98,12 @@ func UpdateHistory(c *gin.Context) {
 func DeleteHistory(c *gin.Context) {
 	id := c.Param("id")
 	db := database.GetDB()
+
+	// 先删除所有分P记录
+	db.Delete(&models.RecordHistoryPart{}, "history_id = ?", id)
+	// 再删除历史记录
 	db.Delete(&models.RecordHistory{}, id)
+
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "删除成功"})
 }
 
