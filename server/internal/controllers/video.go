@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -264,5 +265,82 @@ func GetDanmakuStats(c *gin.Context) {
 		"total":              totalCount,
 		"sent":               sentCount,
 		"historyDanmakuSent": history.DanmakuSent,
+	})
+}
+
+// ParseDanmaku 解析弹幕XML文件（使用队列）
+func ParseDanmaku(c *gin.Context) {
+	historyID, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+
+	log.Printf("[弹幕解析] 收到解析请求: history_id=%d", historyID)
+
+	// 添加到解析队列
+	queue := services.NewDanmakuParserQueue()
+	task := &services.DanmakuParseTask{
+		HistoryID: uint(historyID),
+	}
+
+	if err := queue.Add(task); err != nil {
+		log.Printf("[弹幕解析] ❌ 添加到队列失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": err.Error()})
+		return
+	}
+
+	queueLength := queue.GetQueueLength()
+	log.Printf("[弹幕解析] ✅ 任务已加入队列 (队列长度=%d)", queueLength)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":        "success",
+		"msg":         "弹幕解析任务已加入队列",
+		"queueLength": queueLength,
+	})
+}
+
+// BatchParseDanmaku 批量解析弹幕
+func BatchParseDanmaku(c *gin.Context) {
+	type BatchParseReq struct {
+		HistoryIDs []uint `json:"historyIds" binding:"required"`
+	}
+
+	var req BatchParseReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+
+	queue := services.NewDanmakuParserQueue()
+	addedCount := 0
+
+	for _, historyID := range req.HistoryIDs {
+		task := &services.DanmakuParseTask{
+			HistoryID: historyID,
+		}
+		if err := queue.Add(task); err != nil {
+			log.Printf("[批量弹幕解析] ⚠️  添加任务失败 history_id=%d: %v", historyID, err)
+			continue
+		}
+		addedCount++
+	}
+
+	queueLength := queue.GetQueueLength()
+	log.Printf("[批量弹幕解析] ✅ 已添加 %d/%d 个任务到队列 (队列长度=%d)",
+		addedCount, len(req.HistoryIDs), queueLength)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":        "success",
+		"msg":         fmt.Sprintf("已添加%d个解析任务到队列", addedCount),
+		"added":       addedCount,
+		"total":       len(req.HistoryIDs),
+		"queueLength": queueLength,
+	})
+}
+
+// GetParseQueueStatus 获取解析队列状态
+func GetParseQueueStatus(c *gin.Context) {
+	queue := services.NewDanmakuParserQueue()
+
+	c.JSON(http.StatusOK, gin.H{
+		"queueLength": queue.GetQueueLength(),
+		"processing":  queue.IsProcessing(),
 	})
 }

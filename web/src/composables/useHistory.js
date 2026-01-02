@@ -355,6 +355,63 @@ export function useHistoryOperations() {
     }
   }
 
+  // 解析弹幕
+  const handleParseDanmaku = async (row, callback) => {
+    try {
+      await ElMessageBox.confirm('确定要解析此视频的弹幕XML文件吗？', '解析弹幕', {
+        type: 'info'
+      })
+      
+      ElMessage.info('弹幕解析任务已加入队列...')
+      
+      // 异步解析，不等待结果
+      axios.post(`/api/history/parseDanmaku/${row.id}`)
+        .then((response) => {
+          ElMessage.success(response.data.msg || '弹幕解析完成')
+          callback?.()
+        })
+        .catch((error) => {
+          console.error('解析弹幕失败:', error)
+          ElMessage.error(error.response?.data?.msg || '解析弹幕失败')
+          callback?.()
+        })
+      
+      // 立即回调以刷新状态
+      if (callback) {
+        setTimeout(callback, 500)
+      }
+    } catch (error) {
+      if (error !== 'cancel') {
+        console.error('解析弹幕失败:', error)
+      }
+    }
+  }
+
+  // 批量解析弹幕
+  const handleBatchParseDanmaku = async (historyIds, callback) => {
+    try {
+      await ElMessageBox.confirm(
+        `确定要解析选中的 ${historyIds.length} 个视频的弹幕吗？`,
+        '批量解析弹幕',
+        { type: 'info' }
+      )
+      
+      ElMessage.info(`正在添加 ${historyIds.length} 个解析任务到队列...`)
+      
+      const response = await axios.post('/api/history/batchParseDanmaku', {
+        historyIds
+      })
+      
+      ElMessage.success(response.data.msg || '批量解析任务已添加')
+      callback?.()
+    } catch (error) {
+      if (error !== 'cancel') {
+        console.error('批量解析弹幕失败:', error)
+        ElMessage.error(error.response?.data?.msg || '批量解析失败')
+      }
+    }
+  }
+
   // 同步视频信息
   const handleSyncVideo = async (row, callback) => {
     try {
@@ -461,6 +518,8 @@ export function useHistoryOperations() {
     handleUpload,
     handlePublish,
     handleSendDanmaku,
+    handleParseDanmaku,
+    handleBatchParseDanmaku,
     handleSyncVideo,
     handleMoveFiles,
     handleResetStatus,

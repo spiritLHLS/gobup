@@ -177,33 +177,49 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 		}
 	}
 
-	// 获取分P详细信息
+	// 获取分P详细信息（只更新CID为0的分P）
 	partInfo, err := client.GetVideoPartInfo(history.BvID)
 	if err != nil {
 		log.Printf("获取分P详细信息失败: %v", err)
 	} else {
-		// 更新分P的CID和转码状态
+		// 只更新CID为0的分P（避免覆盖已有数据）
 		var parts []models.RecordHistoryPart
-		if err := db.Where("history_id = ?", historyID).
+		if err := db.Where("history_id = ? AND c_id = 0", historyID).
 			Order("start_time ASC").
 			Find(&parts).Error; err == nil {
 
 			for i, part := range parts {
 				if i < len(partInfo.Videos) {
 					videoPartData := partInfo.Videos[i]
-					part.CID = videoPartData.CID
-					part.XcodeState = videoPartData.XcodeState
-					part.Page = videoPartData.Page
-					db.Save(&part)
+					// 只更新CID、转码状态、分P序号
+					updates := map[string]interface{}{
+						"c_id":        videoPartData.CID,
+						"xcode_state": videoPartData.XcodeState,
+						"page":        videoPartData.Page,
+					}
+					if err := db.Model(&part).Updates(updates).Error; err != nil {
+						log.Printf("更新分P%d CID失败: %v", part.ID, err)
+					} else {
+						log.Printf("更新分P%d CID: %d", part.ID, videoPartData.CID)
+					}
 				}
 			}
 		}
 	}
 
-	// 更新同步时间
+	// 只更新同步时间和视频状态相关字段
 	now := time.Now()
-	history.SyncedAt = &now
-	db.Save(&history)
+	updates := map[string]interface{}{
+		"synced_at":        &now,
+		"video_state":      history.VideoState,
+		"video_state_desc": history.VideoStateDesc,
+	}
+	if history.AvID != "" {
+		updates["av_id"] = history.AvID
+	}
+	if err := db.Model(&history).Updates(updates).Error; err != nil {
+		log.Printf("更新历史记录同步信息失败: %v", err)
+	}
 
 	log.Printf("视频 %s 信息同步成功，状态: %s", history.BvID, history.VideoStateDesc)
 

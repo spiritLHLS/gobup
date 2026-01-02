@@ -75,6 +75,15 @@
           </el-button>
 
           <el-button 
+            type="primary"
+            plain
+            @click="$emit('parseDanmaku')"
+          >
+            <el-icon><Document /></el-icon>
+            解析弹幕
+          </el-button>
+
+          <el-button 
             type="info"
             :disabled="!history?.bvId"
             @click="$emit('syncVideo')"
@@ -131,6 +140,7 @@ import { computed } from 'vue'
 import { 
   Upload, 
   ChatDotRound, 
+  Document,
   Refresh, 
   FolderOpened, 
   RefreshLeft, 
@@ -155,6 +165,7 @@ defineEmits([
   'upload',
   'publish',
   'sendDanmaku',
+  'parseDanmaku',
   'syncVideo',
   'moveFiles',
   'resetStatus',

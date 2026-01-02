@@ -122,6 +122,7 @@
         @upload="handleBatchUpload"
         @publish="handleBatchPublish"
         @send-danmaku="handleBatchSendDanmaku"
+        @parse-danmaku="handleBatchParseDanmaku"
         @sync-video="handleBatchSyncVideo"
         @move-files="handleBatchMoveFiles"
         @reset-status="handleBatchResetStatus"
@@ -158,6 +159,7 @@
       @upload="handleUploadInDialog"
       @publish="handlePublishInDialog"
       @send-danmaku="handleSendDanmakuInDialog"
+      @parse-danmaku="handleParseDanmakuInDialog"
       @sync-video="handleSyncVideoInDialog"
       @move-files="handleMoveFilesInDialog"
       @reset-status="handleResetStatus"
@@ -249,6 +251,8 @@ const {
   handleUpload,
   handlePublish,
   handleSendDanmaku,
+  handleParseDanmaku,
+  handleBatchParseDanmaku: batchParseDanmakuOp,
   handleSyncVideo,
   handleMoveFiles,
   handleResetStatus: resetHistoryStatus,
@@ -547,6 +551,56 @@ const handleBatchSendDanmaku = async () => {
       ElMessage.error('批量发送弹幕失败')
     }
   }
+}
+
+// 批量解析弹幕
+const handleBatchParseDanmaku = async () => {
+  if (selectedHistories.value.length === 0) {
+    ElMessage.warning('请先选择记录')
+    return
+  }
+
+  try {
+    const historyIds = selectedHistories.value.map(h => h.id)
+    await handleBatchParseDanmaku(historyIds, async () => {
+      await fetchHistories()
+    })
+  } catch (error) {
+    console.error('批量解析弹幕失败:', error)
+  }
+}
+
+// 对话框中解析弹幕
+const handleParseDanmakuInDialog = async () => {
+  await handleParseDanmaku(currentHistory.value, async () => {
+    await fetchHistories()
+    actionsDialogVisible.value = false
+  })
+// 批量解析弹幕
+const handleBatchParseDanmaku = async () => {
+  if (selectedHistories.value.length === 0) {
+    ElMessage.warning('请先选择记录')
+    return
+  }
+
+  try {
+    const historyIds = selectedHistories.value.map(h => h.id)
+    await batchParseDanmakuOp(historyIds, async () => {
+      await fetchHistories()
+    })
+  } catch (error) {
+    console.error('批量解析弹幕失败:', error)
+  }
+}
+
+// 对话框中解析弹幕
+const handleParseDanmakuInDialog = async () => {
+  await handleParseDanmaku(currentHistory.value, async () => {
+    await fetchHistories()
+    actionsDialogVisible.value = false
+  })
+}
+
 }
 
 const handleBatchSyncVideo = async () => {

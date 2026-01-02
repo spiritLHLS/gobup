@@ -505,6 +505,18 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 	log.Printf("[FileScan] 成功导入文件: %s -> HistoryID=%d, PartID=%d",
 		filepath.Base(filePath), history.ID, part.ID)
 
+	// 尝试解析弹幕XML文件
+	xmlPath := strings.TrimSuffix(filePath, filepath.Ext(filePath)) + ".xml"
+	if _, err := os.Stat(xmlPath); err == nil {
+		parser := NewDanmakuXMLParser()
+		count, err := parser.ParseDanmakuFile(xmlPath, metadata.SessionID)
+		if err != nil {
+			log.Printf("[FileScan] ⚠️  解析弹幕失败 %s: %v", filepath.Base(xmlPath), err)
+		} else {
+			log.Printf("[FileScan] ✅ 成功解析 %d 条弹幕从 %s", count, filepath.Base(xmlPath))
+		}
+	}
+
 	return nil
 }
 

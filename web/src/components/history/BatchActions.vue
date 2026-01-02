@@ -16,6 +16,10 @@
         <el-icon><ChatDotRound /></el-icon>
         发送弹幕
       </el-button>
+      <el-button size="small" type="primary" plain @click="$emit('parseDanmaku')">
+        <el-icon><Document /></el-icon>
+        解析弹幕
+      </el-button>
       <el-button size="small" type="info" @click="$emit('syncVideo')">
         <el-icon><Refresh /></el-icon>
         同步信息
@@ -44,6 +48,7 @@
 import { 
   Upload, 
   ChatDotRound, 
+  Document,
   Refresh, 
   FolderOpened, 
   RefreshLeft, 
@@ -63,6 +68,7 @@ defineEmits([
   'upload',
   'publish',
   'sendDanmaku',
+  'parseDanmaku',
   'syncVideo',
   'moveFiles',
   'resetStatus',

@@ -65,6 +65,8 @@ func SetupRoutes(router *gin.Engine) {
 				// 弹幕相关
 				histories.POST("/sendDanmaku/:id", controllers.SendDanmaku)
 				histories.GET("/danmakuStats/:id", controllers.GetDanmakuStats)
+				histories.POST("/parseDanmaku/:id", controllers.ParseDanmaku)
+				histories.POST("/batchParseDanmaku", controllers.BatchParseDanmaku)
 
 				// 文件移动
 				histories.POST("/moveFiles/:id", controllers.MoveFiles)
@@ -108,6 +110,7 @@ func SetupRoutes(router *gin.Engine) {
 			{
 				queue.GET("/upload/status", controllers.GetUploadQueueStatus)
 				queue.GET("/danmaku/status", controllers.GetDanmakuQueueStatus)
+				queue.GET("/parse/status", controllers.GetParseQueueStatus)
 			}
 
 			// 配置导入导出
