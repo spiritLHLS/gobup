@@ -5,6 +5,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ProgressCallback 进度回调函数
@@ -74,23 +75,45 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 	// 4. 分片上传
 	log.Printf("[UPOS] 开始分片上传: total_parts=%d, chunk_size=%dMB", totalParts, chunkSize/(1024*1024))
 	chunkDone := 0
-	err = readFileChunks(file, chunkSize, func(chunk FileChunk) error {
-		// UPOS使用从1开始的分片编号
-		partNum := int(chunk.Index + 1)
-		err := u.uploadChunk(preResp, lineResp, chunk.Data, partNum, int(totalParts), fileSize)
-		if err != nil {
-			return err
+
+	// 分片上传最多重试3次整个流程（如果某个分片持续失败）
+	maxUploadRetries := 3
+	for uploadRetry := 0; uploadRetry < maxUploadRetries; uploadRetry++ {
+		if uploadRetry > 0 {
+			log.Printf("[UPOS] ⚠️ 检测到分片上传失败，开始断点续传 (重试 %d/%d)，从分片 %d/%d 继续", uploadRetry+1, maxUploadRetries, chunkDone+1, totalParts)
 		}
-		chunkDone++
-		// 更新进度
-		if u.progressCallback != nil {
-			u.progressCallback(chunkDone, int(totalParts))
+
+		err = readFileChunks(file, chunkSize, func(chunk FileChunk) error {
+			// 如果是重试，跳过已上传的分片
+			if int(chunk.Index) < chunkDone {
+				// 静默跳过已上传的分片，避免日志过多
+				return nil
+			}
+
+			// UPOS使用从1开始的分片编号
+			partNum := int(chunk.Index + 1)
+			err := u.uploadChunk(preResp, lineResp, chunk.Data, partNum, int(totalParts), fileSize)
+			if err != nil {
+				log.Printf("[UPOS] ❌ 分片 %d/%d 上传失败: %v", partNum, totalParts, err)
+				return err
+			}
+			chunkDone++
+			// 更新进度
+			if u.progressCallback != nil {
+				u.progressCallback(chunkDone, int(totalParts))
+			}
+			log.Printf("[UPOS] 上传进度: %d/%d (%.1f%%)", chunkDone, totalParts, float64(chunkDone)*100/float64(totalParts))
+			return nil
+		})
+
+		if err == nil {
+			break
 		}
-		log.Printf("[UPOS] 上传进度: %d/%d (%.1f%%)", chunkDone, totalParts, float64(chunkDone)*100/float64(totalParts))
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("上传分片失败: %w", err)
+
+		// 如果是最后一次重试仍然失败，返回错误
+		if uploadRetry == maxUploadRetries-1 {
+			return nil, fmt.Errorf("上传分片失败: %w", err)
+		}
 	}
 
 	// 5. 完成上传
@@ -307,7 +330,19 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 
 	// 使用限流器和重试机制
 	limiter := GetAPILimiter()
-	return WithRetry(DefaultRetryConfig, func() error {
+
+	var lastErr error
+	for attempt := 0; attempt <= DefaultRetryConfig.MaxRetries; attempt++ {
+		if attempt > 0 {
+			// 网络错误重试前等待
+			delay := time.Duration(float64(DefaultRetryConfig.InitialDelay) * float64(attempt))
+			if delay > DefaultRetryConfig.MaxDelay {
+				delay = DefaultRetryConfig.MaxDelay
+			}
+			log.Printf("[UPOS] 分片%d上传失败，等待%v后重试 (%d/%d): %v", partNum, delay, attempt, DefaultRetryConfig.MaxRetries, lastErr)
+			time.Sleep(delay)
+		}
+
 		// 等待限流器允许
 		if err := limiter.WaitChunkUpload(); err != nil {
 			return err
@@ -319,17 +354,35 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 			SetBody(chunk).
 			Put(uploadURL)
 		if err != nil {
-			log.Printf("[UPOS] 上传分片%d请求失败: err=%v", partNum, err)
-			return err
+			lastErr = err
+			// 网络错误可以重试
+			continue
 		}
 
+		statusCode := resp.GetStatusCode()
 		if !resp.IsSuccessState() {
-			log.Printf("[UPOS] 上传分片%d HTTP错误: status=%d, body=%s", partNum, resp.GetStatusCode(), resp.String())
-			return fmt.Errorf("上传分片失败: %s", resp.String())
+			log.Printf("[UPOS] 上传分片%d HTTP错误: status=%d, body=%s", partNum, statusCode, resp.String())
+			// 明确返回HTTP状态码，方便上层判断
+			if statusCode == 406 {
+				return fmt.Errorf("HTTP 406: 速率限制 - %s", resp.String())
+			} else if statusCode == 601 {
+				return fmt.Errorf("HTTP 601: 上传视频过快 - %s", resp.String())
+			}
+			lastErr = fmt.Errorf("HTTP %d: 上传分片失败 - %s", statusCode, resp.String())
+			// HTTP错误也可以重试（除了406/601）
+			continue
 		}
 
+		// 成功
 		return nil
-	})
+	}
+
+	// 所有重试都失败
+	if lastErr != nil {
+		log.Printf("[UPOS] 分片%d上传失败，已重试%d次: %v", partNum, DefaultRetryConfig.MaxRetries, lastErr)
+		return lastErr
+	}
+	return fmt.Errorf("上传分片%d失败: 未知错误", partNum)
 }
 
 func (u *UposUploader) completeUpload(pre *PreUploadResp, line *LineUploadResp, totalParts int) error {

@@ -162,25 +162,22 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		s.progressTracker.UpdateChunkDone(int64(part.ID), int64(history.ID), page, chunkDone, chunkTotal)
 	})
 
-	// 执行上传，支持重试
+	// 执行上传（upload_upos.go内部已经有断点续传和重试机制）
 	var uploadResult *bili.UploadResult
 	var uploadErr error
 	var is406RateLimit bool
 
-	maxRetries := 3
-	for retry := 0; retry < maxRetries; retry++ {
-		uploadResult, uploadErr = uploader.Upload(part.FilePath)
-		if uploadErr == nil {
-			break
-		}
+	uploadResult, uploadErr = uploader.Upload(part.FilePath)
 
-		// 检测是否为406速率限制错误
+	if uploadErr != nil {
+		// 检测是否为真正的406/601速率限制错误
+		// 只有明确的HTTP状态码才判定为速率限制，避免误判网络错误
 		errMsg := uploadErr.Error()
-		if contains(errMsg, "406") || contains(errMsg, "601") || contains(errMsg, "上传视频过快") {
+		if contains(errMsg, "HTTP 406") || contains(errMsg, "HTTP 601") || contains(errMsg, "上传视频过快") {
 			is406RateLimit = true
-			log.Printf("检测到406速率限制错误 (重试 %d/%d): %v", retry+1, maxRetries, uploadErr)
+			log.Printf("检测到速率限制错误: %v", uploadErr)
 		} else {
-			log.Printf("上传失败 (重试 %d/%d): %v", retry+1, maxRetries, uploadErr)
+			log.Printf("上传失败: %v", uploadErr)
 		}
 	}
 
