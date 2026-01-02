@@ -186,6 +186,12 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 
 	// 更新历史记录，使用API直接返回的BV号
 	history.AvID = fmt.Sprintf("%d", avID)
+	// 检查BV号格式，如果不是BV开头或格式错误，则通过aid转换
+	if !strings.HasPrefix(bvid, "BV") || len(bvid) != 12 {
+		log.Printf("警告: API返回的BV号格式错误: %s, 使用AID=%d重新转换", bvid, avID)
+		bvid = Av2Bv(avID)
+		log.Printf("转换后的正确BV号: %s", bvid)
+	}
 	history.BvID = bvid
 	history.Publish = true
 	history.Message = "投稿成功"
@@ -251,6 +257,34 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	}
 
 	return nil
+}
+
+// Av2Bv 将AV号转换为BV号
+// 算法参考: https://github.com/SocialSisterYi/bilibili-API-collect
+func Av2Bv(av int64) string {
+	const (
+		xorCode  = int64(23442827791579)
+		maskCode = int64(2251799813685247)
+		maxAid   = int64(1) << 51
+		base     = 58
+		alphabet = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf"
+	)
+
+	bytes := []byte{'B', 'V', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0'}
+	bvIndex := len(bytes) - 1
+	tmp := (maxAid | av) ^ xorCode
+
+	for tmp > 0 {
+		bytes[bvIndex] = alphabet[tmp%base]
+		tmp /= base
+		bvIndex--
+	}
+
+	// 交换特定位置的字符
+	bytes[3], bytes[9] = bytes[9], bytes[3]
+	bytes[4], bytes[7] = bytes[7], bytes[4]
+
+	return string(bytes)
 }
 
 // GetSeasons 获取合集列表
