@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
@@ -184,14 +185,28 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("投稿失败: %w", err)
 	}
 
-	// 更新历史记录，使用API直接返回的BV号
+	// 更新历史记录
 	history.AvID = fmt.Sprintf("%d", avID)
-	// 检查BV号格式，如果不是BV开头或格式错误，则通过aid转换
+
+	// 检查BV号格式，如果格式错误则通过aid从B站API获取正确的BV号
 	if !strings.HasPrefix(bvid, "BV") || len(bvid) != 12 {
-		log.Printf("警告: API返回的BV号格式错误: %s, 使用AID=%d重新转换", bvid, avID)
-		bvid = Av2Bv(avID)
-		log.Printf("转换后的正确BV号: %s", bvid)
+		log.Printf("警告: API返回的BV号格式错误: %s, 使用AID=%d从视频信息接口获取正确BV号", bvid, avID)
+
+		// 等待一下，让B站处理完投稿
+		time.Sleep(2 * time.Second)
+
+		// 通过aid获取视频信息来获取正确的BV号
+		videoInfo, err := client.GetVideoInfoByAid(avID)
+		if err != nil {
+			log.Printf("警告: 从视频信息接口获取BV号失败: %v, 尝试使用算法转换", err)
+			// 如果API调用失败，使用算法转换作为后备方案
+			bvid = Av2Bv(avID)
+		} else {
+			bvid = videoInfo.Bvid
+			log.Printf("✓ 从视频信息接口获取到正确的BV号: %s", bvid)
+		}
 	}
+
 	history.BvID = bvid
 	history.Publish = true
 	history.Message = "投稿成功"

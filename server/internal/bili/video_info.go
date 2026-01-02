@@ -74,6 +74,49 @@ func (c *BiliClient) GetVideoInfo(bvid string) (*VideoInfo, error) {
 	return &resp.Data, nil
 }
 
+// GetVideoInfoByAid 通过aid获取视频信息
+func (c *BiliClient) GetVideoInfoByAid(aid int64) (*VideoInfo, error) {
+	var resp VideoInfoResponse
+
+	// 构建请求，带上Cookie获取更准确的状态信息
+	req := c.ReqClient.R().
+		SetQueryParam("aid", fmt.Sprintf("%d", aid)).
+		SetSuccessResult(&resp)
+
+	// 如果有Cookie，添加buvid以获取更准确的状态
+	if c.Cookies != "" {
+		// 获取buvid
+		buvid, err := GetBuvid()
+		if err == nil && buvid != nil {
+			// 添加buvid到Cookie中
+			cookieStr := c.Cookies
+			if buvid.Data.B3 != "" {
+				cookieStr += ";buvid3=" + buvid.Data.B3
+			}
+			if buvid.Data.B4 != "" {
+				cookieStr += ";buvid4=" + buvid.Data.B4
+			}
+			req.SetHeader("Cookie", cookieStr)
+		}
+	}
+
+	r, err := req.Get("https://api.bilibili.com/x/web-interface/view")
+
+	if err != nil {
+		return nil, fmt.Errorf("获取视频信息失败: %w", err)
+	}
+
+	if !r.IsSuccessState() {
+		return nil, fmt.Errorf("获取视频信息失败: HTTP %d", r.StatusCode)
+	}
+
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("获取视频信息失败: %s (code=%d)", resp.Message, resp.Code)
+	}
+
+	return &resp.Data, nil
+}
+
 // VideoPartInfo 分P详细信息
 type VideoPartInfo struct {
 	State  int `json:"state"`
