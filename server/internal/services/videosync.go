@@ -143,20 +143,29 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 	oldVideoState := history.VideoState
 
 	// 更新视频状态
+	// 根据B站API文档：
+	// 0 = 正常公开（审核通过）
+	// 1 = 审核中
+	// 2 = 已下架
+	// 3 = 仅自己可见（审核未通过或违规）
 	history.VideoState = videoInfo.State
 	switch videoInfo.State {
+	case 0:
+		history.VideoStateDesc = "已发布"
+	case 1:
+		history.VideoStateDesc = "审核中"
+	case 2:
+		history.VideoStateDesc = "已下架"
+	case 3:
+		history.VideoStateDesc = "仅自己可见"
 	case -1, -2, -3, -4:
 		history.VideoStateDesc = "审核未通过"
-	case 0:
-		history.VideoStateDesc = "审核中"
-	case 1:
-		history.VideoStateDesc = "已通过"
 	default:
 		history.VideoStateDesc = fmt.Sprintf("未知状态(%d)", videoInfo.State)
 	}
 
 	// 检测到从非通过状态变为通过状态，触发审核通过后的文件处理
-	if oldVideoState != 1 && videoInfo.State == 1 {
+	if oldVideoState != 0 && videoInfo.State == 0 {
 		log.Printf("视频 %s 审核通过，检查是否需要处理文件", history.BvID)
 		if room.DeleteType == 11 || room.DeleteType == 12 {
 			fileMoverSvc := NewFileMoverService()
