@@ -318,24 +318,23 @@ func GetSystemStats(c *gin.Context) {
 	db := database.GetDB()
 
 	var stats struct {
-		TotalRooms     int64 `json:"totalRooms"`
-		RecordingRooms int64 `json:"recordingRooms"`
-		TotalHistories int64 `json:"totalHistories"`
-		RecordingCount int64 `json:"recordingCount"`
-		PendingUploads int64 `json:"pendingUploads"`
-		PendingPublish int64 `json:"pendingPublish"`
-		TotalParts     int64 `json:"totalParts"`
-		TotalUsers     int64 `json:"totalUsers"`
+		TotalRecordings int64 `json:"totalRecordings"` // 总录制数（历史记录总数）
+		UploadedCount   int64 `json:"uploadedCount"`   // 已上传（upload_status=2）
+		PendingCount    int64 `json:"pendingCount"`    // 待处理（未上传或上传中）
+		FailedCount     int64 `json:"failedCount"`     // 失败（上传失败或发布失败）
 	}
 
-	db.Model(&models.RecordRoom{}).Count(&stats.TotalRooms)
-	db.Model(&models.RecordRoom{}).Where("recording = ?", true).Count(&stats.RecordingRooms)
-	db.Model(&models.RecordHistory{}).Count(&stats.TotalHistories)
-	db.Model(&models.RecordHistory{}).Where("recording = ?", true).Count(&stats.RecordingCount)
-	db.Model(&models.RecordHistory{}).Where("upload = ? AND publish = ?", true, false).Count(&stats.PendingUploads)
-	db.Model(&models.RecordHistory{}).Where("publish = ?", false).Count(&stats.PendingPublish)
-	db.Model(&models.RecordHistoryPart{}).Count(&stats.TotalParts)
-	db.Model(&models.BiliBiliUser{}).Where("login = ?", true).Count(&stats.TotalUsers)
+	// 总录制数：所有历史记录
+	db.Model(&models.RecordHistory{}).Count(&stats.TotalRecordings)
+
+	// 已上传：上传状态为2（已上传）
+	db.Model(&models.RecordHistory{}).Where("upload_status = ?", 2).Count(&stats.UploadedCount)
+
+	// 待处理：上传状态为0（未上传）或1（上传中）
+	db.Model(&models.RecordHistory{}).Where("upload_status IN ?", []int{0, 1}).Count(&stats.PendingCount)
+
+	// 失败：code != 0 或 video_state = 2（审核未通过）
+	db.Model(&models.RecordHistory{}).Where("code != 0 OR video_state = ?", 2).Count(&stats.FailedCount)
 
 	c.JSON(http.StatusOK, stats)
 }
