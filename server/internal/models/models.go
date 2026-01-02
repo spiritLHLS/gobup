@@ -167,15 +167,15 @@ type LiveMsg struct {
 	Message    string         `gorm:"type:text" json:"message"`
 	UserName   string         `json:"userName"`
 	UID        int64          `json:"uid"`
-	ULevel     int            `gorm:"default:0" json:"ulevel"`         // 用户等级
-	MedalName  string         `json:"medalName"`                       // 粉丝勋章名称
-	MedalLevel int            `gorm:"default:0" json:"medalLevel"`     // 粉丝勋章等级
-	Sent       bool           `gorm:"default:false;index" json:"sent"` // 是否已发送到视频
-	CID        int64          `gorm:"column:c_id;index" json:"cid"`    // 发送到哪个CID
-	Progress   int            `json:"progress"`                        // 视频中的位置（毫秒）
-	Mode       int            `gorm:"default:1" json:"mode"`           // 弹幕模式: 1滚动 4底部 5顶部
-	FontSize   int            `gorm:"default:25" json:"fontSize"`      // 字号
-	Color      int            `gorm:"default:16777215" json:"color"`   // 颜色
+	ULevel     int            `gorm:"column:u_level;default:0" json:"ulevel"` // 用户等级
+	MedalName  string         `json:"medalName"`                              // 粉丝勋章名称
+	MedalLevel int            `gorm:"default:0" json:"medalLevel"`            // 粉丝勋章等级
+	Sent       bool           `gorm:"default:false;index" json:"sent"`        // 是否已发送到视频
+	CID        int64          `gorm:"column:c_id;index" json:"cid"`           // 发送到哪个CID
+	Progress   int            `json:"progress"`                               // 视频中的位置（毫秒）
+	Mode       int            `gorm:"default:1" json:"mode"`                  // 弹幕模式: 1滚动 4底部 5顶部
+	FontSize   int            `gorm:"default:25" json:"fontSize"`             // 字号
+	Color      int            `gorm:"default:16777215" json:"color"`          // 颜色
 }
 
 // VideoSyncTask 视频同步任务
