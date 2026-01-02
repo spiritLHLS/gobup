@@ -333,8 +333,8 @@ func GetSystemStats(c *gin.Context) {
 	// 待处理：上传状态为0（未上传）或1（上传中）
 	db.Model(&models.RecordHistory{}).Where("upload_status IN ?", []int{0, 1}).Count(&stats.PendingCount)
 
-	// 失败：code != 0 或 video_state = 2（审核未通过）
-	db.Model(&models.RecordHistory{}).Where("code != 0 OR video_state = ?", 2).Count(&stats.FailedCount)
+	// 失败：video_state = 2（审核未通过）或 message 包含"失败"字样的已上传记录
+	db.Model(&models.RecordHistory{}).Where("video_state = ? OR (upload_status = ? AND message LIKE ?)", 2, 2, "%失败%").Count(&stats.FailedCount)
 
 	c.JSON(http.StatusOK, stats)
 }
