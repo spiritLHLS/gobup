@@ -30,6 +30,24 @@ type LiveRoomInfo struct {
 	} `json:"data"`
 }
 
+// UserInfo B站主播信息（直播相关）
+type UserInfo struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Msg     string `json:"msg"`
+	Data    struct {
+		Info struct {
+			UID    int64  `json:"uid"`
+			Uname  string `json:"uname"`
+			Face   string `json:"face"`
+			Gender int    `json:"gender"`
+		} `json:"info"`
+		RoomID     int64  `json:"room_id"`
+		MedalName  string `json:"medal_name"`
+		GloryCount int    `json:"glory_count"`
+	} `json:"data"`
+}
+
 // LiveStatusService 直播状态服务
 type LiveStatusService struct {
 	client *req.Client
@@ -70,6 +88,30 @@ func (s *LiveStatusService) GetRoomInfo(roomID string) (*LiveRoomInfo, error) {
 	return &roomInfo, nil
 }
 
+// GetUserInfo 获取主播信息（直播相关API）
+func (s *LiveStatusService) GetUserInfo(uid int64) (*UserInfo, error) {
+	url := fmt.Sprintf("https://api.live.bilibili.com/live_user/v1/Master/info?uid=%d", uid)
+
+	var userInfo UserInfo
+	resp, err := s.client.R().
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
+		Get(url)
+
+	if err != nil {
+		return nil, fmt.Errorf("请求主播信息失败: %w", err)
+	}
+
+	if err := json.Unmarshal(resp.Bytes(), &userInfo); err != nil {
+		return nil, fmt.Errorf("解析主播信息失败: %w", err)
+	}
+
+	if userInfo.Code != 0 {
+		return nil, fmt.Errorf("获取主播信息失败: %s", userInfo.Message)
+	}
+
+	return &userInfo, nil
+}
+
 // UpdateRoomLiveStatus 更新房间的直播状态
 func (s *LiveStatusService) UpdateRoomLiveStatus(room *models.RecordRoom) error {
 	roomInfo, err := s.GetRoomInfo(room.RoomID)
@@ -83,11 +125,23 @@ func (s *LiveStatusService) UpdateRoomLiveStatus(room *models.RecordRoom) error 
 	// 记录之前的状态
 	wasStreaming := room.Streaming
 
+	// 获取主播信息
+	uname := room.Uname // 默认保持原有名称
+	if roomInfo.Data.UID > 0 {
+		userInfo, err := s.GetUserInfo(roomInfo.Data.UID)
+		if err == nil && userInfo.Data.Info.Uname != "" {
+			uname = userInfo.Data.Info.Uname
+			log.Printf("[LiveStatus] 获取到主播名称: %s (UID=%d)", uname, roomInfo.Data.UID)
+		} else {
+			log.Printf("[LiveStatus] 获取主播名称失败，保持原名称: %v", err)
+		}
+	}
+
 	// 更新房间状态
 	updates := map[string]interface{}{
 		"streaming":        roomInfo.Data.LiveStatus == 1,
 		"title":            roomInfo.Data.Title,
-		"uname":            room.Uname, // 保持原有主播名，或从其他接口获取
+		"uname":            uname,
 		"area_name":        roomInfo.Data.AreaName,
 		"area_name_parent": roomInfo.Data.ParentAreaName,
 		"live_status":      roomInfo.Data.LiveStatus,
@@ -96,6 +150,20 @@ func (s *LiveStatusService) UpdateRoomLiveStatus(room *models.RecordRoom) error 
 
 	if err := db.Model(room).Updates(updates).Error; err != nil {
 		return fmt.Errorf("更新房间状态失败: %w", err)
+	}
+
+	// 如果主播名称已更新，同步更新该房间的所有历史记录
+	if uname != room.Uname && uname != "" {
+		result := db.Model(&models.RecordHistory{}).
+			Where("room_id = ?", room.RoomID).
+			Update("uname", uname)
+
+		if result.Error != nil {
+			log.Printf("[LiveStatus] 更新历史记录主播名失败: %v", result.Error)
+		} else if result.RowsAffected > 0 {
+			log.Printf("[LiveStatus] 已同步更新 %d 条历史记录的主播名: %s -> %s",
+				result.RowsAffected, room.Uname, uname)
+		}
 	}
 
 	// 检测直播状态变化
