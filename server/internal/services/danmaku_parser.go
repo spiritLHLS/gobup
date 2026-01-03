@@ -13,6 +13,7 @@ import (
 
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
+	"gorm.io/gorm"
 )
 
 // DanmakuXMLParser 弹幕XML解析器
@@ -90,6 +91,9 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 	log.Printf("[弹幕解析] 解析到: 普通弹幕=%d, SC=%d, 礼物=%d, 上舰=%d",
 		len(dmXML.D), len(dmXML.SC), len(dmXML.Gift), len(dmXML.Guard))
 
+	// 收集所有需要保存的弹幕
+	var msgsToSave []*models.LiveMsg
+
 	// 解析普通弹幕
 	for _, d := range dmXML.D {
 		msg, err := p.parseDanmaku(d, sessionID)
@@ -97,21 +101,7 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 			log.Printf("[弹幕解析] ⚠️  解析弹幕失败: %v", err)
 			continue
 		}
-
-		// 检查是否已存在（去重）
-		var existing models.LiveMsg
-		if err := db.Where("session_id = ? AND timestamp = ? AND message = ?",
-			sessionID, msg.Timestamp, msg.Message).First(&existing).Error; err == nil {
-			// 已存在，跳过
-			continue
-		}
-
-		// 保存到数据库
-		if err := db.Create(&msg).Error; err != nil {
-			log.Printf("[弹幕解析] ❌ 保存弹幕失败: %v", err)
-			continue
-		}
-		count++
+		msgsToSave = append(msgsToSave, msg)
 	}
 
 	// 解析SC留言
@@ -121,19 +111,7 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 			log.Printf("[弹幕解析] ⚠️  解析SC失败: %v", err)
 			continue
 		}
-
-		// 检查是否已存在
-		var existing models.LiveMsg
-		if err := db.Where("session_id = ? AND timestamp = ? AND message = ?",
-			sessionID, msg.Timestamp, msg.Message).First(&existing).Error; err == nil {
-			continue
-		}
-
-		if err := db.Create(&msg).Error; err != nil {
-			log.Printf("[弹幕解析] ❌ 保存SC失败: %v", err)
-			continue
-		}
-		count++
+		msgsToSave = append(msgsToSave, msg)
 	}
 
 	// 解析上舰（转换为特殊弹幕）
@@ -143,19 +121,33 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 			log.Printf("[弹幕解析] ⚠️  解析上舰失败: %v", err)
 			continue
 		}
+		msgsToSave = append(msgsToSave, msg)
+	}
 
-		// 检查是否已存在
-		var existing models.LiveMsg
-		if err := db.Where("session_id = ? AND timestamp = ? AND message = ?",
-			sessionID, msg.Timestamp, msg.Message).First(&existing).Error; err == nil {
-			continue
-		}
+	// 使用事务批量保存，减少数据库锁定时间
+	err = db.Transaction(func(tx *gorm.DB) error {
+		for _, msg := range msgsToSave {
+			// 检查是否已存在（去重）
+			var existing models.LiveMsg
+			if err := tx.Where("session_id = ? AND timestamp = ? AND message = ?",
+				msg.SessionID, msg.Timestamp, msg.Message).First(&existing).Error; err == nil {
+				// 已存在，跳过
+				continue
+			}
 
-		if err := db.Create(&msg).Error; err != nil {
-			log.Printf("[弹幕解析] ❌ 保存上舰失败: %v", err)
-			continue
+			// 保存到数据库
+			if err := tx.Create(msg).Error; err != nil {
+				log.Printf("[弹幕解析] ❌ 保存弹幕失败: %v", err)
+				// 不中断事务，继续处理下一条
+				continue
+			}
+			count++
 		}
-		count++
+		return nil
+	})
+
+	if err != nil {
+		return 0, fmt.Errorf("保存弹幕事务失败: %w", err)
 	}
 
 	log.Printf("[弹幕解析] ✅ 解析完成: 成功导入 %d 条弹幕", count)
