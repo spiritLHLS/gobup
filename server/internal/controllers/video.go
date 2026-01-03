@@ -335,6 +335,11 @@ func DeleteHistoryWithFiles(c *gin.Context) {
 		}
 	}
 
+	// 删除弹幕解析记录
+	if history.SessionID != "" {
+		db.Delete(&models.LiveMsg{}, "session_id = ?", history.SessionID)
+	}
+
 	// 删除数据库记录
 	db.Delete(&models.RecordHistoryPart{}, "history_id = ?", historyID)
 	db.Delete(&models.RecordHistory{}, historyID)

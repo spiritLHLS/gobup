@@ -100,6 +100,18 @@ func DeleteHistory(c *gin.Context) {
 	id := c.Param("id")
 	db := database.GetDB()
 
+	// 获取历史记录以获得 session_id
+	var history models.RecordHistory
+	if err := db.First(&history, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"type": "error", "msg": "历史记录不存在"})
+		return
+	}
+
+	// 删除弹幕解析记录
+	if history.SessionID != "" {
+		db.Delete(&models.LiveMsg{}, "session_id = ?", history.SessionID)
+	}
+
 	// 先删除所有分P记录
 	db.Delete(&models.RecordHistoryPart{}, "history_id = ?", id)
 	// 再删除历史记录
