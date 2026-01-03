@@ -9,36 +9,35 @@ import (
 // DanmakuTask 弹幕发送任务
 type DanmakuTask struct {
 	HistoryID uint
-	UserID    uint
 }
 
-// UserDanmakuQueue 用户弹幕发送队列
-type UserDanmakuQueue struct {
-	userID     uint
+// VideoDanmakuQueue 视频弹幕发送队列（支持多用户并行发送）
+type VideoDanmakuQueue struct {
+	historyID  uint
 	tasks      chan *DanmakuTask
 	processing bool
 	mu         sync.Mutex
 	service    *DanmakuService
 }
 
-// NewUserDanmakuQueue 创建用户弹幕发送队列
-func NewUserDanmakuQueue(userID uint, service *DanmakuService) *UserDanmakuQueue {
-	return &UserDanmakuQueue{
-		userID:  userID,
-		tasks:   make(chan *DanmakuTask, 50), // 缓存最多50个弹幕发送任务
-		service: service,
+// NewVideoDanmakuQueue 创建视频弹幕发送队列
+func NewVideoDanmakuQueue(historyID uint, service *DanmakuService) *VideoDanmakuQueue {
+	return &VideoDanmakuQueue{
+		historyID: historyID,
+		tasks:     make(chan *DanmakuTask, 10), // 缓存最多10个弹幕发送任务
+		service:   service,
 	}
 }
 
 // Add 添加弹幕发送任务到队列
-func (q *UserDanmakuQueue) Add(task *DanmakuTask) error {
+func (q *VideoDanmakuQueue) Add(task *DanmakuTask) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	select {
 	case q.tasks <- task:
-		log.Printf("[弹幕队列] ➕ 添加任务到用户%d的队列: history_id=%d (队列长度: %d)",
-			q.userID, task.HistoryID, len(q.tasks))
+		log.Printf("[弹幕队列] ➕ 添加任务到视频%d的队列 (队列长度: %d)",
+			q.historyID, len(q.tasks))
 
 		// 如果没有正在处理，启动处理
 		if !q.processing {
@@ -47,42 +46,42 @@ func (q *UserDanmakuQueue) Add(task *DanmakuTask) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("用户%d的弹幕发送队列已满，无法添加新任务", q.userID)
+		return fmt.Errorf("视频%d的弹幕发送队列已满，无法添加新任务", q.historyID)
 	}
 }
 
 // process 处理队列中的任务
-func (q *UserDanmakuQueue) process() {
+func (q *VideoDanmakuQueue) process() {
 	defer func() {
 		q.mu.Lock()
 		q.processing = false
 		q.mu.Unlock()
-		log.Printf("[弹幕队列] 🏁 用户%d的队列处理完毕", q.userID)
+		log.Printf("[弹幕队列] 🏁 视频%d的队列处理完毕", q.historyID)
 	}()
 
 	for {
 		select {
 		case task := <-q.tasks:
-			log.Printf("[弹幕队列] 🎬 开始处理用户%d的弹幕发送任务: history_id=%d (剩余队列: %d)",
-				q.userID, task.HistoryID, len(q.tasks))
+			log.Printf("[弹幕队列] 🎬 开始处理视频%d的弹幕发送任务 (剩余队列: %d)",
+				q.historyID, len(q.tasks))
 
-			// 执行弹幕发送
-			if err := q.service.sendDanmakuForHistoryInternal(task.HistoryID, task.UserID); err != nil {
-				log.Printf("[弹幕队列] ❌ 用户%d的弹幕发送任务失败: history_id=%d, error=%v",
-					q.userID, task.HistoryID, err)
+			// 执行弹幕发送（使用多用户并行）
+			if err := q.service.sendDanmakuForHistoryWithMultipleUsers(task.HistoryID); err != nil {
+				log.Printf("[弹幕队列] ❌ 视频%d的弹幕发送任务失败: error=%v",
+					q.historyID, err)
 			} else {
-				log.Printf("[弹幕队列] ✅ 用户%d的弹幕发送任务成功: history_id=%d",
-					q.userID, task.HistoryID)
+				log.Printf("[弹幕队列] ✅ 视频%d的弹幕发送任务成功",
+					q.historyID)
 			}
 
 			// 队列为空时退出
 			if len(q.tasks) == 0 {
-				log.Printf("[弹幕队列] ℹ️  用户%d的队列已空，准备退出处理循环", q.userID)
+				log.Printf("[弹幕队列] ℹ️  视频%d的队列已空，准备退出处理循环", q.historyID)
 				return
 			}
 		default:
 			// 如果没有任务了，退出
-			log.Printf("[弹幕队列] ℹ️  用户%d的队列已空，准备退出处理循环", q.userID)
+			log.Printf("[弹幕队列] ℹ️  视频%d的队列已空，准备退出处理循环", q.historyID)
 			return
 		}
 	}
@@ -90,7 +89,7 @@ func (q *UserDanmakuQueue) process() {
 
 // DanmakuQueueManager 弹幕队列管理器
 type DanmakuQueueManager struct {
-	queues  sync.Map // userID -> *UserDanmakuQueue
+	queues  sync.Map // historyID -> *VideoDanmakuQueue
 	service *DanmakuService
 }
 
@@ -101,34 +100,33 @@ func NewDanmakuQueueManager(service *DanmakuService) *DanmakuQueueManager {
 	}
 }
 
-// GetQueue 获取或创建用户的弹幕发送队列
-func (m *DanmakuQueueManager) GetQueue(userID uint) *UserDanmakuQueue {
-	if queue, ok := m.queues.Load(userID); ok {
-		return queue.(*UserDanmakuQueue)
+// GetQueue 获取或创建视频的弹幕发送队列
+func (m *DanmakuQueueManager) GetQueue(historyID uint) *VideoDanmakuQueue {
+	if queue, ok := m.queues.Load(historyID); ok {
+		return queue.(*VideoDanmakuQueue)
 	}
 
 	// 创建新队列
-	queue := NewUserDanmakuQueue(userID, m.service)
-	actual, loaded := m.queues.LoadOrStore(userID, queue)
+	queue := NewVideoDanmakuQueue(historyID, m.service)
+	actual, loaded := m.queues.LoadOrStore(historyID, queue)
 	if loaded {
-		return actual.(*UserDanmakuQueue)
+		return actual.(*VideoDanmakuQueue)
 	}
 	return queue
 }
 
 // AddTask 添加弹幕发送任务
-func (m *DanmakuQueueManager) AddTask(userID uint, historyID uint) error {
-	queue := m.GetQueue(userID)
+func (m *DanmakuQueueManager) AddTask(historyID uint) error {
+	queue := m.GetQueue(historyID)
 	return queue.Add(&DanmakuTask{
 		HistoryID: historyID,
-		UserID:    userID,
 	})
 }
 
-// GetQueueLength 获取指定用户的队列长度
-func (m *DanmakuQueueManager) GetQueueLength(userID uint) int {
-	if queue, ok := m.queues.Load(userID); ok {
-		return len(queue.(*UserDanmakuQueue).tasks)
+// GetQueueLength 获取指定视频的队列长度
+func (m *DanmakuQueueManager) GetQueueLength(historyID uint) int {
+	if queue, ok := m.queues.Load(historyID); ok {
+		return len(queue.(*VideoDanmakuQueue).tasks)
 	}
 	return 0
 }
@@ -137,18 +135,18 @@ func (m *DanmakuQueueManager) GetQueueLength(userID uint) int {
 func (m *DanmakuQueueManager) GetAllQueuesStatus() map[uint]int {
 	status := make(map[uint]int)
 	m.queues.Range(func(key, value interface{}) bool {
-		userID := key.(uint)
-		queue := value.(*UserDanmakuQueue)
-		status[userID] = len(queue.tasks)
+		historyID := key.(uint)
+		queue := value.(*VideoDanmakuQueue)
+		status[historyID] = len(queue.tasks)
 		return true
 	})
 	return status
 }
 
-// IsProcessing 检查用户是否有正在处理的弹幕任务
-func (m *DanmakuQueueManager) IsProcessing(userID uint) bool {
-	if queue, ok := m.queues.Load(userID); ok {
-		q := queue.(*UserDanmakuQueue)
+// IsProcessing 检查视频是否有正在处理的弹幕任务
+func (m *DanmakuQueueManager) IsProcessing(historyID uint) bool {
+	if queue, ok := m.queues.Load(historyID); ok {
+		q := queue.(*VideoDanmakuQueue)
 		q.mu.Lock()
 		defer q.mu.Unlock()
 		return q.processing

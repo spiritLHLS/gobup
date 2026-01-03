@@ -18,33 +18,23 @@ import (
 func SendDanmaku(c *gin.Context) {
 	historyID, _ := strconv.ParseUint(c.Param("id"), 10, 32)
 
-	type SendDanmakuReq struct {
-		UserID uint `json:"userId" binding:"required"`
-	}
-
-	var req SendDanmakuReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
-		return
-	}
-
 	danmakuService := services.NewDanmakuService()
 
-	log.Printf("=== 开始启动弹幕发送任务 (history_id=%d, user_id=%d) ===", historyID, req.UserID)
+	log.Printf("=== 开始启动弹幕发送任务 (history_id=%d) ===", historyID)
 
-	// 添加到队列（队列会自动异步处理）
-	if err := danmakuService.SendDanmakuForHistory(uint(historyID), req.UserID); err != nil {
+	// 添加到队列（队列会自动异步处理，使用所有有效用户并行发送）
+	if err := danmakuService.SendDanmakuForHistory(uint(historyID)); err != nil {
 		log.Printf("[弹幕发送] ❌ 加入队列失败 (history_id=%d): %v", historyID, err)
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": err.Error()})
 		return
 	}
 
-	queueLength := danmakuService.GetQueueManager().GetQueueLength(req.UserID)
+	queueLength := danmakuService.GetQueueManager().GetQueueLength(uint(historyID))
 	log.Printf("[弹幕发送] ✅ 任务已加入队列 (history_id=%d, 队列长度=%d)", historyID, queueLength)
 
 	c.JSON(http.StatusOK, gin.H{
 		"type":        "success",
-		"msg":         "弹幕发送任务已加入队列",
+		"msg":         "弹幕发送任务已加入队列，将使用所有有效B站账户并行发送",
 		"queueLength": queueLength,
 	})
 }
@@ -53,7 +43,6 @@ func SendDanmaku(c *gin.Context) {
 func BatchSendDanmaku(c *gin.Context) {
 	type BatchSendReq struct {
 		HistoryIDs []uint `json:"historyIds" binding:"required"`
-		UserID     uint   `json:"userId" binding:"required"`
 	}
 
 	var req BatchSendReq
@@ -66,23 +55,21 @@ func BatchSendDanmaku(c *gin.Context) {
 	addedCount := 0
 
 	for _, historyID := range req.HistoryIDs {
-		if err := danmakuService.SendDanmakuForHistory(historyID, req.UserID); err != nil {
+		if err := danmakuService.SendDanmakuForHistory(historyID); err != nil {
 			log.Printf("[批量弹幕发送] ⚠️  添加任务失败 history_id=%d: %v", historyID, err)
 			continue
 		}
 		addedCount++
 	}
 
-	queueLength := danmakuService.GetQueueManager().GetQueueLength(req.UserID)
-	log.Printf("[批量弹幕发送] ✅ 已添加 %d/%d 个任务到队列 (队列长度=%d)",
-		addedCount, len(req.HistoryIDs), queueLength)
+	log.Printf("[批量弹幕发送] ✅ 已添加 %d/%d 个任务到队列",
+		addedCount, len(req.HistoryIDs))
 
 	c.JSON(http.StatusOK, gin.H{
-		"type":        "success",
-		"msg":         fmt.Sprintf("已添加%d个发送任务到队列", addedCount),
-		"added":       addedCount,
-		"total":       len(req.HistoryIDs),
-		"queueLength": queueLength,
+		"type":  "success",
+		"msg":   fmt.Sprintf("已添加%d个发送任务到队列，将使用所有有效B站账户并行发送", addedCount),
+		"added": addedCount,
+		"total": len(req.HistoryIDs),
 	})
 }
 

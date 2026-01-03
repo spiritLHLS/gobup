@@ -2,10 +2,7 @@ package bili
 
 import (
 	"fmt"
-	"log"
 	"strconv"
-	"strings"
-	"time"
 )
 
 // SendDanmaku 发送弹幕到视频
@@ -33,8 +30,8 @@ type SendDanmakuResponse struct {
 	} `json:"data"`
 }
 
-// SendDanmaku 发送弹幕
-func (c *BiliClient) SendDanmaku(cid int64, bvid string, progress int, message string, mode, fontSize, color int) error {
+// SendDanmakuWithoutWait 发送弹幕
+func (c *BiliClient) SendDanmakuWithoutWait(cid int64, bvid string, progress int, message string, mode, fontSize, color int) error {
 	csrf := GetCookieValue(c.Cookies, "bili_jct")
 	if csrf == "" {
 		return fmt.Errorf("未找到CSRF token")
@@ -107,62 +104,7 @@ func (c *BiliClient) SendDanmaku(cid int64, bvid string, progress int, message s
 		}
 	}
 
-	// 控制发送速率，避免被限制 - 成功后等待较长时间
-	time.Sleep(25 * time.Second)
-
 	return nil
-}
-
-// BatchSendDanmaku 批量发送弹幕（自动限速）
-func (c *BiliClient) BatchSendDanmaku(danmakus []DanmakuItem) (int, error) {
-	successCount := 0
-	failedCount := 0
-	for i, dm := range danmakus {
-		err := c.SendDanmaku(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
-		if err != nil {
-			failedCount++
-			// 检查错误类型
-			if strings.Contains(err.Error(), "36703") {
-				// 发送频率过快，等待120秒后继续
-				log.Printf("[弹幕发送] ⚠️  发送频率过快，等待120秒... (已发送%d/%d)", i+1, len(danmakus))
-				time.Sleep(120 * time.Second)
-				// 重试当前弹幕
-				err = c.SendDanmaku(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
-				if err == nil {
-					successCount++
-					failedCount--
-				}
-			} else if strings.Contains(err.Error(), "36704") {
-				// 视频未审核通过，停止发送
-				log.Printf("[弹幕发送] ❌ 视频未审核通过，停止发送 (已发送%d/%d)", successCount, len(danmakus))
-				return successCount, fmt.Errorf("视频未审核通过: %w", err)
-			} else if strings.Contains(err.Error(), "36701") || strings.Contains(err.Error(), "36702") || strings.Contains(err.Error(), "36714") {
-				// 弹幕内容/长度/时间问题，跳过这条弹幕
-				log.Printf("[弹幕发送] ⚠️  跳过问题弹幕: %v", err)
-				continue
-			} else if strings.Contains(err.Error(), "-101") || strings.Contains(err.Error(), "-102") || strings.Contains(err.Error(), "-111") {
-				// 账号问题，停止发送
-				log.Printf("[弹幕发送] ❌ 账号异常，停止发送: %v", err)
-				return successCount, err
-			} else {
-				log.Printf("[弹幕发送] ⚠️  发送失败: %v", err)
-			}
-		} else {
-			successCount++
-		}
-
-		// 每10条额外休息一下
-		if (i+1)%10 == 0 {
-			log.Printf("[弹幕发送] ⏸️  已发送10条，休息5秒... (进度: %d/%d)", i+1, len(danmakus))
-			time.Sleep(5 * time.Second)
-		}
-	}
-
-	if failedCount > 0 {
-		log.Printf("[弹幕发送] ⚠️  批量发送完成: 成功%d条, 失败%d条", successCount, failedCount)
-	}
-
-	return successCount, nil
 }
 
 type DanmakuItem struct {

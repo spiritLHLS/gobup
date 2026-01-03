@@ -3,8 +3,10 @@ package services
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
@@ -35,20 +37,63 @@ func (s *DanmakuService) GetQueueManager() *DanmakuQueueManager {
 }
 
 // SendDanmakuForHistory 为历史记录发送弹幕（通过队列）
-func (s *DanmakuService) SendDanmakuForHistory(historyID uint, userID uint) error {
+func (s *DanmakuService) SendDanmakuForHistory(historyID uint) error {
 	// 添加到队列
-	if err := s.queueManager.AddTask(userID, historyID); err != nil {
-		log.Printf("[弹幕发送] ❌ 添加到队列失败 (history_id=%d, user_id=%d): %v", historyID, userID, err)
+	if err := s.queueManager.AddTask(historyID); err != nil {
+		log.Printf("[弹幕发送] ❌ 添加到队列失败 (history_id=%d): %v", historyID, err)
 		return err
 	}
 
-	log.Printf("[弹幕发送] ✅ 任务已加入队列 (history_id=%d, user_id=%d, 队列长度=%d)",
-		historyID, userID, s.queueManager.GetQueueLength(userID))
+	log.Printf("[弹幕发送] ✅ 任务已加入队列 (history_id=%d, 队列长度=%d)",
+		historyID, s.queueManager.GetQueueLength(historyID))
 	return nil
 }
 
-// sendDanmakuForHistoryInternal 为历史记录发送弹幕（内部方法，由队列调用）
-func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID uint) error {
+// getValidUsers 获取所有已登录且Cookie有效的用户
+func (s *DanmakuService) getValidUsers() ([]models.BiliBiliUser, error) {
+	db := database.GetDB()
+
+	var users []models.BiliBiliUser
+	if err := db.Where("login = ?", true).Find(&users).Error; err != nil {
+		return nil, fmt.Errorf("查询用户失败: %w", err)
+	}
+
+	// 验证每个用户的cookie有效性
+	validUsers := make([]models.BiliBiliUser, 0, len(users))
+	for _, user := range users {
+		if user.Cookies == "" {
+			continue
+		}
+
+		// 验证cookie
+		valid, err := bili.ValidateCookie(user.Cookies)
+		if err != nil {
+			log.Printf("[弹幕发送] ⚠️ 验证用户%d (uid=%d) cookie失败: %v", user.ID, user.UID, err)
+			continue
+		}
+
+		if !valid {
+			log.Printf("[弹幕发送] ⚠️ 用户%d (uid=%d) cookie已失效", user.ID, user.UID)
+			// 更新用户登录状态
+			user.Login = false
+			db.Save(&user)
+			continue
+		}
+
+		validUsers = append(validUsers, user)
+		log.Printf("[弹幕发送] ✓ 用户%d (uid=%d, uname=%s) cookie验证通过", user.ID, user.UID, user.Uname)
+	}
+
+	if len(validUsers) == 0 {
+		return nil, fmt.Errorf("没有可用的已登录B站用户")
+	}
+
+	log.Printf("[弹幕发送] 找到 %d 个有效的B站用户", len(validUsers))
+	return validUsers, nil
+}
+
+// sendDanmakuForHistoryWithMultipleUsers 使用多个用户并行发送弹幕
+func (s *DanmakuService) sendDanmakuForHistoryWithMultipleUsers(historyID uint) error {
 	db := database.GetDB()
 
 	log.Printf("[弹幕发送] 步骤1: 开始处理历史记录 %d", historyID)
@@ -78,7 +123,16 @@ func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID ui
 		return fmt.Errorf("弹幕已发送，请勿重复操作")
 	}
 
-	log.Printf("[弹幕发送] 步骤3: 获取房间和用户信息 (room_id=%s, user_id=%d)", history.RoomID, userID)
+	log.Printf("[弹幕发送] 步骤3: 获取有效的B站用户")
+
+	// 获取所有有效用户
+	validUsers, err := s.getValidUsers()
+	if err != nil {
+		log.Printf("[弹幕发送] ❌ 获取有效用户失败: %v", err)
+		return err
+	}
+
+	log.Printf("[弹幕发送] 步骤4: 获取房间配置 (room_id=%s)", history.RoomID)
 
 	// 获取房间配置
 	var room models.RecordRoom
@@ -86,20 +140,6 @@ func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID ui
 		log.Printf("[弹幕发送] ❌ 房间配置不存在: %v", err)
 		return fmt.Errorf("房间配置不存在: %w", err)
 	}
-
-	// 获取用户
-	var user models.BiliBiliUser
-	if err := db.First(&user, userID).Error; err != nil {
-		log.Printf("[弹幕发送] ❌ 用户不存在: %v", err)
-		return fmt.Errorf("用户不存在: %w", err)
-	}
-
-	if !user.Login {
-		log.Printf("[弹幕发送] ❌ 用户未登录 (uid=%d)", user.UID)
-		return fmt.Errorf("用户未登录")
-	}
-
-	log.Printf("[弹幕发送] ✓ 用户信息验证通过 (uid=%d, uname=%s)", user.UID, user.Uname)
 
 	// 获取弹幕列表（应用过滤规则）
 	var danmakus []models.LiveMsg
@@ -145,13 +185,13 @@ func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID ui
 		return fmt.Errorf("查询弹幕失败: %w", err)
 	}
 
-	log.Printf("[弹幕发送] 步骤4: 查询到 %d 条弹幕 (session_id=%s)", len(danmakus), history.SessionID)
+	log.Printf("[弹幕发送] 步骤5: 查询到 %d 条弹幕 (session_id=%s)", len(danmakus), history.SessionID)
 
 	// 应用去重逻辑
 	if room.DmDistinct && len(danmakus) > 0 {
 		beforeCount := len(danmakus)
 		danmakus = s.deduplicateDanmakus(danmakus)
-		log.Printf("[弹幕发送] 步骤5: 去重后剩余 %d 条弹幕 (去重了%d条)", len(danmakus), beforeCount-len(danmakus))
+		log.Printf("[弹幕发送] 步骤6: 去重后剩余 %d 条弹幕 (去重了%d条)", len(danmakus), beforeCount-len(danmakus))
 	}
 
 	if len(danmakus) == 0 {
@@ -162,15 +202,16 @@ func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID ui
 		return nil
 	}
 
-	log.Printf("[弹幕发送] 步骤6: 初始化发送进度 (总计 %d 条)", len(danmakus))
+	log.Printf("[弹幕发送] 步骤7: 初始化发送进度 (总计 %d 条)", len(danmakus))
 
 	// 初始化进度
 	danmakuprogress.SetDanmakuProgress(int64(historyID), 0, len(danmakus), true, false)
 
-	log.Printf("[弹幕发送] 步骤7: 获取视频信息 (BV号=%s)", history.BvID)
+	log.Printf("[弹幕发送] 步骤8: 获取视频信息 (BV号=%s)", history.BvID)
 
-	// 获取视频分P信息
-	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+	// 使用第一个有效用户获取视频信息
+	firstUser := validUsers[0]
+	client := bili.NewBiliClient(firstUser.AccessKey, firstUser.Cookies, firstUser.UID)
 	videoInfo, err := client.GetVideoInfo(history.BvID)
 	if err != nil {
 		log.Printf("[弹幕发送] ❌ 获取视频信息失败: %v", err)
@@ -179,7 +220,7 @@ func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID ui
 
 	log.Printf("[弹幕发送] ✓ 视频信息获取成功 (aid=%d, 分P数=%d)", videoInfo.Aid, len(videoInfo.Pages))
 
-	log.Printf("[弹幕发送] 步骤8: 获取分P信息")
+	log.Printf("[弹幕发送] 步骤9: 获取分P信息")
 
 	// 获取所有分P
 	var parts []models.RecordHistoryPart
@@ -282,30 +323,93 @@ func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID ui
 		}
 	}
 
-	log.Printf("[弹幕发送] 步骤9: 开始映射弹幕到分P (映射成功 %d 条)", len(danmakuItems))
+	log.Printf("[弹幕发送] 步骤10: 开始映射弹幕到分P (映射成功 %d 条)", len(danmakuItems))
 
-	// 批量发送弹幕
+	// 批量发送弹幕（使用多用户并行）
 	if len(danmakuItems) > 0 {
-		log.Printf("[弹幕发送] 步骤10: 开始批量发送 %d 条弹幕到视频 %s", len(danmakuItems), history.BvID)
+		log.Printf("[弹幕发送] 步骤11: 开始使用 %d 个用户并行发送 %d 条弹幕到视频 %s",
+			len(validUsers), len(danmakuItems), history.BvID)
 
-		// 发送弹幕并更新进度
+		// 将弹幕分配给不同的用户
+		userCount := len(validUsers)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
 		successCount := 0
-		for i, dm := range danmakuItems {
-			err := client.SendDanmaku(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
-			if err != nil {
-				log.Printf("[弹幕发送] ❌ 第%d/%d条失败 (进度=%dms, 内容=%s): %v", i+1, len(danmakuItems), dm.Progress, dm.Message, err)
-			} else {
-				successCount++
-				if (i+1)%10 == 0 || i == len(danmakuItems)-1 {
-					log.Printf("[弹幕发送] ⏳ 进度: %d/%d (%.1f%%)", i+1, len(danmakuItems), float64(i+1)*100/float64(len(danmakuItems)))
-				}
-			}
+		totalSent := 0
 
-			// 更新进度
-			danmakuprogress.SetDanmakuProgress(int64(historyID), i+1, len(danmakuItems), true, false)
+		// 为每个用户创建发送任务
+		for userIdx, user := range validUsers {
+			wg.Add(1)
+			go func(userIdx int, user models.BiliBiliUser) {
+				defer wg.Done()
+
+				client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+				userSuccessCount := 0
+				userSentCount := 0
+				consecutiveFailures := 0 // 连续失败计数
+
+				// 该用户负责的弹幕索引：userIdx, userIdx + userCount, userIdx + 2*userCount, ...
+				for i := userIdx; i < len(danmakuItems); i += userCount {
+					dm := danmakuItems[i]
+					userSentCount++
+
+					// 使用不等待的发送方法
+					err := client.SendDanmakuWithoutWait(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
+					if err != nil {
+						consecutiveFailures++
+						log.Printf("[弹幕发送] ❌ 用户%s 第%d条失败 (连续失败%d次, 进度=%dms, 内容=%s): %v",
+							user.Uname, userSentCount, consecutiveFailures, dm.Progress, dm.Message, err)
+
+						// 指数退避机制
+						if consecutiveFailures >= 3 {
+							// 连续失败3次或以上，等待10分钟
+							log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败%d次，等待10分钟后继续...", user.Uname, consecutiveFailures)
+							time.Sleep(10 * time.Minute)
+							consecutiveFailures = 0 // 重置计数器
+						} else if consecutiveFailures == 2 {
+							// 连续失败2次，等待2分钟
+							log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败2次，等待2分钟后继续...", user.Uname)
+							time.Sleep(2 * time.Minute)
+						} else {
+							// 首次失败，等待30秒
+							log.Printf("[弹幕发送] ⚠️ 用户%s 发送失败，等待30秒后继续...", user.Uname)
+							time.Sleep(30 * time.Second)
+						}
+					} else {
+						userSuccessCount++
+						consecutiveFailures = 0 // 成功后重置失败计数
+
+						// 成功后随机等待15-25秒，避免风控
+						waitTime := 15 + rand.Intn(11) // 15到25秒的随机值
+						log.Printf("[弹幕发送] ✓ 用户%s 第%d条成功，等待%d秒后继续...", user.Uname, userSentCount, waitTime)
+						time.Sleep(time.Duration(waitTime) * time.Second)
+					}
+
+					// 更新进度
+					mu.Lock()
+					totalSent++
+					if totalSent%10 == 0 || totalSent == len(danmakuItems) {
+						log.Printf("[弹幕发送] ⏳ 进度: %d/%d (%.1f%%)",
+							totalSent, len(danmakuItems), float64(totalSent)*100/float64(len(danmakuItems)))
+					}
+					danmakuprogress.SetDanmakuProgress(int64(historyID), totalSent, len(danmakuItems), true, false)
+					mu.Unlock()
+				}
+
+				log.Printf("[弹幕发送] ✅ 用户%s 发送完成: 成功 %d/%d 条",
+					user.Uname, userSuccessCount, userSentCount)
+
+				mu.Lock()
+				successCount += userSuccessCount
+				mu.Unlock()
+			}(userIdx, user)
 		}
 
-		log.Printf("[弹幕发送] ✅ 发送完成: 成功 %d/%d 条 (成功率 %.1f%%)", successCount, len(danmakuItems), float64(successCount)*100/float64(len(danmakuItems)))
+		// 等待所有用户完成
+		wg.Wait()
+
+		log.Printf("[弹幕发送] ✅ 全部发送完成: 成功 %d/%d 条 (成功率 %.1f%%)",
+			successCount, len(danmakuItems), float64(successCount)*100/float64(len(danmakuItems)))
 
 		// 更新历史记录
 		history.DanmakuSent = true
