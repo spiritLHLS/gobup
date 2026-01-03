@@ -32,6 +32,7 @@ type RecordRoom struct {
 	Tags               string         `json:"tags"`
 	TID                int            `gorm:"default:171" json:"tid"`
 	Copyright          int            `gorm:"default:1" json:"copyright"`
+	SourceTemplate     string         `gorm:"type:text;default:'直播间: https://live.bilibili.com/${roomId}  稿件直播源'" json:"sourceTemplate"` // 转载来源模板，支持变量替换
 	PercentileRank     float64        `gorm:"default:0.95" json:"percentileRank"`
 	HighEnergyCut      bool           `gorm:"default:false" json:"highEnergyCut"`
 	WindowSize         int            `gorm:"default:60" json:"windowSize"`         // 高能剪辑窗口大小(秒)

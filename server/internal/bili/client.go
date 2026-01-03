@@ -121,18 +121,13 @@ func (c *BiliClient) PreUpload(filename string, filesize int64) (*PreUploadResp,
 }
 
 // PublishVideo 投稿视频
-func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, cover string, videos []PublishVideoPartRequest) (int64, string, error) {
+func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, cover string, videos []PublishVideoPartRequest, source string) (int64, string, error) {
 	csrf := GetCookieValue(c.Cookies, "bili_jct")
 	if csrf == "" {
 		return 0, "", fmt.Errorf("未找到CSRF token (bili_jct)")
 	}
 
-	// 构建source字段
-	source := ""
-	if copyright == 2 {
-		// 转载时source为空或由调用方提供
-		source = ""
-	}
+	// 对于转载类型，source会由调用方提供（已经处理过模板）
 
 	req := PublishVideoRequest{
 		Copyright:    copyright,

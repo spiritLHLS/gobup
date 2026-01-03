@@ -196,7 +196,7 @@ type EditVideoResponse struct {
 }
 
 // EditVideo 编辑已发布的视频
-func (c *BiliClient) EditVideo(aid int64, title, desc, tags string, tid int, cover string, videos []PublishVideoPartRequest) error {
+func (c *BiliClient) EditVideo(aid int64, title, desc, tags string, tid, copyright int, cover string, videos []PublishVideoPartRequest, source string) error {
 	csrf := GetCookieValue(c.Cookies, "bili_jct")
 	if csrf == "" {
 		return fmt.Errorf("未找到CSRF token")
@@ -204,7 +204,8 @@ func (c *BiliClient) EditVideo(aid int64, title, desc, tags string, tid int, cov
 
 	req := EditVideoRequest{
 		Aid:       aid,
-		Copyright: 1,
+		Copyright: copyright,
+		Source:    source,
 		Cover:     cover,
 		Desc:      desc,
 		Tag:       tags,

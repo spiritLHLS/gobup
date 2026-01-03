@@ -90,6 +90,18 @@
         </el-radio-group>
       </el-form-item>
       
+      <el-form-item label="转载来源模板" v-if="localForm.copyright === 2">
+        <el-input 
+          v-model="localForm.sourceTemplate"
+          placeholder="直播间: https://live.bilibili.com/${roomId}  稿件直播源"
+          type="textarea"
+          :rows="2"
+        />
+        <div class="help-text">
+          支持变量: ${roomId} ${uname} ${areaName} ${title} 等。留空则使用默认模板
+        </div>
+      </el-form-item>
+      
       <el-form-item label="分P标题模板">
         <el-input 
           v-model="localForm.partTitleTemplate"

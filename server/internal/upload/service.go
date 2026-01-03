@@ -440,8 +440,16 @@ func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history
 		log.Printf("[自动分P] 创建Part %d/%d 成功: id=%d, size=%d, duration=%d", i+1, numParts, newPart.ID, newPart.FileSize, newPart.Duration)
 	}
 
-	// 标记原始Part为已上传（实际上是被分割了）
+	// 删除原始文件，避免被识别为cid=0的文件
+	if err := os.Remove(originalPart.FilePath); err != nil {
+		log.Printf("[自动分P] 删除原始文件失败: %v (文件: %s)", err, originalPart.FilePath)
+	} else {
+		log.Printf("[自动分P] 原始文件已删除: %s", originalPart.FilePath)
+	}
+
+	// 标记原始Part为已上传（实际上是被分割了），并标记文件已删除
 	originalPart.Upload = true
+	originalPart.FileDelete = true
 	originalPart.UploadErrorMsg = fmt.Sprintf("文件过大(分片数%d>10000)，已自动分割成%d个Part", totalChunks, numParts)
 	db.Save(originalPart)
 

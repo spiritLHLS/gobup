@@ -45,8 +45,9 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	}
 
 	// 获取所有已上传的分P（必须按start_time ASC排序，确保投稿时分P顺序正确）
+	// 排除已删除文件的Parts（例如被切分的原始文件）
 	var parts []models.RecordHistoryPart
-	if err := db.Where("history_id = ? AND upload = ?", historyID, true).
+	if err := db.Where("history_id = ? AND upload = ? AND file_delete = ?", historyID, true, false).
 		Order("start_time ASC").
 		Find(&parts).Error; err != nil {
 		return fmt.Errorf("查询分P失败: %w", err)
@@ -257,8 +258,19 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		log.Printf("  分P[%d]: %s (CID=%d)", i, vp.Title, vp.Cid)
 	}
 
+	// 处理转载来源
+	source := ""
+	if room.Copyright == 2 {
+		// 使用模板生成转载来源
+		sourceTemplate := room.SourceTemplate
+		if sourceTemplate == "" {
+			sourceTemplate = "直播间: https://live.bilibili.com/${roomId}  稿件直播源"
+		}
+		source = s.templateSvc.RenderTitle(sourceTemplate, templateData)
+	}
+
 	// 投稿，同时获取AID和BV号
-	avID, bvid, err := client.PublishVideo(title, desc, tagsStr, tid, room.Copyright, coverURL, videoParts)
+	avID, bvid, err := client.PublishVideo(title, desc, tagsStr, tid, room.Copyright, coverURL, videoParts, source)
 	if err != nil {
 		// 检查是否是验证码错误
 		captchaService := services.NewCaptchaService()

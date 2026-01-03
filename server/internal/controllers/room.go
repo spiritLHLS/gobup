@@ -51,6 +51,11 @@ func UpdateRoom(c *gin.Context) {
 		return
 	}
 
+	// 确保转载来源模板有默认值
+	if room.Copyright == 2 && room.SourceTemplate == "" {
+		room.SourceTemplate = "直播间: https://live.bilibili.com/${roomId}  稿件直播源"
+	}
+
 	db := database.GetDB()
 	db.Save(&room)
 	c.JSON(http.StatusOK, true)
