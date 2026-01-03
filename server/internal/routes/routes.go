@@ -146,6 +146,7 @@ func SetupRoutes(router *gin.Engine) {
 				filescan.POST("/trigger", controllers.TriggerFileScan)
 				filescan.GET("/preview", controllers.PreviewFileScan)
 				filescan.POST("/import", controllers.ImportSelectedFiles)
+				filescan.POST("/cleanCompleted", controllers.CleanCompletedFiles)
 			}
 
 			// 数据修复API

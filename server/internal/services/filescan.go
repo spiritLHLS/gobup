@@ -838,3 +838,82 @@ func (s *FileScanService) ScanOrphanFiles() error {
 	log.Printf("[FileScan] 孤儿文件扫描完成: 发现%d个孤儿记录", orphanCount)
 	return nil
 }
+
+// CleanCompletedFilesResult 清理已完成文件的结果
+type CleanCompletedFilesResult struct {
+	TotalHistories   int      `json:"totalHistories"`   // 检查的历史记录总数
+	DeletedXMLFiles  int      `json:"deletedXMLFiles"`  // 删除的XML文件数
+	DeletedJPGFiles  int      `json:"deletedJPGFiles"`  // 删除的JPG文件数
+	SkippedHistories int      `json:"skippedHistories"` // 跳过的历史记录数
+	Errors           []string `json:"errors"`           // 错误信息列表
+}
+
+// CleanCompletedFiles 清理已上传投稿成功且解析弹幕完成且已发送弹幕的历史记录的xml和jpg文件
+func (s *FileScanService) CleanCompletedFiles() (*CleanCompletedFilesResult, error) {
+	db := database.GetDB()
+	result := &CleanCompletedFilesResult{
+		Errors: make([]string, 0),
+	}
+
+	// 查询所有已上传投稿成功(uploadStatus=2)且弹幕已发送(danmakuSent=true)的历史记录
+	var histories []models.RecordHistory
+	if err := db.Where("upload_status = ? AND danmaku_sent = ?", 2, true).Find(&histories).Error; err != nil {
+		return nil, fmt.Errorf("查询历史记录失败: %w", err)
+	}
+
+	result.TotalHistories = len(histories)
+	log.Printf("[FileScan] 开始清理已完成的历史记录文件，共 %d 条记录", result.TotalHistories)
+
+	for _, history := range histories {
+		// 获取该历史记录的所有分P
+		var parts []models.RecordHistoryPart
+		if err := db.Where("history_id = ?", history.ID).Find(&parts).Error; err != nil {
+			errMsg := fmt.Sprintf("查询历史记录 %d 的分P失败: %v", history.ID, err)
+			log.Printf("[FileScan] %s", errMsg)
+			result.Errors = append(result.Errors, errMsg)
+			result.SkippedHistories++
+			continue
+		}
+
+		// 遍历每个分P，删除对应的xml和jpg文件
+		for _, part := range parts {
+			if part.FilePath == "" {
+				continue
+			}
+
+			// 构造xml和jpg文件路径
+			basePathWithoutExt := strings.TrimSuffix(part.FilePath, filepath.Ext(part.FilePath))
+			xmlPath := basePathWithoutExt + ".xml"
+			jpgPath := basePathWithoutExt + ".jpg"
+
+			// 删除xml文件
+			if _, err := os.Stat(xmlPath); err == nil {
+				if err := os.Remove(xmlPath); err != nil {
+					errMsg := fmt.Sprintf("删除xml文件失败: %s, error: %v", xmlPath, err)
+					log.Printf("[FileScan] %s", errMsg)
+					result.Errors = append(result.Errors, errMsg)
+				} else {
+					result.DeletedXMLFiles++
+					log.Printf("[FileScan] 删除xml文件: %s", xmlPath)
+				}
+			}
+
+			// 删除jpg文件
+			if _, err := os.Stat(jpgPath); err == nil {
+				if err := os.Remove(jpgPath); err != nil {
+					errMsg := fmt.Sprintf("删除jpg文件失败: %s, error: %v", jpgPath, err)
+					log.Printf("[FileScan] %s", errMsg)
+					result.Errors = append(result.Errors, errMsg)
+				} else {
+					result.DeletedJPGFiles++
+					log.Printf("[FileScan] 删除jpg文件: %s", jpgPath)
+				}
+			}
+		}
+	}
+
+	log.Printf("[FileScan] 清理已完成文件结束: 检查 %d 条历史记录, 删除 %d 个xml文件, %d 个jpg文件, 跳过 %d 条记录",
+		result.TotalHistories, result.DeletedXMLFiles, result.DeletedJPGFiles, result.SkippedHistories)
+
+	return result, nil
+}

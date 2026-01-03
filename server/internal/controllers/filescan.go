@@ -134,3 +134,35 @@ func ImportSelectedFiles(c *gin.Context) {
 		"errors":      result.Errors,
 	})
 }
+
+// CleanCompletedFiles 清理已完成历史记录的xml和jpg文件
+func CleanCompletedFiles(c *gin.Context) {
+	log.Printf("[FileScan] 收到手动清理已完成文件请求")
+
+	// 执行清理
+	scanService := services.NewFileScanService()
+	result, err := scanService.CleanCompletedFiles()
+
+	if err != nil {
+		log.Printf("[FileScan] 清理失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"type": "error",
+			"msg":  "清理失败: " + err.Error(),
+		})
+		return
+	}
+
+	// 返回清理结果
+	log.Printf("[FileScan] 清理完成: 检查历史记录=%d, 删除XML=%d, 删除JPG=%d, 跳过=%d",
+		result.TotalHistories, result.DeletedXMLFiles, result.DeletedJPGFiles, result.SkippedHistories)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":             "success",
+		"msg":              "清理完成",
+		"totalHistories":   result.TotalHistories,
+		"deletedXMLFiles":  result.DeletedXMLFiles,
+		"deletedJPGFiles":  result.DeletedJPGFiles,
+		"skippedHistories": result.SkippedHistories,
+		"errors":           result.Errors,
+	})
+}

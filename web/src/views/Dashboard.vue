@@ -252,6 +252,20 @@
               <span class="help-text">孤儿文件扫描间隔时间，最小1小时</span>
             </div>
           </el-form-item>
+
+          <el-form-item label="孤立文件清理">
+            <div class="button-group">
+              <el-button 
+                type="danger" 
+                @click="cleanCompletedFiles" 
+                :loading="cleaning"
+                :icon="Delete"
+              >
+                清理已完成文件
+              </el-button>
+              <span class="help-text">删除已上传投稿成功且解析弹幕完成且已发送弹幕的对应xml文件和jpg文件</span>
+            </div>
+          </el-form-item>
         </div>
       </el-form>
     </el-card>
@@ -264,7 +278,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { VideoCamera, Upload, Clock, Warning, Check, Refresh, FolderOpened, Search, Tools } from '@element-plus/icons-vue'
+import { VideoCamera, Upload, Clock, Warning, Check, Refresh, FolderOpened, Search, Tools, Delete } from '@element-plus/icons-vue'
 import api, { filescanAPI, dataRepairAPI } from '../api'
 import FileScanDialog from '../components/filescan/FileScanDialog.vue'
 
@@ -273,6 +287,7 @@ const saving = ref(false)
 const scanning = ref(false)
 const checking = ref(false)
 const repairing = ref(false)
+const cleaning = ref(false)
 const fileScanDialogRef = ref(null)
 const config = ref({
   autoFileScan: true,
@@ -574,6 +589,66 @@ const repairDataConsistency = async () => {
 const handleFilesImported = () => {
   // 刷新统计数据
   loadStats()
+}
+
+// 清理已完成文件（xml和jpg）
+const cleanCompletedFiles = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '此操作将删除所有已上传投稿成功且解析弹幕完成且已发送弹幕的历史记录的xml和jpg文件。\n\n' +
+      '删除的文件类型：\n' +
+      '• .xml 弹幕文件\n' +
+      '• .jpg 封面文件\n\n' +
+      '注意：此操作不可恢复！是否继续？',
+      '清理已完成文件',
+      {
+        confirmButtonText: '确定清理',
+        cancelButtonText: '取消',
+        type: 'warning',
+        distinguishCancelAndClose: true
+      }
+    )
+    
+    cleaning.value = true
+    const response = await filescanAPI.cleanCompleted()
+    
+    if (response.type === 'success') {
+      let message = `清理完成！\n\n`
+      message += `检查历史记录: ${response.totalHistories} 条\n`
+      message += `删除XML文件: ${response.deletedXMLFiles} 个\n`
+      message += `删除JPG文件: ${response.deletedJPGFiles} 个\n`
+      
+      if (response.skippedHistories > 0) {
+        message += `跳过记录: ${response.skippedHistories} 条\n`
+      }
+      
+      if (response.errors && response.errors.length > 0) {
+        message += `\n错误信息：\n` + response.errors.join('\n')
+        ElMessageBox.alert(message, '清理结果', { 
+          type: 'warning',
+          confirmButtonText: '知道了'
+        })
+      } else {
+        if (response.deletedXMLFiles > 0 || response.deletedJPGFiles > 0) {
+          ElMessageBox.alert(message, '清理结果', { 
+            type: 'success',
+            confirmButtonText: '知道了'
+          })
+        } else {
+          ElMessage.info('没有需要清理的文件')
+        }
+      }
+    } else {
+      ElMessage.error(response.msg || '清理失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('清理文件失败:', error)
+      ElMessage.error('清理失败: ' + (error.message || '网络错误'))
+    }
+  } finally {
+    cleaning.value = false
+  }
 }
 
 onMounted(() => {
