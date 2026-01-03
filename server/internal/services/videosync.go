@@ -143,29 +143,46 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 	oldVideoState := history.VideoState
 
 	// 更新视频状态
-	// 根据B站API文档：
+	// B站API返回的state值：
 	// 0 = 正常公开（审核通过）
 	// 1 = 审核中
 	// 2 = 已下架
 	// 3 = 仅自己可见（审核未通过或违规）
-	history.VideoState = videoInfo.State
+	// -1, -2, -3, -4 = 各种未通过状态
+	//
+	// 数据库存储的videoState（与前端一致）：
+	// 1 = 已通过
+	// 0 = 审核中
+	// -1 = 未知
+	// -2 = 未通过
+	// 2 = 已下架
+	// 3 = 仅自己可见
 	switch videoInfo.State {
 	case 0:
+		// B站API state=0 表示已发布，转换为 videoState=1
+		history.VideoState = 1
 		history.VideoStateDesc = "已发布"
 	case 1:
+		// B站API state=1 表示审核中，转换为 videoState=0
+		history.VideoState = 0
 		history.VideoStateDesc = "审核中"
 	case 2:
+		history.VideoState = 2
 		history.VideoStateDesc = "已下架"
 	case 3:
+		history.VideoState = 3
 		history.VideoStateDesc = "仅自己可见"
 	case -1, -2, -3, -4:
+		history.VideoState = -2
 		history.VideoStateDesc = "审核未通过"
 	default:
+		history.VideoState = -1
 		history.VideoStateDesc = fmt.Sprintf("未知状态(%d)", videoInfo.State)
 	}
 
 	// 检测到从非通过状态变为通过状态，触发审核通过后的文件处理
-	if oldVideoState != 0 && videoInfo.State == 0 {
+	// videoState=1 表示已通过
+	if oldVideoState != 1 && history.VideoState == 1 {
 		log.Printf("视频 %s 审核通过，检查是否需要处理文件", history.BvID)
 		if room.DeleteType == 11 || room.DeleteType == 12 {
 			fileMoverSvc := NewFileMoverService()
@@ -269,10 +286,10 @@ func (s *VideoSyncService) CreateSyncTask(historyID uint) error {
 func (s *VideoSyncService) ProcessPendingTasks() error {
 	db := database.GetDB()
 
-	// 查找待执行的任务
+	// 查找待执行的任务（排除 next_run_at 为 NULL 的任务，这些是永久失败的任务）
 	var tasks []models.VideoSyncTask
 	now := time.Now()
-	if err := db.Where("status IN ? AND (next_run_at IS NULL OR next_run_at <= ?)",
+	if err := db.Where("status IN ? AND next_run_at IS NOT NULL AND next_run_at <= ?",
 		[]string{"pending", "failed"}, now).
 		Limit(10).
 		Find(&tasks).Error; err != nil {
@@ -306,22 +323,23 @@ func (s *VideoSyncService) ProcessPendingTasks() error {
 
 			if isPermanentError {
 				// 永久性错误，直接标记为失败不再重试
-				log.Printf("检测到永久性错误，不再重试 (history=%d): %v", task.HistoryID, err)
+				log.Printf("检测到永久性错误，将任务标记为永久失败并从队列移除 (history=%d): %v", task.HistoryID, err)
 				task.Status = "failed"
-				task.NextRunAt = nil
+				task.NextRunAt = nil // 设置为NULL以从队列中移除
 			} else {
-				// 设置下次重试时间（指数退避）
-				retryDelay := time.Duration(task.RetryCount*task.RetryCount) * time.Minute
-				if retryDelay > 60*time.Minute {
-					retryDelay = 60 * time.Minute
-				}
-				nextRun := time.Now().Add(retryDelay)
-				task.NextRunAt = &nextRun
-
-				// 如果重试次数过多，标记为失败不再重试
+				// 如果重试次数过多，标记为永久失败不再重试
 				if task.RetryCount >= 5 {
+					log.Printf("重试次数超过限制，将任务标记为永久失败并从队列移除 (history=%d, retries=%d)", task.HistoryID, task.RetryCount)
 					task.Status = "failed"
 					task.NextRunAt = nil
+				} else {
+					// 设置下次重试时间（指数退避）
+					retryDelay := time.Duration(task.RetryCount*task.RetryCount) * time.Minute
+					if retryDelay > 60*time.Minute {
+						retryDelay = 60 * time.Minute
+					}
+					nextRun := time.Now().Add(retryDelay)
+					task.NextRunAt = &nextRun
 				}
 			}
 		} else {
