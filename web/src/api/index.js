@@ -94,4 +94,10 @@ export const filescanAPI = {
   import: (filePaths) => request.post('/filescan/import', { filePaths })
 }
 
+// 数据修复
+export const dataRepairAPI = {
+  check: (dryRun = true) => request.get('/datarepair/check', { params: { dryRun } }),
+  repair: () => request.post('/datarepair/repair')
+}
+
 export default request

@@ -196,6 +196,39 @@
         <div class="form-section">
           <div class="section-title">维护与清理</div>
           
+          <el-form-item label="自动数据修复">
+            <div class="switch-item">
+              <el-switch 
+                v-model="config.autoDataRepair" 
+                @change="toggleFeature('autoDataRepair', $event)"
+                size="large"
+              />
+              <span class="help-text">启用后，每天自动检查并修复数据一致性问题（孤儿分P、空历史记录等）</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="数据一致性检查">
+            <div class="button-group">
+              <el-button 
+                type="primary" 
+                @click="checkDataConsistency" 
+                :loading="checking"
+                :icon="Search"
+              >
+                检查问题
+              </el-button>
+              <el-button 
+                type="warning" 
+                @click="repairDataConsistency" 
+                :loading="repairing"
+                :icon="Tools"
+              >
+                修复数据
+              </el-button>
+              <span class="help-text">检查并修复分P与历史记录之间的数据不一致问题</span>
+            </div>
+          </el-form-item>
+
           <el-form-item label="孤儿文件扫描">
             <div class="switch-item">
               <el-switch 
@@ -231,13 +264,15 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { VideoCamera, Upload, Clock, Warning, Check, Refresh, FolderOpened } from '@element-plus/icons-vue'
-import api, { filescanAPI } from '../api'
+import { VideoCamera, Upload, Clock, Warning, Check, Refresh, FolderOpened, Search, Tools } from '@element-plus/icons-vue'
+import api, { filescanAPI, dataRepairAPI } from '../api'
 import FileScanDialog from '../components/filescan/FileScanDialog.vue'
 
 const loading = ref(false)
 const saving = ref(false)
 const scanning = ref(false)
+const checking = ref(false)
+const repairing = ref(false)
 const fileScanDialogRef = ref(null)
 const config = ref({
   autoFileScan: true,
@@ -247,6 +282,7 @@ const config = ref({
   fileScanMaxAge: 720,
   workPath: '',
   customScanPaths: '',
+  autoDataRepair: false,
   enableOrphanScan: true,
   orphanScanInterval: 360
 })
@@ -354,6 +390,7 @@ const saveConfig = async () => {
 const getFeatureName = (feature) => {
   const names = {
     autoFileScan: '自动扫盘录入',
+    autoDataRepair: '自动数据修复',
     enableOrphanScan: '孤儿文件扫描'
   }
   return names[feature] || feature
@@ -408,6 +445,128 @@ const triggerFileScan = async (force = false) => {
 const openFileScanDialog = () => {
   if (fileScanDialogRef.value) {
     fileScanDialogRef.value.open()
+  }
+}
+
+// 检查数据一致性
+const checkDataConsistency = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '将检查分P与历史记录之间的数据一致性问题（不会修改数据）。是否继续？',
+      '数据一致性检查',
+      {
+        confirmButtonText: '检查',
+        cancelButtonText: '取消',
+        type: 'info'
+      }
+    )
+    
+    checking.value = true
+    const response = await dataRepairAPI.check(true) // dryRun=true
+    
+    if (response.type === 'success') {
+      const hasIssues = response.orphanParts > 0 || response.emptyHistories > 0
+      
+      let message = `检查完成！\n\n`
+      message += `发现孤儿分P: ${response.orphanParts} 个\n`
+      message += `发现空历史记录: ${response.emptyHistories} 个\n`
+      
+      if (hasIssues) {
+        message += `\n如需修复，请点击"修复数据"按钮。`
+        
+        if (response.errors && response.errors.length > 0) {
+          message += `\n\n错误信息：\n` + response.errors.join('\n')
+        }
+        
+        ElMessageBox.alert(message, '检查结果', { 
+          type: 'warning',
+          confirmButtonText: '知道了'
+        })
+      } else {
+        ElMessage.success('数据一致性良好，未发现问题！')
+      }
+    } else {
+      ElMessage.error(response.msg || '检查失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('数据检查失败:', error)
+      ElMessage.error('检查失败: ' + (error.message || '网络错误'))
+    }
+  } finally {
+    checking.value = false
+  }
+}
+
+// 修复数据一致性
+const repairDataConsistency = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '将自动修复以下问题：\n' +
+      '1. 孤儿分P（有分P但无历史记录）\n' +
+      '2. 空历史记录（有历史记录但无分P）\n' +
+      '3. 历史记录时间范围错误\n\n' +
+      '是否继续？',
+      '数据一致性修复',
+      {
+        confirmButtonText: '修复',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    repairing.value = true
+    const response = await dataRepairAPI.repair()
+    
+    if (response.type === 'success') {
+      const hasChanges = response.createdHistories > 0 || 
+                        response.deletedEmptyHistories > 0 || 
+                        response.reassignedParts > 0 || 
+                        response.updatedHistoryTimes > 0
+      
+      let message = `修复完成！\n\n`
+      message += `孤儿分P: ${response.orphanParts} 个\n`
+      message += `空历史记录: ${response.emptyHistories} 个\n`
+      
+      if (hasChanges) {
+        message += `\n修复操作：\n`
+        if (response.createdHistories > 0) {
+          message += `- 创建历史记录: ${response.createdHistories} 个\n`
+        }
+        if (response.deletedEmptyHistories > 0) {
+          message += `- 删除空历史记录: ${response.deletedEmptyHistories} 个\n`
+        }
+        if (response.reassignedParts > 0) {
+          message += `- 重新分配分P: ${response.reassignedParts} 个\n`
+        }
+        if (response.updatedHistoryTimes > 0) {
+          message += `- 更新时间范围: ${response.updatedHistoryTimes} 个\n`
+        }
+      }
+      
+      if (response.errors && response.errors.length > 0) {
+        message += `\n错误信息：\n` + response.errors.join('\n')
+      }
+      
+      ElMessageBox.alert(message, '修复结果', { 
+        type: hasChanges ? 'success' : 'info',
+        confirmButtonText: '知道了'
+      })
+      
+      // 刷新统计数据
+      if (hasChanges) {
+        loadStats()
+      }
+    } else {
+      ElMessage.error(response.msg || '修复失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('数据修复失败:', error)
+      ElMessage.error('修复失败: ' + (error.message || '网络错误'))
+    }
+  } finally {
+    repairing.value = false
   }
 }
 

@@ -94,6 +94,30 @@ func InitScheduler() {
 		}
 	})
 
+	// 数据一致性检查与修复 - 每天凌晨4点执行
+	cronJob.AddFunc("0 4 * * *", func() {
+		// 检查是否启用自动数据修复
+		if !isFeatureEnabled("AutoDataRepair") {
+			return
+		}
+
+		log.Println("执行定时任务: 数据一致性检查与修复")
+		repairService := services.NewDataRepairService()
+		result, err := repairService.CheckAndRepairDataConsistency(false) // 自动执行实际修复
+		if err != nil {
+			log.Printf("数据一致性修复失败: %v", err)
+			return
+		}
+
+		// 如果有问题被修复，记录日志
+		if result.CreatedHistories > 0 || result.DeletedEmptyHistories > 0 ||
+			result.ReassignedParts > 0 || result.UpdatedHistoryTimes > 0 {
+			log.Printf("数据一致性修复完成: 孤儿分P=%d, 空历史=%d, 新建历史=%d, 删除空历史=%d, 更新时间=%d, 重新分配=%d",
+				result.OrphanParts, result.EmptyHistories, result.CreatedHistories,
+				result.DeletedEmptyHistories, result.UpdatedHistoryTimes, result.ReassignedParts)
+		}
+	})
+
 	// Token自动刷新任务 - 每2天执行一次（参考biliupforjava的RefreshTokenJob）
 	cronJob.AddFunc("0 */48 * * *", func() {
 		log.Println("执行定时任务: Token自动刷新")

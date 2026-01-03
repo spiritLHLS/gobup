@@ -140,6 +140,13 @@ func SetupRoutes(router *gin.Engine) {
 				filescan.GET("/preview", controllers.PreviewFileScan)
 				filescan.POST("/import", controllers.ImportSelectedFiles)
 			}
+
+			// 数据修复API
+			datarepair := auth.Group("/datarepair")
+			{
+				datarepair.GET("/check", controllers.CheckDataConsistency)
+				datarepair.POST("/repair", controllers.RepairDataConsistency)
+			}
 		}
 	}
 
