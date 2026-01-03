@@ -693,11 +693,27 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 	}
 
 	// 创建新的历史记录
+	// 尝试从直播间API获取真实的主播名
+	uname := metadata.Uname
+	liveStatusService := NewLiveStatusService()
+	roomInfo, roomErr := liveStatusService.GetRoomInfo(metadata.RoomID)
+	if roomErr == nil && roomInfo.Data.UID > 0 {
+		userInfo, userErr := liveStatusService.GetUserInfo(roomInfo.Data.UID)
+		if userErr == nil && userInfo.Data.Info.Uname != "" {
+			uname = userInfo.Data.Info.Uname
+			log.Printf("[FileScan] 从API获取主播名: %s (UID=%d)", uname, roomInfo.Data.UID)
+		} else {
+			log.Printf("[FileScan] 获取主播名失败: %v, 使用默认: %s", userErr, uname)
+		}
+	} else {
+		log.Printf("[FileScan] 获取直播间信息失败: %v, 使用默认主播名: %s", roomErr, uname)
+	}
+
 	history = models.RecordHistory{
 		RoomID:    metadata.RoomID,
 		SessionID: metadata.SessionID,
 		EventID:   fmt.Sprintf("scan_%s_%d", metadata.RoomID, time.Now().Unix()),
-		Uname:     metadata.Uname,
+		Uname:     uname, // 使用从API获取的真实主播名
 		Title:     metadata.Title,
 		AreaName:  metadata.AreaName,
 		StartTime: metadata.StartTime,
@@ -712,8 +728,8 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 		return nil, fmt.Errorf("创建历史记录失败: %w", err)
 	}
 
-	log.Printf("[FileScan] 创建新历史记录: ID=%d, SessionID=%s, RoomID=%s",
-		history.ID, history.SessionID, metadata.RoomID)
+	log.Printf("[FileScan] 创建新历史记录: ID=%d, SessionID=%s, RoomID=%s, Uname=%s",
+		history.ID, history.SessionID, metadata.RoomID, history.Uname)
 
 	return &history, nil
 }
