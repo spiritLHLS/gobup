@@ -44,7 +44,7 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("用户Cookie已失效，请重新登录")
 	}
 
-	// 获取所有已上传的分P
+	// 获取所有已上传的分P（必须按start_time ASC排序，确保投稿时分P顺序正确）
 	var parts []models.RecordHistoryPart
 	if err := db.Where("history_id = ? AND upload = ?", historyID, true).
 		Order("start_time ASC").
@@ -169,8 +169,9 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		coverURL = ""
 	}
 
-	// 构建分P信息
+	// 构建分P信息（parts已按start_time ASC排序，循环按时间顺序处理）
 	var videoParts []bili.PublishVideoPartRequest
+	log.Printf("开始构建%d个分P的投稿信息（按录制时间顺序）", len(parts))
 	for i, part := range parts {
 		partTemplateData := map[string]interface{}{
 			"index":     i + 1,
@@ -195,12 +196,46 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		// 调试日志：检查关键参数
 		log.Printf("构建分P[%d]: filename=%s, cid=%d", i, filename, part.CID)
 
-		// 只有CID大于0时才传递（参考biliupforjava实现）
+		// 检查CID是否为0（参考biliupforjava实现）
+		// 如果CID为0，说明视频还没有上传完成或上传出错，需要立即上传
 		var cid int64
 		if part.CID > 0 {
 			cid = int64(part.CID)
 		} else {
-			log.Printf("警告: 分P[%d]的CID为0，可能导致投稿失败", i)
+			log.Printf("检测到分P[%d]的CID为0，立即触发上传: %s", i, part.FilePath)
+
+			// 检查文件是否存在
+			if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
+				return fmt.Errorf("分P[%d]文件不存在，无法上传: %s", i, part.FilePath)
+			}
+
+			// 重置上传状态，准备上传
+			part.Upload = false
+			part.Uploading = false
+			part.FileName = ""
+			part.CID = 0
+			part.UploadRetryCount = 0
+			part.UploadErrorMsg = ""
+			db.Save(&part)
+
+			// 立即上传该分P
+			log.Printf("开始上传分P[%d]: %s", i, part.FilePath)
+			if err := s.uploadPartInternal(&part, &history, &room); err != nil {
+				return fmt.Errorf("分P[%d]上传失败: %w，请稍后重试投稿", i, err)
+			}
+
+			// 重新加载分P信息，获取上传后的CID
+			if err := db.First(&part, part.ID).Error; err != nil {
+				return fmt.Errorf("重新加载分P[%d]信息失败: %w", i, err)
+			}
+
+			if part.CID == 0 {
+				return fmt.Errorf("分P[%d]上传后CID仍为0，上传可能失败", i)
+			}
+
+			cid = int64(part.CID)
+			filename = part.FileName // 使用上传后获得的服务器文件名
+			log.Printf("分P[%d]上传成功，CID=%d, FileName=%s", i, part.CID, filename)
 		}
 
 		videoParts = append(videoParts, bili.PublishVideoPartRequest{
@@ -209,6 +244,12 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 			Filename: filename,
 			Cid:      cid,
 		})
+	}
+
+	// 打印最终的分P列表，确认顺序正确
+	log.Printf("投稿分P列表（共%d个，按录制时间顺序）:", len(videoParts))
+	for i, vp := range videoParts {
+		log.Printf("  分P[%d]: %s (CID=%d)", i, vp.Title, vp.Cid)
 	}
 
 	// 投稿，同时获取AID和BV号

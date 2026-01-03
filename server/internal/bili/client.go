@@ -1,6 +1,7 @@
 package bili
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"strings"
@@ -284,6 +285,7 @@ func (c *BiliClient) AddToSeason(sectionID int64, aid, cid int64, title string) 
 }
 
 // UploadCover 上传封面
+// 参考 biliupforjava 实现：使用 base64 编码的 data URI 格式
 func (c *BiliClient) UploadCover(imageData []byte) (string, error) {
 	csrf := GetCookieValue(c.Cookies, "bili_jct")
 	if csrf == "" {
@@ -301,17 +303,34 @@ func (c *BiliClient) UploadCover(imageData []byte) (string, error) {
 	// 添加csrf参数和适当的请求头
 	apiURL := fmt.Sprintf("https://member.bilibili.com/x/vu/web/cover/up?csrf=%s", csrf)
 
+	// 使用 base64 编码的 data URI 格式（参考 biliupforjava）
+	// 检测图片类型
+	imageType := "image/jpeg"
+	if len(imageData) > 3 {
+		// PNG: 89 50 4E 47
+		if imageData[0] == 0x89 && imageData[1] == 0x50 && imageData[2] == 0x4E && imageData[3] == 0x47 {
+			imageType = "image/png"
+		}
+	}
+
+	// 使用 base64 标准库编码
+	base64Data := base64.StdEncoding.EncodeToString(imageData)
+	dataURI := fmt.Sprintf("data:%s;base64,%s", imageType, base64Data)
+
 	_, err := c.ReqClient.R().
 		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame").
-		SetFileBytes("file", "cover.jpg", imageData).
+		SetHeader("Content-Type", "application/x-www-form-urlencoded").
+		SetFormData(map[string]string{
+			"cover": dataURI,
+		}).
 		SetSuccessResult(&result).
 		Post(apiURL)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("请求错误: %w", err)
 	}
 
 	if result.Code != 0 {
-		return "", fmt.Errorf("上传封面失败: %s", result.Msg)
+		return "", fmt.Errorf("%s", result.Msg)
 	}
 
 	return result.Data.URL, nil
