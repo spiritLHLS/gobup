@@ -98,13 +98,14 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 			// 使用Member API获取分P信息
 			partInfo, partErr := client.GetVideoPartInfo(history.BvID)
 			if partErr != nil {
-				// Member API也失败，可能视频已被删除
+				// Member API也失败，判断为审核中（-404通常表示视频正在审核）
 				if strings.Contains(partErr.Error(), "code=-404") {
-					log.Printf("Member API确认视频已删除: %s", history.BvID)
-					history.VideoState = -404
-					history.VideoStateDesc = "视频已删除"
+					log.Printf("Member API也返回-404，判断视频为审核中: %s", history.BvID)
+					history.VideoState = 0
+					history.VideoStateDesc = "审核中"
+					history.SyncedAt = &[]time.Time{time.Now()}[0]
 					db.Save(&history)
-					return fmt.Errorf("视频已删除: %w", err)
+					return nil // 成功更新状态，不返回错误
 				}
 				return fmt.Errorf("获取视频信息失败: %w", err)
 			}
@@ -122,7 +123,15 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 				// 再次尝试获取视频信息（带Cookie）
 				videoInfo, err = client.GetVideoInfo(history.BvID)
 				if err != nil {
-					// 仍然失败，保守处理，保持原状态
+					// 仍然失败，如果是-404，判断为审核中
+					if strings.Contains(err.Error(), "code=-404") {
+						log.Printf("二次确认返回-404，判断视频为审核中: %s", history.BvID)
+						history.VideoState = 0
+						history.VideoStateDesc = "审核中"
+						history.SyncedAt = &[]time.Time{time.Now()}[0]
+						db.Save(&history)
+						return nil // 成功更新状态，不返回错误
+					}
 					log.Printf("二次确认仍失败，保持原状态: %s, error: %v", history.BvID, err)
 					return fmt.Errorf("获取视频信息失败: %w", err)
 				}
