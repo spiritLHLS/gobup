@@ -232,7 +232,7 @@ func (s *FileScanService) scanDirectory(dirPath string, config *ScanConfig, resu
 		// 如果解析到房间号，检查直播状态（智能判断）
 		if metadata != nil && metadata.RoomID != "" && metadata.RoomID != "unknown" {
 			liveStatusService := NewLiveStatusService()
-			isFinished, usedFallback, err := liveStatusService.IsRoomRecordingFinished(metadata.RoomID, info.ModTime())
+			isFinished, usedFallback, err := liveStatusService.IsRoomRecordingFinished(metadata.RoomID, info.ModTime(), metadata.Title)
 
 			if err == nil {
 				if !isFinished {

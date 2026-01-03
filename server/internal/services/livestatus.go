@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/gobup/server/internal/database"
@@ -217,7 +218,7 @@ func (s *LiveStatusService) UpdateAllRoomsStatus() error {
 
 // IsRoomRecordingFinished 判断房间的录播是否已完成（直播已结束且录制文件稳定）
 // 返回值: (是否可以处理, 是否使用了保底逻辑, 错误)
-func (s *LiveStatusService) IsRoomRecordingFinished(roomID string, fileModTime time.Time) (bool, bool, error) {
+func (s *LiveStatusService) IsRoomRecordingFinished(roomID string, fileModTime time.Time, fileTitle string) (bool, bool, error) {
 	// 保底逻辑：文件修改时间超过1小时才处理
 	const fallbackDuration = 1 * time.Hour
 	timeSinceModified := time.Since(fileModTime)
@@ -244,18 +245,41 @@ func (s *LiveStatusService) IsRoomRecordingFinished(roomID string, fileModTime t
 
 	isLive := roomInfo.Data.LiveStatus == 1
 
+	// 定义文件稳定的时间阈值
+	const liveFileThreshold = 1 * time.Hour // 直播中的房间，文件修改超过1小时视为旧直播
+	const endedFileBuffer = 5 * time.Minute // 直播结束后，文件修改超过5分钟才处理
+
 	if isLive {
-		// 正在直播，录播文件可能还在写入
-		log.Printf("[LiveStatus] 房间 %s 正在直播（live_status=%d），跳过文件处理",
-			roomID, roomInfo.Data.LiveStatus)
-		return false, false, nil
+		// 房间正在直播，需要区分是当前这场直播还是之前的录播
+		// 判断1：文件修改时间
+		if timeSinceModified < liveFileThreshold {
+			// 文件最近修改过（不到1小时），可能是当前这场直播的文件，跳过
+			log.Printf("[LiveStatus] 房间 %s 正在直播（live_status=%d），文件修改时间过近（%v），跳过文件处理",
+				roomID, roomInfo.Data.LiveStatus, timeSinceModified)
+			return false, false, nil
+		}
+
+		// 判断2：标题匹配（即使文件修改时间>1小时，但如果标题与当前直播一致，可能是分P）
+		if fileTitle != "" && roomInfo.Data.Title != "" {
+			// 简单的标题匹配：去除空格后比较，或者检查是否包含
+			fileT := strings.TrimSpace(fileTitle)
+			liveT := strings.TrimSpace(roomInfo.Data.Title)
+			if fileT == liveT || strings.Contains(fileT, liveT) || strings.Contains(liveT, fileT) {
+				log.Printf("[LiveStatus] 房间 %s 正在直播（live_status=%d），文件标题与当前直播匹配（文件:%s, 直播:%s），可能是当前直播的分P，跳过处理",
+					roomID, roomInfo.Data.LiveStatus, fileTitle, roomInfo.Data.Title)
+				return false, false, nil
+			}
+		}
+
+		// 文件很久没修改了（超过1小时）且标题不匹配，这是之前那场直播的文件，可以处理
+		log.Printf("[LiveStatus] 房间 %s 正在直播（live_status=%d），但文件修改时间较久（%v）且标题不匹配（文件:%s, 直播:%s），判定为旧直播文件，可以处理",
+			roomID, roomInfo.Data.LiveStatus, timeSinceModified, fileTitle, roomInfo.Data.Title)
+		return true, false, nil
 	}
 
 	// 直播已结束，检查文件修改时间
 	// 给予一定的缓冲时间（如5分钟），确保录播软件已完成文件写入
-	bufferTime := 5 * time.Minute
-
-	if timeSinceModified < bufferTime {
+	if timeSinceModified < endedFileBuffer {
 		log.Printf("[LiveStatus] 房间 %s 直播已结束（live_status=%d），但文件修改时间过近（%v），等待稳定",
 			roomID, roomInfo.Data.LiveStatus, timeSinceModified)
 		return false, false, nil
