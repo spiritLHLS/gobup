@@ -234,6 +234,11 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 	if history.AvID != "" {
 		updates["av_id"] = history.AvID
 	}
+	// 更新主播名字（如果API返回了owner信息）
+	if videoInfo.Owner.Name != "" {
+		updates["uname"] = videoInfo.Owner.Name
+		log.Printf("更新主播名字: %s", videoInfo.Owner.Name)
+	}
 	if err := db.Model(&history).Updates(updates).Error; err != nil {
 		log.Printf("更新历史记录同步信息失败: %v", err)
 	}

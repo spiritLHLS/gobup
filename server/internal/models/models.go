@@ -20,9 +20,9 @@ type RecordRoom struct {
 	AreaNameChild      string         `json:"areaNameChild"`
 	HistoryID          uint           `json:"historyId"`
 	UploadUserID       uint           `gorm:"index" json:"uploadUserId"`
-	Upload             bool           `gorm:"default:true;index" json:"upload"`
-	AutoUpload         bool           `gorm:"default:true" json:"autoUpload"`   // 是否自动上传分P
-	AutoPublish        bool           `gorm:"default:false" json:"autoPublish"` // 所有分P上传完成后是否自动投稿
+	Upload             bool           `gorm:"default:true;index" json:"upload"` // 启用上传功能（总开关）
+	AutoUpload         bool           `gorm:"default:true" json:"autoUpload"`   // 录制完成后自动上传分P
+	AutoPublish        bool           `gorm:"default:false" json:"autoPublish"` // 所有分P上传完成后自动投稿
 	TitleTemplate      string         `gorm:"type:text" json:"titleTemplate"`
 	PartTitleTemplate  string         `gorm:"type:text" json:"partTitleTemplate"`
 	DescTemplate       string         `gorm:"type:text" json:"descTemplate"`

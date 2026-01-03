@@ -8,13 +8,18 @@ import (
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/services"
+	"github.com/gobup/server/internal/upload"
 	"github.com/robfig/cron/v3"
 )
 
 var cronJob *cron.Cron
+var uploadService *upload.Service
 
 func InitScheduler() {
 	cronJob = cron.New()
+
+	// 初始化上传服务（用于自动上传任务）
+	uploadService = upload.NewService()
 
 	// 视频同步任务 - 每5分钟执行一次
 	cronJob.AddFunc("*/5 * * * *", func() {
@@ -94,6 +99,14 @@ func InitScheduler() {
 		log.Println("执行定时任务: Token自动刷新")
 		if err := refreshAllUserTokens(); err != nil {
 			log.Printf("Token刷新任务失败: %v", err)
+		}
+	})
+
+	// 自动上传任务 - 每10分钟执行一次，检查并处理待上传的分P
+	cronJob.AddFunc("*/10 * * * *", func() {
+		log.Println("执行定时任务: 自动上传检查")
+		if err := processAutoUpload(); err != nil {
+			log.Printf("自动上传任务失败: %v", err)
 		}
 	})
 
@@ -188,6 +201,45 @@ func refreshAllUserTokens() error {
 	}
 
 	log.Printf("[TOKEN_REFRESH] 完成: 成功=%d, 失败=%d", successCount, failCount)
+	return nil
+}
+
+// processAutoUpload 处理自动上传任务
+func processAutoUpload() error {
+	// 获取自动上传服务
+	autoUploadSvc := services.NewAutoUploadService()
+
+	// 获取所有待上传的分P
+	tasks, err := autoUploadSvc.GetPendingUploadParts()
+	if err != nil {
+		return err
+	}
+
+	if len(tasks) == 0 {
+		log.Println("[自动上传] 没有待上传的分P")
+		return nil
+	}
+
+	log.Printf("[自动上传] 发现 %d 个待上传的分P，开始加入上传队列", len(tasks))
+
+	successCount := 0
+	failCount := 0
+
+	for _, task := range tasks {
+		log.Printf("[自动上传] 加入队列: room=%s (%s), part_id=%d, file=%s",
+			task.Room.RoomID, task.Room.Uname, task.Part.ID, task.Part.FileName)
+
+		// 将分P加入上传队列
+		if err := uploadService.UploadPart(&task.Part, &task.History, &task.Room); err != nil {
+			log.Printf("[自动上传] 加入队列失败: part_id=%d, error=%v", task.Part.ID, err)
+			failCount++
+			continue
+		}
+
+		successCount++
+	}
+
+	log.Printf("[自动上传] 完成: 成功加入队列=%d, 失败=%d", successCount, failCount)
 	return nil
 }
 

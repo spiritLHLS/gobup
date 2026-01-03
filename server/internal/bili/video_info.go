@@ -17,7 +17,12 @@ type VideoInfo struct {
 	Pic      string `json:"pic"`
 	State    int    `json:"state"`    // 视频状态
 	Duration int    `json:"duration"` // 总时长(秒)
-	Pages    []struct {
+	Owner    struct {
+		Mid  int64  `json:"mid"`
+		Name string `json:"name"`
+		Face string `json:"face"`
+	} `json:"owner"` // 视频所有者（UP主）信息
+	Pages []struct {
 		CID      int64  `json:"cid"`
 		Page     int    `json:"page"`
 		Part     string `json:"part"`

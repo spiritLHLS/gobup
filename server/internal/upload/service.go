@@ -153,9 +153,9 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 
 	log.Printf("开始上传: room=%s, file=%s, line=%s", room.RoomID, part.FilePath, room.Line)
 
-	// 推送上传开始通知
+	// 推送上传开始通知（使用历史记录中实际的主播名）
 	if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
-		s.wxPusher.NotifyUploadStart(room.UploadUserID, room.Wxuid, room.Uname, part.FileName, part.FileSize)
+		s.wxPusher.NotifyUploadStart(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, part.FileSize)
 	}
 
 	// 创建客户端
@@ -237,9 +237,9 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 			db.Save(history)
 		}
 
-		// 推送失败通知
+		// 推送失败通知（使用历史记录中实际的主播名）
 		if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
-			s.wxPusher.NotifyUploadFailed(room.UploadUserID, room.Wxuid, room.Uname, part.FileName, uploadErr.Error())
+			s.wxPusher.NotifyUploadFailed(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, uploadErr.Error())
 		}
 		return fmt.Errorf("上传失败: %w", uploadErr)
 	}
@@ -279,9 +279,9 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		}
 	}
 
-	// 推送成功通知
+	// 推送成功通知（使用历史记录中实际的主播名）
 	if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
-		s.wxPusher.NotifyUploadSuccess(room.UploadUserID, room.Wxuid, room.Uname, part.FileName)
+		s.wxPusher.NotifyUploadSuccess(room.UploadUserID, room.Wxuid, history.Uname, part.FileName)
 	}
 
 	// 检查是否可以投稿

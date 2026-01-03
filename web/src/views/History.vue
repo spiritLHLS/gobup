@@ -28,7 +28,7 @@
         <el-table-column type="selection" width="55" />
         <el-table-column prop="roomId" label="房间ID" width="100" />
         <el-table-column prop="title" label="标题" min-width="200" />
-        <el-table-column prop="name" label="主播" width="120" />
+        <el-table-column prop="uname" label="主播" width="120" />
         <el-table-column label="上传状态" width="200">
           <template #default="{ row }">
             <div v-if="row.uploadStatus === 1 && !row.bvId && getHistoryProgress(row.id)">

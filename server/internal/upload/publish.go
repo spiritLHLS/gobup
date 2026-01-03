@@ -56,12 +56,12 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("没有已上传的分P")
 	}
 
-	// 构建模板数据
+	// 构建模板数据（优先使用历史记录中的实际数据）
 	templateData := map[string]interface{}{
-		"uname":     room.Uname,
-		"title":     history.Title,
+		"uname":     history.Uname, // 使用历史记录中实际的主播名
+		"title":     history.Title, // 使用历史记录中实际的直播标题
 		"roomId":    history.RoomID,
-		"areaName":  history.AreaName,
+		"areaName":  history.AreaName, // 使用历史记录中实际的分区名称
 		"startTime": history.StartTime,
 		"uid":       user.UID,
 	}
@@ -173,10 +173,15 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	var videoParts []bili.PublishVideoPartRequest
 	log.Printf("开始构建%d个分P的投稿信息（按录制时间顺序）", len(parts))
 	for i, part := range parts {
+		// 为分P标题模板构建数据，包含所有可用变量
 		partTemplateData := map[string]interface{}{
 			"index":     i + 1,
 			"startTime": part.StartTime,
 			"areaName":  part.AreaName,
+			"uname":     history.Uname,  // 主播名
+			"title":     history.Title,  // 直播标题
+			"roomId":    history.RoomID, // 房间号
+			"fileName":  part.FileName,  // 文件名
 		}
 		partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
 
@@ -319,9 +324,9 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		log.Printf("创建同步任务失败: %v", err)
 	}
 
-	// 推送通知
+	// 推送通知（使用历史记录中实际的主播名）
 	if room.Wxuid != "" && containsTag(room.PushMsgTags, "投稿") {
-		s.wxPusher.NotifyPublishSuccess(room.UploadUserID, room.Wxuid, room.Uname, title, history.BvID)
+		s.wxPusher.NotifyPublishSuccess(room.UploadUserID, room.Wxuid, history.Uname, title, history.BvID)
 	}
 
 	// 发送动态
