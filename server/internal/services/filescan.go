@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,9 @@ import (
 	"github.com/gobup/server/internal/models"
 	"gorm.io/gorm"
 )
+
+// ErrFileAlreadyExists 文件已存在错误
+var ErrFileAlreadyExists = errors.New("文件已存在于数据库中")
 
 // FileScanService 文件扫描服务，用于定期扫描录制目录，发现未入库的文件
 type FileScanService struct{}
@@ -294,10 +298,17 @@ func (s *FileScanService) scanDirectory(dirPath string, config *ScanConfig, resu
 
 		// 尝试导入文件
 		if err := s.importFile(path, info); err != nil {
-			log.Printf("[FileScan] 导入文件失败: %s, error: %v", path, err)
-			result.FailedFiles++
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", filepath.Base(path), err))
+			if errors.Is(err, ErrFileAlreadyExists) {
+				// 文件已存在，计入跳过数
+				result.SkippedFiles++
+			} else {
+				// 真正的导入失败
+				log.Printf("[FileScan] 导入文件失败: %s, error: %v", path, err)
+				result.FailedFiles++
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", filepath.Base(path), err))
+			}
 		} else {
+			// 导入成功
 			result.NewFiles++
 		}
 
@@ -426,10 +437,17 @@ func (s *FileScanService) ImportSelectedFiles(filePaths []string) (*ScanResult, 
 
 		// 尝试导入文件
 		if err := s.importFile(filePath, info); err != nil {
-			log.Printf("[FileScan] 导入文件失败: %s, error: %v", filePath, err)
-			result.FailedFiles++
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", filepath.Base(filePath), err))
+			if errors.Is(err, ErrFileAlreadyExists) {
+				// 文件已存在，计入跳过数
+				result.SkippedFiles++
+			} else {
+				// 真正的导入失败
+				log.Printf("[FileScan] 导入文件失败: %s, error: %v", filePath, err)
+				result.FailedFiles++
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", filepath.Base(filePath), err))
+			}
 		} else {
+			// 导入成功
 			result.NewFiles++
 		}
 		result.TotalFiles++
@@ -450,7 +468,7 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 	if err := db.Where("file_path = ?", filePath).First(&existingPart).Error; err == nil {
 		// 文件已存在，跳过
 		log.Printf("[FileScan] 文件已存在，跳过: %s", filePath)
-		return nil
+		return ErrFileAlreadyExists
 	}
 
 	// 2. 从文件路径解析房间信息
