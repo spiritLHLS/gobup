@@ -633,9 +633,10 @@ func (s *FileScanService) parseFileMetadata(filePath string, info os.FileInfo) *
 		}
 	}
 
-	// 生成 SessionID（使用 房间号+日期 作为session标识）
-	dateStr := metadata.StartTime.Format("20060102")
-	metadata.SessionID = fmt.Sprintf("%s_%s_scan", metadata.RoomID, dateStr)
+	// 生成 SessionID（使用 房间号+日期+时间 作为session标识，避免同一天多场直播被合并）
+	// 使用小时级别的标识，同一小时内的视频可以合并
+	sessionTimeStr := metadata.StartTime.Format("2006010215") // 精确到小时
+	metadata.SessionID = fmt.Sprintf("%s_%s_scan", metadata.RoomID, sessionTimeStr)
 
 	return metadata
 }
@@ -645,15 +646,25 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 	// 先尝试通过 SessionID 查找
 	var history models.RecordHistory
 	if err := db.Where("session_id = ?", metadata.SessionID).First(&history).Error; err == nil {
-		// 找到已有记录，更新结束时间
-		if metadata.EndTime.After(history.EndTime) {
-			history.EndTime = metadata.EndTime
-			db.Save(&history)
+		// 找到已有记录，检查标题是否一致
+		// 如果标题差异较大，可能是不同的直播，不合并
+		if !s.isSimilarTitle(history.Title, metadata.Title) {
+			log.Printf("[FileScan] SessionID相同但标题差异过大，创建新记录: 已有=%s, 新=%s",
+				history.Title, metadata.Title)
+			// 修改SessionID以避免冲突
+			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().Unix())
+		} else {
+			// 标题相似，更新结束时间
+			if metadata.EndTime.After(history.EndTime) {
+				history.EndTime = metadata.EndTime
+				db.Save(&history)
+			}
+			return &history, nil
 		}
-		return &history, nil
 	}
 
-	// 如果没有找到，尝试查找同一天同一房间的最近记录（时间差在6小时内视为同一场直播）
+	// 如果没有找到，尝试查找同一天同一房间的最近记录
+	// 条件：时间差在2小时内 且 标题相似
 	var histories []models.RecordHistory
 	dayStart := metadata.StartTime.Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
@@ -661,20 +672,21 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 	err := db.Where("room_id = ? AND start_time >= ? AND start_time < ?",
 		metadata.RoomID, dayStart, dayEnd).
 		Order("end_time DESC").
-		Limit(5).
+		Limit(10).
 		Find(&histories).Error
 
 	if err == nil && len(histories) > 0 {
-		// 检查时间差
+		// 检查时间差和标题相似度
 		for _, h := range histories {
 			timeDiff := metadata.StartTime.Sub(h.EndTime)
-			if timeDiff >= 0 && timeDiff < 6*time.Hour {
+			// 时间差在2小时内，且标题相似，才合并
+			if timeDiff >= 0 && timeDiff < 2*time.Hour && s.isSimilarTitle(h.Title, metadata.Title) {
 				// 找到可合并的历史记录
 				if metadata.EndTime.After(h.EndTime) {
 					h.EndTime = metadata.EndTime
 					db.Save(&h)
 				}
-				log.Printf("[FileScan] 合并到已有历史记录: ID=%d, SessionID=%s", h.ID, h.SessionID)
+				log.Printf("[FileScan] 合并到已有历史记录: ID=%d, SessionID=%s (标题相似)", h.ID, h.SessionID)
 				return &h, nil
 			}
 		}
@@ -704,6 +716,83 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 		history.ID, history.SessionID, metadata.RoomID)
 
 	return &history, nil
+}
+
+// isSimilarTitle 判断两个标题是否相似
+// 用于判断是否为同一场直播
+func (s *FileScanService) isSimilarTitle(title1, title2 string) bool {
+	// 移除常见的编号前缀（如 "193-"）
+	cleanTitle1 := removeNumberPrefix(title1)
+	cleanTitle2 := removeNumberPrefix(title2)
+
+	// 如果清理后的标题完全相同，视为相似
+	if cleanTitle1 == cleanTitle2 {
+		return true
+	}
+
+	// 计算相似度（简单的包含关系判断）
+	// 如果一个标题包含另一个标题的主要部分（长度>5），也视为相似
+	if len(cleanTitle1) > 5 && len(cleanTitle2) > 5 {
+		if strings.Contains(cleanTitle1, cleanTitle2) || strings.Contains(cleanTitle2, cleanTitle1) {
+			return true
+		}
+	}
+
+	// 计算编辑距离或其他相似度算法
+	// 这里使用简单的单词匹配率
+	similarity := calculateTitleSimilarity(cleanTitle1, cleanTitle2)
+	return similarity > 0.6 // 相似度超过60%视为相似
+}
+
+// removeNumberPrefix 移除标题中的数字编号前缀
+func removeNumberPrefix(title string) string {
+	// 移除类似 "193-" 这样的前缀
+	parts := strings.SplitN(title, "-", 2)
+	if len(parts) == 2 {
+		// 检查第一部分是否全是数字
+		isNumber := true
+		for _, c := range parts[0] {
+			if c < '0' || c > '9' {
+				isNumber = false
+				break
+			}
+		}
+		if isNumber {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	return title
+}
+
+// calculateTitleSimilarity 计算两个标题的相似度（0-1之间）
+func calculateTitleSimilarity(title1, title2 string) float64 {
+	// 简单的字符匹配算法
+	if title1 == title2 {
+		return 1.0
+	}
+
+	// 转换为rune数组以正确处理中文
+	runes1 := []rune(title1)
+	runes2 := []rune(title2)
+
+	if len(runes1) == 0 || len(runes2) == 0 {
+		return 0.0
+	}
+
+	// 计算最长公共子序列长度
+	matchCount := 0
+	for _, r1 := range runes1 {
+		for _, r2 := range runes2 {
+			if r1 == r2 {
+				matchCount++
+				break
+			}
+		}
+	}
+
+	// 相似度 = 匹配字符数 / 平均长度
+	avgLen := float64(len(runes1)+len(runes2)) / 2.0
+	return float64(matchCount) / avgLen
 }
 
 // ScanOrphanFiles 扫描孤儿文件（数据库中有记录但文件不存在）
