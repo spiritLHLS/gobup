@@ -19,6 +19,9 @@ type APILimiter struct {
 	// 投稿API限流器 - 每分钟最多5次
 	publishLimiter *rate.Limiter
 
+	// 弹幕发送限流器 - 全局限流，防止风控
+	danmakuLimiter *rate.Limiter
+
 	// 其他API限流器 - 每秒最多2次
 	generalLimiter *rate.Limiter
 
@@ -37,6 +40,7 @@ func GetAPILimiter() *APILimiter {
 			preUploadLimiter:   rate.NewLimiter(rate.Every(1*time.Second), 1),        // 预上传：1次/秒
 			chunkUploadLimiter: rate.NewLimiter(rate.Every(350*time.Millisecond), 3), // 分片上传：3次/秒，间隔350ms
 			publishLimiter:     rate.NewLimiter(rate.Every(12*time.Second), 5),       // 投稿：5次/分钟
+			danmakuLimiter:     rate.NewLimiter(rate.Every(15*time.Second), 1),       // 弹幕：最快15秒1条，避免风控
 			generalLimiter:     rate.NewLimiter(rate.Every(500*time.Millisecond), 2), // 通用：2次/秒
 		}
 	})
@@ -62,6 +66,13 @@ func (l *APILimiter) WaitPublish() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.publishLimiter.Wait(context.Background())
+}
+
+// WaitDanmaku 等待弹幕发送API调用（全局限流）
+func (l *APILimiter) WaitDanmaku() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.danmakuLimiter.Wait(context.Background())
 }
 
 // WaitGeneral 等待通用API调用

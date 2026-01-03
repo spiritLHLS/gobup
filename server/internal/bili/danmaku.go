@@ -30,8 +30,14 @@ type SendDanmakuResponse struct {
 	} `json:"data"`
 }
 
-// SendDanmakuWithoutWait 发送弹幕
+// SendDanmakuWithoutWait 发送弹幕（带全局限流）
 func (c *BiliClient) SendDanmakuWithoutWait(cid int64, bvid string, progress int, message string, mode, fontSize, color int) error {
+	// 全局限流，确保不同用户、不同视频的弹幕发送都受到限制
+	limiter := GetAPILimiter()
+	if err := limiter.WaitDanmaku(); err != nil {
+		return fmt.Errorf("等待弹幕限流器失败: %w", err)
+	}
+
 	csrf := GetCookieValue(c.Cookies, "bili_jct")
 	if csrf == "" {
 		return fmt.Errorf("未找到CSRF token")

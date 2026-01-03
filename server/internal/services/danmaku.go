@@ -92,8 +92,8 @@ func (s *DanmakuService) getValidUsers() ([]models.BiliBiliUser, error) {
 	return validUsers, nil
 }
 
-// sendDanmakuForHistoryWithMultipleUsers 使用多个用户并行发送弹幕
-func (s *DanmakuService) sendDanmakuForHistoryWithMultipleUsers(historyID uint) error {
+// sendDanmakuForHistoryWithSerialUsers 使用多个用户串行发送弹幕
+func (s *DanmakuService) sendDanmakuForHistoryWithSerialUsers(historyID uint) error {
 	db := database.GetDB()
 
 	log.Printf("[弹幕发送] 步骤1: 开始处理历史记录 %d", historyID)
@@ -325,88 +325,103 @@ func (s *DanmakuService) sendDanmakuForHistoryWithMultipleUsers(historyID uint) 
 
 	log.Printf("[弹幕发送] 步骤10: 开始映射弹幕到分P (映射成功 %d 条)", len(danmakuItems))
 
-	// 批量发送弹幕（使用多用户并行）
+	// 串行发送弹幕（多个用户轮流发送，每个用户维护自己的随机间隔）
 	if len(danmakuItems) > 0 {
-		log.Printf("[弹幕发送] 步骤11: 开始使用 %d 个用户并行发送 %d 条弹幕到视频 %s",
+		log.Printf("[弹幕发送] 步骤11: 开始使用 %d 个用户串行发送 %d 条弹幕到视频 %s",
 			len(validUsers), len(danmakuItems), history.BvID)
 
-		// 将弹幕分配给不同的用户
 		userCount := len(validUsers)
-		var wg sync.WaitGroup
-		var mu sync.Mutex
 		successCount := 0
 		totalSent := 0
 
-		// 为每个用户创建发送任务
-		for userIdx, user := range validUsers {
-			wg.Add(1)
-			go func(userIdx int, user models.BiliBiliUser) {
-				defer wg.Done()
-
-				client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
-				userSuccessCount := 0
-				userSentCount := 0
-				consecutiveFailures := 0 // 连续失败计数
-
-				// 该用户负责的弹幕索引：userIdx, userIdx + userCount, userIdx + 2*userCount, ...
-				for i := userIdx; i < len(danmakuItems); i += userCount {
-					dm := danmakuItems[i]
-					userSentCount++
-
-					// 使用不等待的发送方法
-					err := client.SendDanmakuWithoutWait(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
-					if err != nil {
-						consecutiveFailures++
-						log.Printf("[弹幕发送] ❌ 用户%s 第%d条失败 (连续失败%d次, 进度=%dms, 内容=%s): %v",
-							user.Uname, userSentCount, consecutiveFailures, dm.Progress, dm.Message, err)
-
-						// 指数退避机制
-						if consecutiveFailures >= 3 {
-							// 连续失败3次或以上，等待10分钟
-							log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败%d次，等待10分钟后继续...", user.Uname, consecutiveFailures)
-							time.Sleep(10 * time.Minute)
-							consecutiveFailures = 0 // 重置计数器
-						} else if consecutiveFailures == 2 {
-							// 连续失败2次，等待2分钟
-							log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败2次，等待2分钟后继续...", user.Uname)
-							time.Sleep(2 * time.Minute)
-						} else {
-							// 首次失败，等待30秒
-							log.Printf("[弹幕发送] ⚠️ 用户%s 发送失败，等待30秒后继续...", user.Uname)
-							time.Sleep(30 * time.Second)
-						}
-					} else {
-						userSuccessCount++
-						consecutiveFailures = 0 // 成功后重置失败计数
-
-						// 成功后随机等待15-25秒，避免风控
-						waitTime := 15 + rand.Intn(11) // 15到25秒的随机值
-						log.Printf("[弹幕发送] ✓ 用户%s 第%d条成功，等待%d秒后继续...", user.Uname, userSentCount, waitTime)
-						time.Sleep(time.Duration(waitTime) * time.Second)
-					}
-
-					// 更新进度
-					mu.Lock()
-					totalSent++
-					if totalSent%10 == 0 || totalSent == len(danmakuItems) {
-						log.Printf("[弹幕发送] ⏳ 进度: %d/%d (%.1f%%)",
-							totalSent, len(danmakuItems), float64(totalSent)*100/float64(len(danmakuItems)))
-					}
-					danmakuprogress.SetDanmakuProgress(int64(historyID), totalSent, len(danmakuItems), true, false)
-					mu.Unlock()
-				}
-
-				log.Printf("[弹幕发送] ✅ 用户%s 发送完成: 成功 %d/%d 条",
-					user.Uname, userSuccessCount, userSentCount)
-
-				mu.Lock()
-				successCount += userSuccessCount
-				mu.Unlock()
-			}(userIdx, user)
+		// 将弹幕按用户分组
+		userDanmakuGroups := make([][]bili.DanmakuItem, userCount)
+		for i := 0; i < userCount; i++ {
+			userDanmakuGroups[i] = make([]bili.DanmakuItem, 0)
 		}
 
-		// 等待所有用户完成
-		wg.Wait()
+		// 轮流分配弹幕给各个用户
+		for i, dm := range danmakuItems {
+			userIdx := i % userCount
+			userDanmakuGroups[userIdx] = append(userDanmakuGroups[userIdx], dm)
+		}
+
+		// 用户串行发送（一个用户发送完后才轮到下一个用户）
+		for userIdx, user := range validUsers {
+			userDanmakus := userDanmakuGroups[userIdx]
+			if len(userDanmakus) == 0 {
+				continue
+			}
+
+			log.Printf("[弹幕发送] 👤 用户%s开始发送 %d 条弹幕", user.Uname, len(userDanmakus))
+
+			client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+			userSuccessCount := 0
+			consecutiveFailures := 0 // 连续失败计数
+
+			// 该用户发送其负责的所有弹幕
+			for dmIdx, dm := range userDanmakus {
+				totalSent++
+
+				// 发送弹幕
+				err := client.SendDanmakuWithoutWait(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
+				if err != nil {
+					consecutiveFailures++
+					log.Printf("[弹幕发送] ❌ 用户%s 第%d/%d条失败 (连续失败%d次, 进度=%dms, 内容=%s): %v",
+						user.Uname, dmIdx+1, len(userDanmakus), consecutiveFailures, dm.Progress, dm.Message, err)
+
+					// 指数退避机制
+					if consecutiveFailures >= 3 {
+						// 连续失败3次或以上，等待10分钟
+						log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败%d次，等待10分钟后继续...", user.Uname, consecutiveFailures)
+						time.Sleep(10 * time.Minute)
+						consecutiveFailures = 0 // 重置计数器
+					} else if consecutiveFailures == 2 {
+						// 连续失败2次，等待2分钟
+						log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败2次，等待2分钟后继续...", user.Uname)
+						time.Sleep(2 * time.Minute)
+					} else {
+						// 首次失败，等待30秒
+						log.Printf("[弹幕发送] ⚠️ 用户%s 发送失败，等待30秒后继续...", user.Uname)
+						time.Sleep(30 * time.Second)
+					}
+				} else {
+					userSuccessCount++
+					successCount++
+					consecutiveFailures = 0 // 成功后重置失败计数
+
+					// 成功后添加随机等待（全局限流器已确保至少20秒间隔）
+					// 这里只添加0-10秒的额外随机延迟，使发送时间更加随机化
+					extraWait := rand.Intn(11) // 0-10秒
+
+					if extraWait > 0 {
+						log.Printf("[弹幕发送] ✓ 用户%s 第%d/%d条成功，额外等待%d秒...",
+							user.Uname, dmIdx+1, len(userDanmakus), extraWait)
+						time.Sleep(time.Duration(extraWait) * time.Second)
+					} else {
+						log.Printf("[弹幕发送] ✓ 用户%s 第%d/%d条成功",
+							user.Uname, dmIdx+1, len(userDanmakus))
+					}
+				}
+
+				// 更新进度
+				if totalSent%10 == 0 || totalSent == len(danmakuItems) {
+					log.Printf("[弹幕发送] ⏳ 总进度: %d/%d (%.1f%%)",
+						totalSent, len(danmakuItems), float64(totalSent)*100/float64(len(danmakuItems)))
+				}
+				danmakuprogress.SetDanmakuProgress(int64(historyID), totalSent, len(danmakuItems), true, false)
+			}
+
+			log.Printf("[弹幕发送] ✅ 用户%s 发送完成: 成功 %d/%d 条",
+				user.Uname, userSuccessCount, len(userDanmakus))
+
+			// 用户切换时额外等待，进一步降低风控风险
+			if userIdx < len(validUsers)-1 {
+				switchWait := 10 + rand.Intn(11) // 10-20秒
+				log.Printf("[弹幕发送] 🔄 切换到下一个用户，等待%d秒...", switchWait)
+				time.Sleep(time.Duration(switchWait) * time.Second)
+			}
+		}
 
 		log.Printf("[弹幕发送] ✅ 全部发送完成: 成功 %d/%d 条 (成功率 %.1f%%)",
 			successCount, len(danmakuItems), float64(successCount)*100/float64(len(danmakuItems)))
