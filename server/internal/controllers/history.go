@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -334,5 +335,249 @@ func UploadHistory(c *gin.Context) {
 		"type":  "success",
 		"msg":   fmt.Sprintf("已将%d个分P添加到上传队列", successCount),
 		"count": successCount,
+	})
+}
+
+// BatchUploadHistory 批量上传历史记录
+func BatchUploadHistory(c *gin.Context) {
+	type BatchUploadReq struct {
+		HistoryIDs []uint `json:"historyIds" binding:"required"`
+		UserID     uint   `json:"userId" binding:"required"`
+	}
+
+	var req BatchUploadReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+
+	if historyUploadService == nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "上传服务未初始化"})
+		return
+	}
+
+	db := database.GetDB()
+	totalParts := 0
+	successHistories := 0
+
+	for _, historyID := range req.HistoryIDs {
+		// 获取历史记录
+		var history models.RecordHistory
+		if err := db.First(&history, historyID).Error; err != nil {
+			log.Printf("[批量上传] ⚠️  历史记录不存在 history_id=%d", historyID)
+			continue
+		}
+
+		// 获取房间信息
+		var room models.RecordRoom
+		if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
+			log.Printf("[批量上传] ⚠️  房间不存在 history_id=%d, room_id=%s", historyID, history.RoomID)
+			continue
+		}
+
+		// 获取所有未上传的分P
+		var parts []models.RecordHistoryPart
+		if err := db.Where("history_id = ? AND upload = ? AND recording = ?", historyID, false, false).
+			Order("start_time ASC").
+			Find(&parts).Error; err != nil {
+			log.Printf("[批量上传] ⚠️  查询分P失败 history_id=%d", historyID)
+			continue
+		}
+
+		if len(parts) == 0 {
+			continue
+		}
+
+		// 添加所有分P到上传队列
+		for i := range parts {
+			if err := historyUploadService.UploadPart(&parts[i], &history, &room); err != nil {
+				log.Printf("[批量上传] ⚠️  添加分P失败 part_id=%d: %v", parts[i].ID, err)
+				continue
+			}
+			totalParts++
+		}
+		successHistories++
+	}
+
+	log.Printf("[批量上传] ✅ 已添加 %d 个历史记录共 %d 个分P到队列",
+		successHistories, totalParts)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":      "success",
+		"msg":       fmt.Sprintf("已将%d个历史记录共%d个分P添加到上传队列", successHistories, totalParts),
+		"histories": successHistories,
+		"parts":     totalParts,
+		"total":     len(req.HistoryIDs),
+	})
+}
+
+// BatchPublishHistory 批量投稿历史记录
+func BatchPublishHistory(c *gin.Context) {
+	type BatchPublishReq struct {
+		HistoryIDs []uint `json:"historyIds" binding:"required"`
+		UserID     uint   `json:"userId" binding:"required"`
+	}
+
+	var req BatchPublishReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+
+	if historyUploadService == nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "上传服务未初始化"})
+		return
+	}
+
+	successCount := 0
+	failedCount := 0
+
+	for _, historyID := range req.HistoryIDs {
+		if err := historyUploadService.PublishHistory(historyID, req.UserID); err != nil {
+			log.Printf("[批量投稿] ⚠️  投稿失败 history_id=%d: %v", historyID, err)
+			failedCount++
+			continue
+		}
+		successCount++
+	}
+
+	log.Printf("[批量投稿] ✅ 完成 %d/%d (失败 %d)",
+		successCount, len(req.HistoryIDs), failedCount)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":    "success",
+		"msg":     fmt.Sprintf("投稿完成：成功%d个，失败%d个", successCount, failedCount),
+		"success": successCount,
+		"failed":  failedCount,
+		"total":   len(req.HistoryIDs),
+	})
+}
+
+// BatchResetStatus 批量重置状态
+func BatchResetStatus(c *gin.Context) {
+	type BatchResetReq struct {
+		HistoryIDs []uint `json:"historyIds" binding:"required"`
+		Upload     bool   `json:"upload"`
+		Publish    bool   `json:"publish"`
+		Danmaku    bool   `json:"danmaku"`
+		Files      bool   `json:"files"`
+	}
+
+	var req BatchResetReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+
+	db := database.GetDB()
+	successCount := 0
+
+	for _, historyID := range req.HistoryIDs {
+		var history models.RecordHistory
+		if err := db.First(&history, historyID).Error; err != nil {
+			log.Printf("[批量重置] ⚠️  历史记录不存在 history_id=%d", historyID)
+			continue
+		}
+
+		updates := make(map[string]interface{})
+
+		if req.Upload {
+			updates["upload_status"] = 0
+			// 重置分P的上传状态
+			db.Model(&models.RecordHistoryPart{}).
+				Where("history_id = ?", historyID).
+				Updates(map[string]interface{}{"upload": false})
+		}
+
+		if req.Publish {
+			updates["publish"] = false
+			updates["bv_id"] = ""
+			updates["video_state"] = -1
+			updates["video_state_desc"] = ""
+		}
+
+		if req.Danmaku {
+			updates["danmaku_sent"] = false
+			updates["danmaku_count"] = 0
+		}
+
+		if req.Files && history.FilePath != "" {
+			// 删除文件
+			filePath := history.FilePath
+			if _, err := os.Stat(filePath); err == nil {
+				os.Remove(filePath)
+			}
+			updates["file_path"] = ""
+		}
+
+		if len(updates) > 0 {
+			db.Model(&history).Updates(updates)
+			successCount++
+		}
+	}
+
+	log.Printf("[批量重置] ✅ 重置完成 %d/%d", successCount, len(req.HistoryIDs))
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":    "success",
+		"msg":     fmt.Sprintf("重置完成：成功%d个", successCount),
+		"success": successCount,
+		"total":   len(req.HistoryIDs),
+	})
+}
+
+// BatchDeleteWithFiles 批量删除记录和文件
+func BatchDeleteWithFiles(c *gin.Context) {
+	type BatchDeleteReq struct {
+		HistoryIDs []uint `json:"historyIds" binding:"required"`
+	}
+
+	var req BatchDeleteReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+
+	db := database.GetDB()
+	successCount := 0
+
+	for _, historyID := range req.HistoryIDs {
+		var history models.RecordHistory
+		if err := db.First(&history, historyID).Error; err != nil {
+			continue
+		}
+
+		// 删除文件
+		if history.FilePath != "" {
+			if _, err := os.Stat(history.FilePath); err == nil {
+				os.Remove(history.FilePath)
+				log.Printf("[批量删除] 删除文件: %s", history.FilePath)
+			}
+		}
+
+		// 获取所有分P并删除文件
+		var parts []models.RecordHistoryPart
+		db.Where("history_id = ?", historyID).Find(&parts)
+		for _, part := range parts {
+			if part.FileName != "" {
+				if _, err := os.Stat(part.FileName); err == nil {
+					os.Remove(part.FileName)
+				}
+			}
+		}
+
+		// 删除数据库记录
+		db.Delete(&models.RecordHistoryPart{}, "history_id = ?", historyID)
+		db.Delete(&history)
+		successCount++
+	}
+
+	log.Printf("[批量删除] ✅ 删除完成 %d/%d", successCount, len(req.HistoryIDs))
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":    "success",
+		"msg":     fmt.Sprintf("删除完成：成功%d个", successCount),
+		"success": successCount,
+		"total":   len(req.HistoryIDs),
 	})
 }

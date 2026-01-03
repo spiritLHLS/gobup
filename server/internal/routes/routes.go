@@ -60,19 +60,26 @@ func SetupRoutes(router *gin.Engine) {
 				// 批量操作
 				histories.POST("/batchUpdate", controllers.BatchUpdateStatus)
 				histories.POST("/batchDelete", controllers.BatchDelete)
+				histories.POST("/batchUpload", controllers.BatchUploadHistory)
+				histories.POST("/batchPublish", controllers.BatchPublishHistory)
+				histories.POST("/batchResetStatus", controllers.BatchResetStatus)
+				histories.POST("/batchDeleteWithFiles", controllers.BatchDeleteWithFiles)
 				histories.POST("/cleanOld", controllers.CleanOldHistories)
 
 				// 弹幕相关
 				histories.POST("/sendDanmaku/:id", controllers.SendDanmaku)
+				histories.POST("/batchSendDanmaku", controllers.BatchSendDanmaku)
 				histories.GET("/danmakuStats/:id", controllers.GetDanmakuStats)
 				histories.POST("/parseDanmaku/:id", controllers.ParseDanmaku)
 				histories.POST("/batchParseDanmaku", controllers.BatchParseDanmaku)
 
 				// 文件移动
 				histories.POST("/moveFiles/:id", controllers.MoveFiles)
+				histories.POST("/batchMoveFiles", controllers.BatchMoveFiles)
 
 				// 视频同步
 				histories.POST("/syncVideo/:id", controllers.SyncVideoInfo)
+				histories.POST("/batchSyncVideo", controllers.BatchSyncVideo)
 				histories.POST("/createSyncTask/:id", controllers.CreateSyncTask)
 			}
 

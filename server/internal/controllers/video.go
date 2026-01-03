@@ -49,6 +49,43 @@ func SendDanmaku(c *gin.Context) {
 	})
 }
 
+// BatchSendDanmaku 批量发送弹幕
+func BatchSendDanmaku(c *gin.Context) {
+	type BatchSendReq struct {
+		HistoryIDs []uint `json:"historyIds" binding:"required"`
+		UserID     uint   `json:"userId" binding:"required"`
+	}
+
+	var req BatchSendReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+
+	danmakuService := services.NewDanmakuService()
+	addedCount := 0
+
+	for _, historyID := range req.HistoryIDs {
+		if err := danmakuService.SendDanmakuForHistory(historyID, req.UserID); err != nil {
+			log.Printf("[批量弹幕发送] ⚠️  添加任务失败 history_id=%d: %v", historyID, err)
+			continue
+		}
+		addedCount++
+	}
+
+	queueLength := danmakuService.GetQueueManager().GetQueueLength(req.UserID)
+	log.Printf("[批量弹幕发送] ✅ 已添加 %d/%d 个任务到队列 (队列长度=%d)",
+		addedCount, len(req.HistoryIDs), queueLength)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":        "success",
+		"msg":         fmt.Sprintf("已添加%d个发送任务到队列", addedCount),
+		"added":       addedCount,
+		"total":       len(req.HistoryIDs),
+		"queueLength": queueLength,
+	})
+}
+
 // MoveFiles 移动历史记录的文件
 func MoveFiles(c *gin.Context) {
 	historyID, _ := strconv.ParseUint(c.Param("id"), 10, 32)
@@ -62,6 +99,43 @@ func MoveFiles(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "文件移动成功"})
 }
 
+// BatchMoveFiles 批量移动文件
+func BatchMoveFiles(c *gin.Context) {
+	type BatchMoveReq struct {
+		HistoryIDs []uint `json:"historyIds" binding:"required"`
+	}
+
+	var req BatchMoveReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+
+	moverService := services.NewFileMoverService()
+	successCount := 0
+	failedCount := 0
+
+	for _, historyID := range req.HistoryIDs {
+		if err := moverService.MoveFilesForHistory(historyID); err != nil {
+			log.Printf("[批量移动文件] ⚠️  移动失败 history_id=%d: %v", historyID, err)
+			failedCount++
+			continue
+		}
+		successCount++
+	}
+
+	log.Printf("[批量移动文件] ✅ 完成 %d/%d (失败 %d)",
+		successCount, len(req.HistoryIDs), failedCount)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":    "success",
+		"msg":     fmt.Sprintf("移动完成：成功%d个，失败%d个", successCount, failedCount),
+		"success": successCount,
+		"failed":  failedCount,
+		"total":   len(req.HistoryIDs),
+	})
+}
+
 // SyncVideoInfo 手动同步视频信息
 func SyncVideoInfo(c *gin.Context) {
 	historyID, _ := strconv.ParseUint(c.Param("id"), 10, 32)
@@ -73,6 +147,43 @@ func SyncVideoInfo(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "视频信息同步成功"})
+}
+
+// BatchSyncVideo 批量同步视频信息
+func BatchSyncVideo(c *gin.Context) {
+	type BatchSyncReq struct {
+		HistoryIDs []uint `json:"historyIds" binding:"required"`
+	}
+
+	var req BatchSyncReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+
+	syncService := services.NewVideoSyncService()
+	successCount := 0
+	failedCount := 0
+
+	for _, historyID := range req.HistoryIDs {
+		if err := syncService.SyncVideoInfo(historyID); err != nil {
+			log.Printf("[批量同步视频] ⚠️  同步失败 history_id=%d: %v", historyID, err)
+			failedCount++
+			continue
+		}
+		successCount++
+	}
+
+	log.Printf("[批量同步视频] ✅ 完成 %d/%d (失败 %d)",
+		successCount, len(req.HistoryIDs), failedCount)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":    "success",
+		"msg":     fmt.Sprintf("同步完成：成功%d个，失败%d个", successCount, failedCount),
+		"success": successCount,
+		"failed":  failedCount,
+		"total":   len(req.HistoryIDs),
+	})
 }
 
 // CreateSyncTask 创建视频同步任务

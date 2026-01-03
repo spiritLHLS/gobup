@@ -430,9 +430,11 @@ const handleBatchUpload = async () => {
   }
 
   try {
-    await ElMessageBox.confirm(`确定要批量上传选中的 ${selectedHistories.value.length} 项吗？`, '批量上传', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      `确定要批量上传选中的 ${selectedHistories.value.length} 项吗？`, 
+      '批量上传', 
+      { type: 'warning' }
+    )
 
     const userResponse = await axios.get('/api/biliUser/list')
     const users = userResponse.data || []
@@ -443,26 +445,22 @@ const handleBatchUpload = async () => {
     }
     
     const userId = users[0].id
+    const historyIds = selectedHistories.value.map(h => h.id)
 
-    const loadingInstance = ElLoading.service({ text: '批量上传中...' })
-    try {
-      for (const history of selectedHistories.value) {
-        try {
-          await axios.post(`/api/history/upload/${history.id}`, { userId })
-        } catch (error) {
-          console.error(`上传历史记录${history.id}失败:`, error)
-        }
-      }
-      ElMessage.success('批量上传任务已启动')
-      startHistoryProgressPolling()
-      fetchHistories()
-    } finally {
-      loadingInstance.close()
-    }
+    ElMessage.info(`正在添加 ${historyIds.length} 个上传任务...`)
+    
+    const response = await axios.post('/api/history/batchUpload', {
+      historyIds,
+      userId
+    })
+    
+    ElMessage.success(response.data.msg || '批量上传任务已启动')
+    startHistoryProgressPolling()
+    fetchHistories()
   } catch (error) {
     if (error !== 'cancel') {
       console.error('批量上传失败:', error)
-      ElMessage.error('批量上传失败')
+      ElMessage.error(error.response?.data?.msg || '批量上传失败')
     }
   }
 }
@@ -474,9 +472,11 @@ const handleBatchPublish = async () => {
   }
 
   try {
-    await ElMessageBox.confirm(`确定要批量投稿选中的 ${selectedHistories.value.length} 项吗？`, '批量投稿', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      `确定要批量投稿选中的 ${selectedHistories.value.length} 项吗？`, 
+      '批量投稿', 
+      { type: 'warning' }
+    )
 
     const userResponse = await axios.get('/api/biliUser/list')
     const users = userResponse.data || []
@@ -487,25 +487,21 @@ const handleBatchPublish = async () => {
     }
     
     const userId = users[0].id
+    const historyIds = selectedHistories.value.map(h => h.id)
 
-    const loadingInstance = ElLoading.service({ text: '批量投稿中...' })
-    try {
-      for (const history of selectedHistories.value) {
-        try {
-          await axios.post(`/api/history/publish/${history.id}`, { userId })
-        } catch (error) {
-          console.error(`投稿历史记录${history.id}失败:`, error)
-        }
-      }
-      ElMessage.success('批量投稿任务已提交')
-      fetchHistories()
-    } finally {
-      loadingInstance.close()
-    }
+    ElMessage.info(`正在添加 ${historyIds.length} 个投稿任务...`)
+    
+    const response = await axios.post('/api/history/batchPublish', {
+      historyIds,
+      userId
+    })
+    
+    ElMessage.success(response.data.msg || '批量投稿任务已提交')
+    fetchHistories()
   } catch (error) {
     if (error !== 'cancel') {
       console.error('批量投稿失败:', error)
-      ElMessage.error('批量投稿失败')
+      ElMessage.error(error.response?.data?.msg || '批量投稿失败')
     }
   }
 }
@@ -517,9 +513,11 @@ const handleBatchSendDanmaku = async () => {
   }
 
   try {
-    await ElMessageBox.confirm(`确定要批量发送弹幕到选中的 ${selectedHistories.value.length} 项吗？此操作可能需要较长时间。`, '批量发送弹幕', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      `确定要批量发送弹幕到选中的 ${selectedHistories.value.length} 项吗？此操作可能需要较长时间。`, 
+      '批量发送弹幕', 
+      { type: 'warning' }
+    )
 
     const userResponse = await axios.get('/api/biliUser/list')
     const users = userResponse.data || []
@@ -530,52 +528,28 @@ const handleBatchSendDanmaku = async () => {
     }
     
     const userId = users[0].id
+    const historyIds = selectedHistories.value.map(h => h.id)
 
-    ElMessage.info('批量发送弹幕任务已启动')
+    ElMessage.info(`正在添加 ${historyIds.length} 个发送任务到队列...`)
     
     // 启动弹幕进度轮询
     startDanmakuProgressPolling()
     
-    for (const history of selectedHistories.value) {
-      try {
-        await axios.post(`/api/history/sendDanmaku/${history.id}`, { userId })
-      } catch (error) {
-        console.error(`发送弹幕到历史记录${history.id}失败:`, error)
-      }
-    }
+    const response = await axios.post('/api/history/batchSendDanmaku', {
+      historyIds,
+      userId
+    })
     
+    ElMessage.success(response.data.msg || '批量发送任务已添加')
     fetchHistories()
   } catch (error) {
     if (error !== 'cancel') {
       console.error('批量发送弹幕失败:', error)
-      ElMessage.error('批量发送弹幕失败')
+      ElMessage.error(error.response?.data?.msg || '批量发送弹幕失败')
     }
   }
 }
 
-// 批量解析弹幕
-const handleBatchParseDanmaku = async () => {
-  if (selectedHistories.value.length === 0) {
-    ElMessage.warning('请先选择记录')
-    return
-  }
-
-  try {
-    const historyIds = selectedHistories.value.map(h => h.id)
-    await handleBatchParseDanmaku(historyIds, async () => {
-      await fetchHistories()
-    })
-  } catch (error) {
-    console.error('批量解析弹幕失败:', error)
-  }
-}
-
-// 对话框中解析弹幕
-const handleParseDanmakuInDialog = async () => {
-  await handleParseDanmaku(currentHistory.value, async () => {
-    await fetchHistories()
-    actionsDialogVisible.value = false
-  })
 // 批量解析弹幕
 const handleBatchParseDanmaku = async () => {
   if (selectedHistories.value.length === 0) {
@@ -601,8 +575,6 @@ const handleParseDanmakuInDialog = async () => {
   })
 }
 
-}
-
 const handleBatchSyncVideo = async () => {
   if (selectedHistories.value.length === 0) {
     ElMessage.warning('请先选择记录')
@@ -610,28 +582,25 @@ const handleBatchSyncVideo = async () => {
   }
 
   try {
-    await ElMessageBox.confirm(`确定要批量同步选中的 ${selectedHistories.value.length} 项的视频信息吗？`, '批量同步', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      `确定要批量同步选中的 ${selectedHistories.value.length} 项的视频信息吗？`, 
+      '批量同步', 
+      { type: 'warning' }
+    )
 
-    const loadingInstance = ElLoading.service({ text: '批量同步中...' })
-    try {
-      for (const history of selectedHistories.value) {
-        try {
-          await axios.post(`/api/history/syncVideo/${history.id}`)
-        } catch (error) {
-          console.error(`同步历史记录${history.id}失败:`, error)
-        }
-      }
-      ElMessage.success('批量同步成功')
-      fetchHistories()
-    } finally {
-      loadingInstance.close()
-    }
+    const historyIds = selectedHistories.value.map(h => h.id)
+    ElMessage.info(`正在同步 ${historyIds.length} 个视频信息...`)
+    
+    const response = await axios.post('/api/history/batchSyncVideo', {
+      historyIds
+    })
+    
+    ElMessage.success(response.data.msg || '批量同步成功')
+    fetchHistories()
   } catch (error) {
     if (error !== 'cancel') {
       console.error('批量同步失败:', error)
-      ElMessage.error('批量同步失败')
+      ElMessage.error(error.response?.data?.msg || '批量同步失败')
     }
   }
 }
@@ -643,28 +612,25 @@ const handleBatchMoveFiles = async () => {
   }
 
   try {
-    await ElMessageBox.confirm(`确定要批量移动选中的 ${selectedHistories.value.length} 项的文件吗？`, '批量移动文件', {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      `确定要批量移动选中的 ${selectedHistories.value.length} 项的文件吗？`, 
+      '批量移动文件', 
+      { type: 'warning' }
+    )
 
-    const loadingInstance = ElLoading.service({ text: '批量移动文件中...' })
-    try {
-      for (const history of selectedHistories.value) {
-        try {
-          await axios.post(`/api/history/moveFiles/${history.id}`)
-        } catch (error) {
-          console.error(`移动历史记录${history.id}文件失败:`, error)
-        }
-      }
-      ElMessage.success('批量移动文件成功')
-      fetchHistories()
-    } finally {
-      loadingInstance.close()
-    }
+    const historyIds = selectedHistories.value.map(h => h.id)
+    ElMessage.info(`正在移动 ${historyIds.length} 个历史记录的文件...`)
+    
+    const response = await axios.post('/api/history/batchMoveFiles', {
+      historyIds
+    })
+    
+    ElMessage.success(response.data.msg || '批量移动文件成功')
+    fetchHistories()
   } catch (error) {
     if (error !== 'cancel') {
       console.error('批量移动文件失败:', error)
-      ElMessage.error('批量移动文件失败')
+      ElMessage.error(error.response?.data?.msg || '批量移动文件失败')
     }
   }
 }
@@ -686,21 +652,17 @@ const handleBatchResetStatus = () => {
 
 const confirmBatchReset = async (options) => {
   try {
-    const loadingInstance = ElLoading.service({ text: '批量重置中...' })
-    try {
-      for (const history of selectedHistories.value) {
-        try {
-          await axios.post(`/api/history/resetStatus/${history.id}`, options)
-        } catch (error) {
-          console.error(`重置历史记录${history.id}失败:`, error)
-        }
-      }
-      ElMessage.success('批量重置成功')
-      batchResetDialogVisible.value = false
-      fetchHistories()
-    } finally {
-      loadingInstance.close()
-    }
+    const historyIds = selectedHistories.value.map(h => h.id)
+    ElMessage.info(`正在重置 ${historyIds.length} 个历史记录...`)
+    
+    const response = await axios.post('/api/history/batchResetStatus', {
+      historyIds,
+      ...options
+    })
+    
+    ElMessage.success(response.data.msg || '批量重置成功')
+    batchResetDialogVisible.value = false
+    fetchHistories()
   } catch (error) {
     console.error('批量重置失败:', error)
     ElMessage.error(error.response?.data?.msg || '批量重置失败')
@@ -720,20 +682,13 @@ const handleBatchDeleteOnly = async () => {
       { type: 'warning' }
     )
     
-    const loadingInstance = ElLoading.service({ text: '批量删除中...' })
-    try {
-      for (const history of selectedHistories.value) {
-        try {
-          await axios.get(`/api/history/delete/${history.id}`)
-        } catch (error) {
-          console.error(`删除历史记录${history.id}失败:`, error)
-        }
-      }
-      ElMessage.success('批量删除记录成功')
-      fetchHistories()
-    } finally {
-      loadingInstance.close()
-    }
+    const ids = selectedHistories.value.map(h => h.id)
+    ElMessage.info(`正在删除 ${ids.length} 条记录...`)
+    
+    const response = await axios.post('/api/history/batchDelete', { ids })
+    
+    ElMessage.success(response.data.msg || '批量删除记录成功')
+    fetchHistories()
   } catch (error) {
     if (error !== 'cancel') {
       console.error('批量删除失败:', error)
@@ -755,20 +710,15 @@ const handleBatchDeleteWithFiles = async () => {
       { type: 'error', confirmButtonText: '确定删除' }
     )
     
-    const loadingInstance = ElLoading.service({ text: '批量删除中...' })
-    try {
-      for (const history of selectedHistories.value) {
-        try {
-          await axios.post(`/api/history/deleteWithFiles/${history.id}`)
-        } catch (error) {
-          console.error(`删除历史记录${history.id}和文件失败:`, error)
-        }
-      }
-      ElMessage.success('批量删除记录和文件成功')
-      fetchHistories()
-    } finally {
-      loadingInstance.close()
-    }
+    const historyIds = selectedHistories.value.map(h => h.id)
+    ElMessage.info(`正在删除 ${historyIds.length} 条记录及其文件...`)
+    
+    const response = await axios.post('/api/history/batchDeleteWithFiles', {
+      historyIds
+    })
+    
+    ElMessage.success(response.data.msg || '批量删除记录和文件成功')
+    fetchHistories()
   } catch (error) {
     if (error !== 'cancel') {
       console.error('批量删除失败:', error)
