@@ -309,6 +309,12 @@ func (p *DanmakuXMLParser) parseRawData(raw string, msg *models.LiveMsg) {
 		if name, ok := medalInfo[1].(string); ok {
 			msg.MedalName = name
 		}
+		// 解析勋章所属的房间ID（索引3）
+		if roomID, ok := medalInfo[3].(float64); ok {
+			msg.MedalRoomID = fmt.Sprintf("%.0f", roomID)
+		} else if roomIDStr, ok := medalInfo[3].(string); ok {
+			msg.MedalRoomID = roomIDStr
+		}
 	}
 
 	// 解析用户等级信息 rawData[4]

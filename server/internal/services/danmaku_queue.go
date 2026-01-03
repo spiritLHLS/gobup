@@ -60,23 +60,30 @@ func (q *UserDanmakuQueue) process() {
 		log.Printf("[弹幕队列] 🏁 用户%d的队列处理完毕", q.userID)
 	}()
 
-	for task := range q.tasks {
-		log.Printf("[弹幕队列] 🎬 开始处理用户%d的弹幕发送任务: history_id=%d (剩余队列: %d)",
-			q.userID, task.HistoryID, len(q.tasks))
+	for {
+		select {
+		case task := <-q.tasks:
+			log.Printf("[弹幕队列] 🎬 开始处理用户%d的弹幕发送任务: history_id=%d (剩余队列: %d)",
+				q.userID, task.HistoryID, len(q.tasks))
 
-		// 执行弹幕发送
-		if err := q.service.sendDanmakuForHistoryInternal(task.HistoryID, task.UserID); err != nil {
-			log.Printf("[弹幕队列] ❌ 用户%d的弹幕发送任务失败: history_id=%d, error=%v",
-				q.userID, task.HistoryID, err)
-		} else {
-			log.Printf("[弹幕队列] ✅ 用户%d的弹幕发送任务成功: history_id=%d",
-				q.userID, task.HistoryID)
-		}
+			// 执行弹幕发送
+			if err := q.service.sendDanmakuForHistoryInternal(task.HistoryID, task.UserID); err != nil {
+				log.Printf("[弹幕队列] ❌ 用户%d的弹幕发送任务失败: history_id=%d, error=%v",
+					q.userID, task.HistoryID, err)
+			} else {
+				log.Printf("[弹幕队列] ✅ 用户%d的弹幕发送任务成功: history_id=%d",
+					q.userID, task.HistoryID)
+			}
 
-		// 队列为空时退出
-		if len(q.tasks) == 0 {
+			// 队列为空时退出
+			if len(q.tasks) == 0 {
+				log.Printf("[弹幕队列] ℹ️  用户%d的队列已空，准备退出处理循环", q.userID)
+				return
+			}
+		default:
+			// 如果没有任务了，退出
 			log.Printf("[弹幕队列] ℹ️  用户%d的队列已空，准备退出处理循环", q.userID)
-			break
+			return
 		}
 	}
 }

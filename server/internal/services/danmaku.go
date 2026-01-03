@@ -119,11 +119,9 @@ func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID ui
 		query = query.Where("medal_level > 0")
 		log.Printf("[弹幕发送] 应用粉丝勋章过滤: 必须佩戴粉丝勋章")
 	} else if room.DmMedalLevel == 2 {
-		// 必须佩戴主播粉丝勋章
-		if room.Uname != "" {
-			query = query.Where("medal_name = ?", room.Uname)
-			log.Printf("[弹幕发送] 应用粉丝勋章过滤: 必须佩戴主播【%s】的粉丝勋章", room.Uname)
-		}
+		// 必须佩戴主播粉丝勋章（通过房间ID匹配）
+		query = query.Where("medal_room_id = ?", history.RoomID)
+		log.Printf("[弹幕发送] 应用粉丝勋章过滤: 必须佩戴主播【%s】(房间%s)的粉丝勋章", room.Uname, history.RoomID)
 	}
 
 	// 关键词屏蔽
