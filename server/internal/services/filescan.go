@@ -466,9 +466,25 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 	// 1. 检查文件是否已存在于数据库
 	var existingPart models.RecordHistoryPart
 	if err := db.Where("file_path = ?", filePath).First(&existingPart).Error; err == nil {
-		// 文件已存在，跳过
-		log.Printf("[FileScan] 文件已存在，跳过: %s", filePath)
-		return ErrFileAlreadyExists
+		// 文件已存在，检查对应的历史记录是否存在
+		var existingHistory models.RecordHistory
+		if err := db.Where("id = ?", existingPart.HistoryID).First(&existingHistory).Error; err != nil {
+			// 历史记录不存在，这是一个孤儿分P记录，需要修复
+			log.Printf("[FileScan] ⚠️  发现孤儿分P记录: PartID=%d, FilePath=%s, HistoryID=%d 不存在",
+				existingPart.ID, filePath, existingPart.HistoryID)
+
+			// 删除孤儿分P记录，重新导入
+			if err := db.Delete(&existingPart).Error; err != nil {
+				log.Printf("[FileScan] 删除孤儿分P记录失败: %v", err)
+				return fmt.Errorf("删除孤儿分P记录失败: %w", err)
+			}
+			log.Printf("[FileScan] 已删除孤儿分P记录，将重新导入文件: %s", filePath)
+			// 继续执行后续的导入逻辑
+		} else {
+			// 历史记录存在，文件正常跳过
+			log.Printf("[FileScan] 文件已存在，跳过: %s", filePath)
+			return ErrFileAlreadyExists
+		}
 	}
 
 	// 2. 从文件路径解析房间信息
