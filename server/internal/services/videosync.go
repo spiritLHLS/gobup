@@ -234,10 +234,19 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 	if history.AvID != "" {
 		updates["av_id"] = history.AvID
 	}
-	// 更新主播名字（如果API返回了owner信息）
-	if videoInfo.Owner.Name != "" {
-		updates["uname"] = videoInfo.Owner.Name
-		log.Printf("更新主播名字: %s", videoInfo.Owner.Name)
+	// 更新主播名字（从直播间API获取，而不是从视频owner获取）
+	liveStatusService := NewLiveStatusService()
+	roomInfo, roomErr := liveStatusService.GetRoomInfo(history.RoomID)
+	if roomErr == nil && roomInfo.Data.UID > 0 {
+		userInfo, userErr := liveStatusService.GetUserInfo(roomInfo.Data.UID)
+		if userErr == nil && userInfo.Data.Info.Uname != "" {
+			updates["uname"] = userInfo.Data.Info.Uname
+			log.Printf("更新主播名字: %s (UID=%d)", userInfo.Data.Info.Uname, roomInfo.Data.UID)
+		} else {
+			log.Printf("获取主播名字失败: %v", userErr)
+		}
+	} else {
+		log.Printf("获取直播间信息失败: %v", roomErr)
 	}
 	if err := db.Model(&history).Updates(updates).Error; err != nil {
 		log.Printf("更新历史记录同步信息失败: %v", err)
