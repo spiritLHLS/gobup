@@ -361,9 +361,11 @@ class BrecImporterDB:
         if not start_time:
             start_time = mtime.strftime('%Y-%m-%d %H:%M:%S')
         
-        # 提取标题
-        title_match = re.search(r'-([^-]+)$', filename)
-        title = title_match.group(1) if title_match else filename
+        # 提取标题 - 匹配最后一个 - 之后到扩展名之前的内容
+        # 例如: 录制-843-20250103-120000-新年第一天直播 紧张.flv -> 新年第一天直播 紧张
+        filename_without_ext = os.path.splitext(filename)[0]
+        title_match = re.search(r'-([^-]+)$', filename_without_ext)
+        title = title_match.group(1) if title_match else filename_without_ext
         
         # 生成 session_id（同一场直播的多个文件使用相同的 session_id）
         # 策略：使用 房间号 + 日期 作为session标识

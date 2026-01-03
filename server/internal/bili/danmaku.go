@@ -2,7 +2,9 @@ package bili
 
 import (
 	"fmt"
+	"log"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -82,11 +84,31 @@ func (c *BiliClient) SendDanmaku(cid int64, bvid string, progress int, message s
 	}
 
 	if resp.Code != 0 {
-		return fmt.Errorf("发送弹幕失败: %s (code=%d)", resp.Message, resp.Code)
+		// 详细的错误码处理
+		switch resp.Code {
+		case 36701:
+			return fmt.Errorf("弹幕包含被禁止的内容 (code=%d)", resp.Code)
+		case 36702:
+			return fmt.Errorf("弹幕长度超过100字符 (code=%d)", resp.Code)
+		case 36703:
+			return fmt.Errorf("发送频率过快，需要等待 (code=%d)", resp.Code)
+		case 36704:
+			return fmt.Errorf("禁止向未审核的视频发送弹幕 (code=%d)", resp.Code)
+		case 36714:
+			return fmt.Errorf("弹幕发送时间不合法 (code=%d)", resp.Code)
+		case -101:
+			return fmt.Errorf("账号未登录 (code=%d)", resp.Code)
+		case -102:
+			return fmt.Errorf("账号被封停 (code=%d)", resp.Code)
+		case -111:
+			return fmt.Errorf("csrf校验失败 (code=%d)", resp.Code)
+		default:
+			return fmt.Errorf("发送弹幕失败: %s (code=%d)", resp.Message, resp.Code)
+		}
 	}
 
-	// 控制发送速率，避免被限制
-	time.Sleep(time.Second)
+	// 控制发送速率，避免被限制 - 成功后等待较长时间
+	time.Sleep(25 * time.Second)
 
 	return nil
 }
@@ -94,17 +116,50 @@ func (c *BiliClient) SendDanmaku(cid int64, bvid string, progress int, message s
 // BatchSendDanmaku 批量发送弹幕（自动限速）
 func (c *BiliClient) BatchSendDanmaku(danmakus []DanmakuItem) (int, error) {
 	successCount := 0
+	failedCount := 0
 	for i, dm := range danmakus {
 		err := c.SendDanmaku(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
 		if err != nil {
-			return successCount, fmt.Errorf("发送第%d条弹幕失败: %w", i+1, err)
+			failedCount++
+			// 检查错误类型
+			if strings.Contains(err.Error(), "36703") {
+				// 发送频率过快，等待120秒后继续
+				log.Printf("[弹幕发送] ⚠️  发送频率过快，等待120秒... (已发送%d/%d)", i+1, len(danmakus))
+				time.Sleep(120 * time.Second)
+				// 重试当前弹幕
+				err = c.SendDanmaku(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
+				if err == nil {
+					successCount++
+					failedCount--
+				}
+			} else if strings.Contains(err.Error(), "36704") {
+				// 视频未审核通过，停止发送
+				log.Printf("[弹幕发送] ❌ 视频未审核通过，停止发送 (已发送%d/%d)", successCount, len(danmakus))
+				return successCount, fmt.Errorf("视频未审核通过: %w", err)
+			} else if strings.Contains(err.Error(), "36701") || strings.Contains(err.Error(), "36702") || strings.Contains(err.Error(), "36714") {
+				// 弹幕内容/长度/时间问题，跳过这条弹幕
+				log.Printf("[弹幕发送] ⚠️  跳过问题弹幕: %v", err)
+				continue
+			} else if strings.Contains(err.Error(), "-101") || strings.Contains(err.Error(), "-102") || strings.Contains(err.Error(), "-111") {
+				// 账号问题，停止发送
+				log.Printf("[弹幕发送] ❌ 账号异常，停止发送: %v", err)
+				return successCount, err
+			} else {
+				log.Printf("[弹幕发送] ⚠️  发送失败: %v", err)
+			}
+		} else {
+			successCount++
 		}
-		successCount++
 
-		// 每10条休息一下
+		// 每10条额外休息一下
 		if (i+1)%10 == 0 {
+			log.Printf("[弹幕发送] ⏸️  已发送10条，休息5秒... (进度: %d/%d)", i+1, len(danmakus))
 			time.Sleep(5 * time.Second)
 		}
+	}
+
+	if failedCount > 0 {
+		log.Printf("[弹幕发送] ⚠️  批量发送完成: 成功%d条, 失败%d条", successCount, failedCount)
 	}
 
 	return successCount, nil

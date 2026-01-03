@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -203,6 +204,10 @@ func (p *DanmakuXMLParser) parseDanmaku(d D, sessionID string) (*models.LiveMsg,
 	// 如果有raw数据（blrec格式），可以解析更多信息
 	if d.Raw != "" {
 		p.parseRawData(d.Raw, msg)
+		// 检查是否为抽奖弹幕（parseRawData会将抽奖弹幕的message设为空）
+		if msg.Message == "" {
+			return nil, fmt.Errorf("抽奖弹幕，已过滤")
+		}
 	}
 
 	return msg, nil
@@ -284,10 +289,49 @@ func (p *DanmakuXMLParser) parseGuard(guard Guard, sessionID string) (*models.Li
 
 // parseRawData 解析原始数据（blrec格式）
 func (p *DanmakuXMLParser) parseRawData(raw string, msg *models.LiveMsg) {
-	// raw格式是JSON数组字符串，例如: [[时间,模式,字号,颜色,...],[...],[粉丝勋章信息],[用户等级,...],...]
-	// 这里做简化处理，仅提取用户等级
-	// 实际实现可以使用json.Unmarshal进行完整解析
-	// 由于raw格式复杂，这里暂不实现完整解析
+	// raw格式: [[时间,模式,字号,颜色,时间戳,弹幕池,用户ID,弹幕ID,权重,抽奖标志],[...],[粉丝勋章信息],[用户等级,...],...]
+	var rawData []interface{}
+	if err := json.Unmarshal([]byte(raw), &rawData); err != nil {
+		return
+	}
+
+	if len(rawData) < 5 {
+		return
+	}
+
+	// 解析基本信息 rawData[0]
+	if basicInfo, ok := rawData[0].([]interface{}); ok && len(basicInfo) >= 10 {
+		// 检查是否为抽奖弹幕（索引9）
+		if lottery, ok := basicInfo[9].(float64); ok && int(lottery) != 0 {
+			msg.Message = "" // 标记为需要过滤的抽奖弹幕
+			return
+		}
+	}
+
+	// 解析粉丝勋章信息 rawData[3]
+	if medalInfo, ok := rawData[3].([]interface{}); ok && len(medalInfo) >= 4 {
+		// [勋章等级, 勋章名称, 主播名称, 房间ID]
+		if level, ok := medalInfo[0].(float64); ok {
+			msg.MedalLevel = int(level)
+		}
+		if name, ok := medalInfo[1].(string); ok {
+			msg.MedalName = name
+		}
+	}
+
+	// 解析用户等级信息 rawData[4]
+	if userInfo, ok := rawData[4].([]interface{}); ok && len(userInfo) >= 1 {
+		if ulLevel, ok := userInfo[0].(float64); ok {
+			msg.ULevel = int(ulLevel)
+		}
+	}
+
+	// 解析用户名 rawData[2] 可能包含用户名
+	if userNameInfo, ok := rawData[2].([]interface{}); ok && len(userNameInfo) >= 2 {
+		if userName, ok := userNameInfo[1].(string); ok {
+			msg.UserName = userName
+		}
+	}
 }
 
 // ParseDanmakuForHistory 为历史记录解析弹幕XML文件

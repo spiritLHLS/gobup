@@ -573,7 +573,7 @@ func (s *FileScanService) parseFileMetadata(filePath string, info os.FileInfo) *
 		}
 	}
 
-	// 尝试从文件名解析（录播姬格式：录制-房间号-日期-时间-标题.flv）
+	// 尝试从文件名解析（录播姬格式：录制-房间号-日期-时间-编号-标题.flv）
 	if strings.HasPrefix(fileName, "录制-") || strings.HasPrefix(fileName, "record-") {
 		fields := strings.Split(fileName, "-")
 		if len(fields) >= 3 {
@@ -589,11 +589,12 @@ func (s *FileScanService) parseFileMetadata(filePath string, info os.FileInfo) *
 				}
 			}
 
-			// 提取标题
+			// 提取标题 - 取最后一个 - 之后的内容
+			// 格式: 录制-5050-20260101-183709-843-新年第一天直播 紧张.flv
 			if len(fields) >= 5 {
-				titleParts := fields[4:]
-				metadata.Title = strings.Join(titleParts, "-")
-				metadata.Title = strings.TrimSuffix(metadata.Title, filepath.Ext(fileName))
+				// 标题是最后一个字段，去除扩展名
+				metadata.Title = fields[len(fields)-1]
+				metadata.Title = strings.TrimSuffix(metadata.Title, filepath.Ext(metadata.Title))
 			}
 		}
 	}

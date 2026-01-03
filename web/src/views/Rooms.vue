@@ -23,8 +23,8 @@
 
       <el-table :data="rooms" style="width: 100%" v-loading="loading">
         <el-table-column prop="roomId" label="房间ID" width="100" />
-        <el-table-column prop="uname" label="主播" width="120" />
-        <el-table-column prop="title" label="房间标题" min-width="200" />
+        <el-table-column prop="uname" label="主播" width="180" />
+        <el-table-column prop="title" label="房间标题" min-width="150" show-overflow-tooltip />
         <el-table-column label="启用上传" width="100">
           <template #default="{ row }">
             <el-tag :type="row.upload ? 'success' : 'info'">

@@ -104,33 +104,41 @@ func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID ui
 	// 获取弹幕列表（应用过滤规则）
 	var danmakus []models.LiveMsg
 	query := db.Where("session_id = ? AND sent = ?", history.SessionID, false).
+		Where("message != '' AND message IS NOT NULL"). // 过滤空弹幕和抽奖弹幕
 		Order("timestamp ASC")
 
 	// 应用弹幕过滤规则
 	if room.DmUlLevel > 0 {
 		// 用户等级过滤（佩戴勋章的不受影响）
 		query = query.Where("u_level >= ? OR medal_level > 0", room.DmUlLevel)
+		log.Printf("[弹幕发送] 应用用户等级过滤: >= %d (佩戴勋章者不受限)", room.DmUlLevel)
 	}
 
 	if room.DmMedalLevel == 1 {
 		// 必须佩戴粉丝勋章
 		query = query.Where("medal_level > 0")
+		log.Printf("[弹幕发送] 应用粉丝勋章过滤: 必须佩戴粉丝勋章")
 	} else if room.DmMedalLevel == 2 {
-		// 必须佩戴主播粉丝勋章（需要额外逻辑判断）
-		// 这里简化处理，只要有勋章名称匹配即可
+		// 必须佩戴主播粉丝勋章
 		if room.Uname != "" {
 			query = query.Where("medal_name = ?", room.Uname)
+			log.Printf("[弹幕发送] 应用粉丝勋章过滤: 必须佩戴主播【%s】的粉丝勋章", room.Uname)
 		}
 	}
 
 	// 关键词屏蔽
 	if room.DmKeywordBlacklist != "" {
 		keywords := strings.Split(room.DmKeywordBlacklist, "\n")
+		keywordCount := 0
 		for _, keyword := range keywords {
 			keyword = strings.TrimSpace(keyword)
 			if keyword != "" {
-				query = query.Where("message NOT LIKE ?", "%"+keyword+"%")
+				query = query.Where("LOWER(message) NOT LIKE ?", "%"+strings.ToLower(keyword)+"%")
+				keywordCount++
 			}
+		}
+		if keywordCount > 0 {
+			log.Printf("[弹幕发送] 应用关键词屏蔽: %d 个关键词", keywordCount)
 		}
 	}
 
@@ -322,17 +330,20 @@ func (s *DanmakuService) sendDanmakuForHistoryInternal(historyID uint, userID ui
 	return nil
 }
 
-// deduplicateDanmakus 弹幕去重
+// deduplicateDanmakus 弹幕去重（参考biliupforjava的布隆过滤器实现）
 func (s *DanmakuService) deduplicateDanmakus(danmakus []models.LiveMsg) []models.LiveMsg {
 	seen := make(map[string]bool)
 	result := make([]models.LiveMsg, 0, len(danmakus))
 
 	for _, dm := range danmakus {
-		// 使用"用户ID+内容"作为去重key
-		key := fmt.Sprintf("%d:%s", dm.UID, dm.Message)
+		// 使用消息内容作为去重key（忽略大小写和空白字符）
+		// 参考 LiveMsgService.java 的实现
+		key := strings.ToLower(strings.TrimSpace(strings.ReplaceAll(dm.Message, " ", "")))
 		if !seen[key] {
 			seen[key] = true
 			result = append(result, dm)
+		} else {
+			log.Printf("[弹幕发送] 去重: 过滤重复弹幕 '%s'", dm.Message)
 		}
 	}
 
