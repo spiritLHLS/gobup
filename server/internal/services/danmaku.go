@@ -21,11 +21,6 @@ type DanmakuService struct {
 var (
 	danmakuServiceInstance *DanmakuService
 	danmakuServiceOnce     sync.Once
-	// 全局弹幕发送计数器（用于限制连续发送）
-	globalDanmakuCounter     int
-	globalDanmakuCounterLock sync.Mutex
-	globalDanmakuLimit       = 100 // 连续发送100条后等待
-	globalDanmakuWaitTime    = 3 * time.Minute
 )
 
 // shouldLogProgress 判断是否应该记录进度日志
@@ -412,19 +407,6 @@ func (s *DanmakuService) sendDanmakuSerial(validUsers []models.BiliBiliUser, use
 		for dmIdx, dm := range userDanmakus {
 			totalSent++
 
-			// 检查全局计数器，每发送100条后等待3分钟
-			globalDanmakuCounterLock.Lock()
-			globalDanmakuCounter++
-			if globalDanmakuCounter >= globalDanmakuLimit {
-				log.Printf("[弹幕发送] ⏸️  已连续发送%d条弹幕，等待%v以避免风控...", globalDanmakuCounter, globalDanmakuWaitTime)
-				globalDanmakuCounterLock.Unlock()
-				time.Sleep(globalDanmakuWaitTime)
-				globalDanmakuCounterLock.Lock()
-				globalDanmakuCounter = 0
-				log.Printf("[弹幕发送] ▶️  等待结束，继续发送弹幕")
-			}
-			globalDanmakuCounterLock.Unlock()
-
 			// 发送弹幕
 			err := client.SendDanmakuWithoutWait(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
 			if err != nil {
@@ -432,19 +414,19 @@ func (s *DanmakuService) sendDanmakuSerial(validUsers []models.BiliBiliUser, use
 				log.Printf("[弹幕发送] 用户%s 第%d/%d条失败 (连续失败%d次, 进度=%dms, 内容=%s): %v",
 					user.Uname, dmIdx+1, len(userDanmakus), consecutiveFailures, dm.Progress, dm.Message, err)
 
-				// 指数退避机制：30秒 -> 1分钟 -> 5分钟 -> 10分钟 -> 15分钟
+				// 指数退避机制：2分钟 -> 4分钟 -> 8分钟 -> 16分钟 -> 30分钟
 				var waitTime time.Duration
 				switch consecutiveFailures {
 				case 1:
-					waitTime = 30 * time.Second
+					waitTime = 2 * time.Minute
 				case 2:
-					waitTime = 1 * time.Minute
+					waitTime = 4 * time.Minute
 				case 3:
-					waitTime = 5 * time.Minute
+					waitTime = 8 * time.Minute
 				case 4:
-					waitTime = 10 * time.Minute
+					waitTime = 16 * time.Minute
 				default:
-					waitTime = 15 * time.Minute
+					waitTime = 30 * time.Minute
 				}
 				log.Printf("[弹幕发送] 用户%s 连续失败%d次，等待%v后继续...", user.Uname, consecutiveFailures, waitTime)
 				time.Sleep(waitTime)
@@ -507,19 +489,6 @@ func (s *DanmakuService) sendDanmakuWithProxyPool(validUsers []models.BiliBiliUs
 			log.Printf("[弹幕发送] 用户%s 开始发送 %d 条弹幕", user.Uname, len(danmakus))
 
 			for dmIdx, dm := range danmakus {
-				// 检查全局计数器，每发送100条后等待3分钟
-				globalDanmakuCounterLock.Lock()
-				globalDanmakuCounter++
-				if globalDanmakuCounter >= globalDanmakuLimit {
-					log.Printf("[弹幕发送] ⏸️  已连续发送%d条弹幕，等待%v以避免风控...", globalDanmakuCounter, globalDanmakuWaitTime)
-					globalDanmakuCounterLock.Unlock()
-					time.Sleep(globalDanmakuWaitTime)
-					globalDanmakuCounterLock.Lock()
-					globalDanmakuCounter = 0
-					log.Printf("[弹幕发送] ▶️  等待结束，继续发送弹幕")
-				}
-				globalDanmakuCounterLock.Unlock()
-
 				// 获取下一个可用代理（跳过不可达的代理）
 				proxyInfo := proxyPool.GetNextAvailableProxy()
 				if proxyInfo == nil {
@@ -548,22 +517,22 @@ func (s *DanmakuService) sendDanmakuWithProxyPool(validUsers []models.BiliBiliUs
 					log.Printf("[弹幕发送] 用户%s 代理%s 第%d/%d条失败 (连续失败%d次): %v",
 						user.Uname, proxyInfo.String(), dmIdx+1, len(danmakus), consecutiveFailures, err)
 
-					// 指数退避
+					// 指数退避：2分钟 -> 4分钟 -> 8分钟 -> 16分钟 -> 30分钟
 					var waitTime time.Duration
 					switch consecutiveFailures {
 					case 1:
-						waitTime = 30 * time.Second
+						waitTime = 2 * time.Minute
 					case 2:
-						waitTime = 1 * time.Minute
+						waitTime = 4 * time.Minute
 					case 3:
-						waitTime = 5 * time.Minute
+						waitTime = 8 * time.Minute
+					case 4:
+						waitTime = 16 * time.Minute
 					default:
-						waitTime = 10 * time.Minute
+						waitTime = 30 * time.Minute
 					}
-					if consecutiveFailures >= 3 {
-						log.Printf("[弹幕发送] 用户%s 连续失败%d次，等待%v后继续...", user.Uname, consecutiveFailures, waitTime)
-						time.Sleep(waitTime)
-					}
+					log.Printf("[弹幕发送] 用户%s 连续失败%d次，等待%v后继续...", user.Uname, consecutiveFailures, waitTime)
+					time.Sleep(waitTime)
 				} else {
 					userSuccessCount++
 					mu.Lock()

@@ -15,11 +15,13 @@ import (
 
 // ProxyInfo 代理信息
 type ProxyInfo struct {
-	URL       string        // 代理URL
-	Limiter   *rate.Limiter // 每个代理独立的限流器
-	mu        sync.Mutex
-	Available bool // 代理是否可用
-	LastCheck time.Time
+	URL           string        // 代理URL
+	Limiter       *rate.Limiter // 每个代理独立的限流器
+	mu            sync.Mutex
+	Available     bool // 代理是否可用
+	LastCheck     time.Time
+	SentCount     int       // 该IP已发送的弹幕数
+	LastResetTime time.Time // 上次重置计数的时间
 }
 
 // ProxyPool 代理池
@@ -41,10 +43,12 @@ func NewProxyPool(proxyURLs []string) *ProxyPool {
 
 	// 添加本地IP（nil表示不使用代理）
 	pool.proxies = append(pool.proxies, &ProxyInfo{
-		URL:       "", // 空字符串表示本地IP
-		Limiter:   pool.localLimiter,
-		Available: true,
-		LastCheck: time.Now(),
+		URL:           "", // 空字符串表示本地IP
+		Limiter:       pool.localLimiter,
+		Available:     true,
+		LastCheck:     time.Now(),
+		SentCount:     0,
+		LastResetTime: time.Now(),
 	})
 
 	// 添加代理IP，每个代理独立限流
@@ -61,10 +65,12 @@ func NewProxyPool(proxyURLs []string) *ProxyPool {
 		}
 
 		proxyInfo := &ProxyInfo{
-			URL:       proxyURL,
-			Limiter:   rate.NewLimiter(rate.Every(30*time.Second), 1), // 每个代理独立限流：30秒1条
-			Available: true,                                           // 初始标记为可用
-			LastCheck: time.Time{},                                    // 等待首次检查
+			URL:           proxyURL,
+			Limiter:       rate.NewLimiter(rate.Every(30*time.Second), 1), // 每个代理独立限流：30秒1条
+			Available:     true,                                           // 初始标记为可用
+			LastCheck:     time.Time{},                                    // 等待首次检查
+			SentCount:     0,
+			LastResetTime: time.Now(),
 		}
 
 		// 异步检查代理可用性
@@ -92,10 +98,31 @@ func (p *ProxyPool) GetNextProxy() *ProxyInfo {
 	return proxy
 }
 
-// WaitDanmaku 等待代理的弹幕限流器
+// WaitDanmaku 等待代理的弹幕限流器（每IP 30条后等待5分钟）
 func (p *ProxyInfo) WaitDanmaku() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	// 检查是否需要等待5分钟
+	if p.SentCount >= 30 {
+		waitTime := 5 * time.Minute
+		elapsed := time.Since(p.LastResetTime)
+		if elapsed < waitTime {
+			remaining := waitTime - elapsed
+			log.Printf("[弹幕限流] %s 已发送30条，等待%.0f秒后继续", p.String(), remaining.Seconds())
+			p.mu.Unlock()
+			time.Sleep(remaining)
+			p.mu.Lock()
+		}
+		// 重置计数
+		p.SentCount = 0
+		p.LastResetTime = time.Now()
+	}
+
+	// 增加计数
+	p.SentCount++
+
+	// 基础限流：30秒1条
 	return p.Limiter.Wait(context.Background())
 }
 
