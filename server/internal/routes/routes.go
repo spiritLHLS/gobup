@@ -147,6 +147,8 @@ func SetupRoutes(router *gin.Engine) {
 				filescan.POST("/trigger", controllers.TriggerFileScan)
 				filescan.GET("/preview", controllers.PreviewFileScan)
 				filescan.POST("/import", controllers.ImportSelectedFiles)
+				filescan.GET("/cleanPreview", controllers.GetCompletedFilesPreview)
+				filescan.POST("/cleanSelected", controllers.CleanSelectedFiles)
 				filescan.POST("/cleanCompleted", controllers.CleanCompletedFiles)
 			}
 

@@ -839,6 +839,23 @@ func (s *FileScanService) ScanOrphanFiles() error {
 	return nil
 }
 
+// FileToClean 待清理的文件信息
+type FileToClean struct {
+	FilePath   string `json:"filePath"`   // 文件路径
+	FileType   string `json:"fileType"`   // 文件类型 xml/jpg
+	FileSize   int64  `json:"fileSize"`   // 文件大小（字节）
+	HistoryID  uint   `json:"historyId"`  // 关联的历史记录ID
+	RoomName   string `json:"roomName"`   // 房间名称
+	Title      string `json:"title"`      // 标题
+	RecordTime string `json:"recordTime"` // 录制时间
+}
+
+// CleanCompletedFilesPreviewResult 清理已完成文件的预览结果
+type CleanCompletedFilesPreviewResult struct {
+	TotalHistories int           `json:"totalHistories"` // 检查的历史记录总数
+	FilesToClean   []FileToClean `json:"filesToClean"`   // 待清理的文件列表
+}
+
 // CleanCompletedFilesResult 清理已完成文件的结果
 type CleanCompletedFilesResult struct {
 	TotalHistories   int      `json:"totalHistories"`   // 检查的历史记录总数
@@ -914,6 +931,115 @@ func (s *FileScanService) CleanCompletedFiles() (*CleanCompletedFilesResult, err
 
 	log.Printf("[FileScan] 清理已完成文件结束: 检查 %d 条历史记录, 删除 %d 个xml文件, %d 个jpg文件, 跳过 %d 条记录",
 		result.TotalHistories, result.DeletedXMLFiles, result.DeletedJPGFiles, result.SkippedHistories)
+
+	return result, nil
+}
+
+// GetCompletedFilesPreview 获取待清理文件的预览列表
+func (s *FileScanService) GetCompletedFilesPreview() (*CleanCompletedFilesPreviewResult, error) {
+	db := database.GetDB()
+	result := &CleanCompletedFilesPreviewResult{
+		FilesToClean: make([]FileToClean, 0),
+	}
+
+	// 查询所有已上传投稿成功(uploadStatus=2)且弹幕已发送(danmakuSent=true)的历史记录
+	var histories []models.RecordHistory
+	if err := db.Where("upload_status = ? AND danmaku_sent = ?", 2, true).Find(&histories).Error; err != nil {
+		return nil, fmt.Errorf("查询历史记录失败: %w", err)
+	}
+
+	result.TotalHistories = len(histories)
+	log.Printf("[FileScan] 开始预览可清理的历史记录文件，共 %d 条记录", result.TotalHistories)
+
+	for _, history := range histories {
+		// 获取该历史记录的所有分P
+		var parts []models.RecordHistoryPart
+		if err := db.Where("history_id = ?", history.ID).Find(&parts).Error; err != nil {
+			log.Printf("[FileScan] 查询历史记录 %d 的分P失败: %v", history.ID, err)
+			continue
+		}
+
+		// 遍历每个分P，检查xml和jpg文件
+		for _, part := range parts {
+			if part.FilePath == "" {
+				continue
+			}
+
+			// 构造xml和jpg文件路径
+			basePathWithoutExt := strings.TrimSuffix(part.FilePath, filepath.Ext(part.FilePath))
+			xmlPath := basePathWithoutExt + ".xml"
+			jpgPath := basePathWithoutExt + ".jpg"
+
+			// 检查xml文件
+			if info, err := os.Stat(xmlPath); err == nil {
+				result.FilesToClean = append(result.FilesToClean, FileToClean{
+					FilePath:   xmlPath,
+					FileType:   "xml",
+					FileSize:   info.Size(),
+					HistoryID:  history.ID,
+					RoomName:   history.RoomName,
+					Title:      history.Title,
+					RecordTime: history.StartTime.Format("2006-01-02 15:04:05"),
+				})
+			}
+
+			// 检查jpg文件
+			if info, err := os.Stat(jpgPath); err == nil {
+				result.FilesToClean = append(result.FilesToClean, FileToClean{
+					FilePath:   jpgPath,
+					FileType:   "jpg",
+					FileSize:   info.Size(),
+					HistoryID:  history.ID,
+					RoomName:   history.RoomName,
+					Title:      history.Title,
+					RecordTime: history.StartTime.Format("2006-01-02 15:04:05"),
+				})
+			}
+		}
+	}
+
+	log.Printf("[FileScan] 预览完成: 检查 %d 条历史记录, 找到 %d 个可清理文件",
+		result.TotalHistories, len(result.FilesToClean))
+
+	return result, nil
+}
+
+// CleanSelectedFiles 清理用户选择的文件
+func (s *FileScanService) CleanSelectedFiles(filePaths []string) (*CleanCompletedFilesResult, error) {
+	result := &CleanCompletedFilesResult{
+		Errors: make([]string, 0),
+	}
+
+	log.Printf("[FileScan] 开始清理用户选择的文件，共 %d 个", len(filePaths))
+
+	for _, filePath := range filePaths {
+		// 检查文件是否存在
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			errMsg := fmt.Sprintf("文件不存在: %s", filePath)
+			log.Printf("[FileScan] %s", errMsg)
+			result.Errors = append(result.Errors, errMsg)
+			continue
+		}
+
+		// 删除文件
+		if err := os.Remove(filePath); err != nil {
+			errMsg := fmt.Sprintf("删除文件失败: %s, error: %v", filePath, err)
+			log.Printf("[FileScan] %s", errMsg)
+			result.Errors = append(result.Errors, errMsg)
+		} else {
+			// 根据文件扩展名计数
+			ext := strings.ToLower(filepath.Ext(filePath))
+			if ext == ".xml" {
+				result.DeletedXMLFiles++
+			} else if ext == ".jpg" || ext == ".jpeg" {
+				result.DeletedJPGFiles++
+			}
+			log.Printf("[FileScan] 删除文件: %s", filePath)
+		}
+	}
+
+	log.Printf("[FileScan] 清理选中文件完成: 删除 %d 个xml文件, %d 个jpg文件",
+		result.DeletedXMLFiles, result.DeletedJPGFiles)
 
 	return result, nil
 }

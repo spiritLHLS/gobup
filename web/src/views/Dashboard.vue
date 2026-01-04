@@ -336,6 +336,9 @@
 
     <!-- 文件扫描对话框 -->
     <FileScanDialog ref="fileScanDialogRef" @imported="handleFilesImported" />
+    
+    <!-- 文件清理对话框 -->
+    <CleanFilesDialog ref="cleanFilesDialogRef" @success="handleFilesCleanSuccess" />
   </div>
 </template>
 
@@ -345,6 +348,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { VideoCamera, Upload, Clock, Warning, Check, Refresh, FolderOpened, Search, Tools, Delete } from '@element-plus/icons-vue'
 import api, { filescanAPI, dataRepairAPI } from '../api'
 import FileScanDialog from '../components/filescan/FileScanDialog.vue'
+import CleanFilesDialog from '../components/filescan/CleanFilesDialog.vue'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -353,6 +357,7 @@ const checking = ref(false)
 const repairing = ref(false)
 const cleaning = ref(false)
 const fileScanDialogRef = ref(null)
+const cleanFilesDialogRef = ref(null)
 const config = ref({
   autoFileScan: true,
   fileScanInterval: 60,
@@ -672,62 +677,15 @@ const handleFilesImported = () => {
 
 // 清理已完成文件（xml和jpg）
 const cleanCompletedFiles = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '此操作将删除所有已上传投稿成功且解析弹幕完成且已发送弹幕的历史记录的xml和jpg文件。\n\n' +
-      '删除的文件类型：\n' +
-      '• .xml 弹幕文件\n' +
-      '• .jpg 封面文件\n\n' +
-      '注意：此操作不可恢复！是否继续？',
-      '清理已完成文件',
-      {
-        confirmButtonText: '确定清理',
-        cancelButtonText: '取消',
-        type: 'warning',
-        distinguishCancelAndClose: true
-      }
-    )
-    
-    cleaning.value = true
-    const response = await filescanAPI.cleanCompleted()
-    
-    if (response.type === 'success') {
-      let message = `清理完成！\n\n`
-      message += `检查历史记录: ${response.totalHistories} 条\n`
-      message += `删除XML文件: ${response.deletedXMLFiles} 个\n`
-      message += `删除JPG文件: ${response.deletedJPGFiles} 个\n`
-      
-      if (response.skippedHistories > 0) {
-        message += `跳过记录: ${response.skippedHistories} 条\n`
-      }
-      
-      if (response.errors && response.errors.length > 0) {
-        message += `\n错误信息：\n` + response.errors.join('\n')
-        ElMessageBox.alert(message, '清理结果', { 
-          type: 'warning',
-          confirmButtonText: '知道了'
-        })
-      } else {
-        if (response.deletedXMLFiles > 0 || response.deletedJPGFiles > 0) {
-          ElMessageBox.alert(message, '清理结果', { 
-            type: 'success',
-            confirmButtonText: '知道了'
-          })
-        } else {
-          ElMessage.info('没有需要清理的文件')
-        }
-      }
-    } else {
-      ElMessage.error(response.msg || '清理失败')
-    }
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('清理文件失败:', error)
-      ElMessage.error('清理失败: ' + (error.message || '网络错误'))
-    }
-  } finally {
-    cleaning.value = false
-  }
+  // 打开文件选择对话框
+  cleanFilesDialogRef.value?.open()
+}
+
+// 处理文件清理成功
+const handleFilesCleanSuccess = () => {
+  ElMessage.success('文件清理完成')
+  // 可选：刷新统计数据
+  loadStats()
 }
 
 onMounted(() => {

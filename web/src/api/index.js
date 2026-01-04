@@ -92,6 +92,8 @@ export const filescanAPI = {
   trigger: (force = false) => request.post('/filescan/trigger', null, { params: { force } }),
   preview: () => request.get('/filescan/preview'),
   import: (filePaths) => request.post('/filescan/import', { filePaths }),
+  cleanPreview: () => request.get('/filescan/cleanPreview'),
+  cleanSelected: (filePaths) => request.post('/filescan/cleanSelected', { filePaths }),
   cleanCompleted: () => request.post('/filescan/cleanCompleted')
 }
 
