@@ -370,38 +370,34 @@ func (s *DanmakuService) sendDanmakuForHistoryWithSerialUsers(historyID uint) er
 					log.Printf("[弹幕发送] ❌ 用户%s 第%d/%d条失败 (连续失败%d次, 进度=%dms, 内容=%s): %v",
 						user.Uname, dmIdx+1, len(userDanmakus), consecutiveFailures, dm.Progress, dm.Message, err)
 
-					// 指数退避机制
-					if consecutiveFailures >= 3 {
-						// 连续失败3次或以上，等待10分钟
-						log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败%d次，等待10分钟后继续...", user.Uname, consecutiveFailures)
-						time.Sleep(10 * time.Minute)
-						consecutiveFailures = 0 // 重置计数器
-					} else if consecutiveFailures == 2 {
-						// 连续失败2次，等待2分钟
-						log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败2次，等待2分钟后继续...", user.Uname)
-						time.Sleep(2 * time.Minute)
-					} else {
-						// 首次失败，等待30秒
-						log.Printf("[弹幕发送] ⚠️ 用户%s 发送失败，等待30秒后继续...", user.Uname)
-						time.Sleep(30 * time.Second)
+					// 指数退避机制：30秒 -> 1分钟 -> 2分钟 -> 5分钟 -> 10分钟
+					var waitTime time.Duration
+					switch consecutiveFailures {
+					case 1:
+						waitTime = 30 * time.Second
+					case 2:
+						waitTime = 1 * time.Minute
+					case 3:
+						waitTime = 2 * time.Minute
+					case 4:
+						waitTime = 5 * time.Minute
+					default:
+						waitTime = 10 * time.Minute
 					}
+					log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败%d次，等待%v后继续...", user.Uname, consecutiveFailures, waitTime)
+					time.Sleep(waitTime)
 				} else {
 					userSuccessCount++
 					successCount++
 					consecutiveFailures = 0 // 成功后重置失败计数
 
-					// 成功后添加随机等待（全局限流器已确保至少20秒间隔）
-					// 这里只添加0-10秒的额外随机延迟，使发送时间更加随机化
-					extraWait := rand.Intn(11) // 0-10秒
+					// 成功后添加随机等待（全局限流器已确保至少22秒间隔）
+					// 这里添加3-8秒的额外随机延迟，总延迟在25-30秒之间，接近biliupforjava的25秒策略
+					extraWait := 3 + rand.Intn(6) // 3-8秒
 
-					if extraWait > 0 {
-						log.Printf("[弹幕发送] ✓ 用户%s 第%d/%d条成功，额外等待%d秒...",
-							user.Uname, dmIdx+1, len(userDanmakus), extraWait)
-						time.Sleep(time.Duration(extraWait) * time.Second)
-					} else {
-						log.Printf("[弹幕发送] ✓ 用户%s 第%d/%d条成功",
-							user.Uname, dmIdx+1, len(userDanmakus))
-					}
+					log.Printf("[弹幕发送] ✓ 用户%s 第%d/%d条成功，额外等待%d秒...",
+						user.Uname, dmIdx+1, len(userDanmakus), extraWait)
+					time.Sleep(time.Duration(extraWait) * time.Second)
 				}
 
 				// 更新进度

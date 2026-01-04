@@ -40,7 +40,7 @@ func GetAPILimiter() *APILimiter {
 			preUploadLimiter:   rate.NewLimiter(rate.Every(1*time.Second), 1),        // 预上传：1次/秒
 			chunkUploadLimiter: rate.NewLimiter(rate.Every(350*time.Millisecond), 3), // 分片上传：3次/秒，间隔350ms
 			publishLimiter:     rate.NewLimiter(rate.Every(12*time.Second), 5),       // 投稿：5次/分钟
-			danmakuLimiter:     rate.NewLimiter(rate.Every(15*time.Second), 1),       // 弹幕：最快15秒1条，避免风控
+			danmakuLimiter:     rate.NewLimiter(rate.Every(22*time.Second), 1),       // 弹幕：22秒1条，参考biliupforjava的25秒策略
 			generalLimiter:     rate.NewLimiter(rate.Every(500*time.Millisecond), 2), // 通用：2次/秒
 		}
 	})
