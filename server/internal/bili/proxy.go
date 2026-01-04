@@ -56,7 +56,7 @@ func NewProxyPool(proxyURLs []string) *ProxyPool {
 
 		// 验证代理URL格式
 		if _, err := url.Parse(proxyURL); err != nil {
-			log.Printf("[代理池] ⚠️ 无效的代理URL: %s, 错误: %v", proxyURL, err)
+			log.Printf("[代理池] 无效的代理URL: %s, 错误: %v", proxyURL, err)
 			continue
 		}
 
@@ -143,7 +143,7 @@ func ParseProxyList(proxyList string) []string {
 		if !strings.HasPrefix(line, "socks5://") &&
 			!strings.HasPrefix(line, "http://") &&
 			!strings.HasPrefix(line, "https://") {
-			log.Printf("[代理池] ⚠️ 无效的代理格式（需要 socks5:// 或 http(s)://）: %s", line)
+			log.Printf("[代理池] 无效的代理格式（需要 socks5:// 或 http(s)://）: %s", line)
 			continue
 		}
 
@@ -184,7 +184,7 @@ func (p *ProxyPool) checkProxyHealth(proxyInfo *ProxyInfo) {
 
 	u, err := url.Parse(proxyInfo.URL)
 	if err != nil {
-		log.Printf("[代理池] ❌ 代理URL解析失败 %s: %v", proxyInfo.URL, err)
+		log.Printf("[代理池] 代理URL解析失败 %s: %v", proxyInfo.URL, err)
 		proxyInfo.mu.Lock()
 		proxyInfo.Available = false
 		proxyInfo.LastCheck = time.Now()
@@ -217,7 +217,7 @@ func (p *ProxyPool) checkProxyHealth(proxyInfo *ProxyInfo) {
 	if err != nil {
 		proxyInfo.Available = false
 		proxyInfo.LastCheck = time.Now()
-		log.Printf("[代理池] ❌ 代理不可达 %s (%s): %v", proxyInfo.URL, addr, err)
+		log.Printf("[代理池] 代理不可达 %s (%s): %v", proxyInfo.URL, addr, err)
 	} else {
 		conn.Close()
 		proxyInfo.Available = true
@@ -264,6 +264,6 @@ func (p *ProxyPool) GetNextAvailableProxy() *ProxyInfo {
 	}
 
 	// 如果所有代理都不可用，返回本地IP
-	log.Printf("[代理池] ⚠️ 所有代理都不可用，使用本地IP")
+	log.Printf("[代理池] 所有代理都不可用，使用本地IP")
 	return p.proxies[0] // 第一个总是本地IP
 }

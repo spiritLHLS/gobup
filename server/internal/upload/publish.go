@@ -334,9 +334,9 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	log.Printf("开始兜底检测：验证视频是否在用户投稿列表中 (mid=%d, aid=%d, bvid=%s)", user.UID, avID, bvid)
 	exists, checkErr := client.CheckVideoExistsInArchive(user.UID, avID, bvid)
 	if checkErr != nil {
-		log.Printf("⚠️  兜底检测失败（API调用错误）: %v，但投稿API已返回成功，继续后续流程", checkErr)
+		log.Printf("兜底检测失败（API调用错误）: %v，但投稿API已返回成功，继续后续流程", checkErr)
 	} else if !exists {
-		log.Printf("⚠️  兜底检测未找到视频！投稿可能失败，但投稿API已返回成功。建议手动检查：https://space.bilibili.com/%d", user.UID)
+		log.Printf("兜底检测未找到视频！投稿可能失败，但投稿API已返回成功。建议手动检查：https://space.bilibili.com/%d", user.UID)
 		// 不返回错误，只记录日志，避免误报
 		// 因为新投稿可能需要更长时间才能在列表中显示
 	} else {

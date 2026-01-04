@@ -44,22 +44,22 @@ func (m *DanmakuQueueManager) AddTask(historyID uint) error {
 
 // process 全局队列处理器（确保同一时间只处理一个视频）
 func (m *DanmakuQueueManager) process() {
-	log.Printf("[弹幕队列] 🚀 全局队列处理器已启动")
+	log.Printf("[弹幕队列] 全局队列处理器已启动")
 
 	for task := range m.tasks {
 		m.mu.Lock()
 		m.processing = true
 		m.mu.Unlock()
 
-		log.Printf("[弹幕队列] 🎬 开始处理视频的弹幕发送任务 (history_id=%d, 剩余队列=%d)",
+		log.Printf("[弹幕队列] 开始处理视频的弹幕发送任务 (history_id=%d, 剩余队列=%d)",
 			task.HistoryID, len(m.tasks))
 
 		// 执行弹幕发送（用户串行发送）
 		if err := m.service.sendDanmakuForHistoryWithSerialUsers(task.HistoryID); err != nil {
-			log.Printf("[弹幕队列] ❌ 视频%d的弹幕发送任务失败: %v",
+			log.Printf("[弹幕队列] 视频%d的弹幕发送任务失败: %v",
 				task.HistoryID, err)
 		} else {
-			log.Printf("[弹幕队列] ✅ 视频%d的弹幕发送任务成功",
+			log.Printf("[弹幕队列] 视频%d的弹幕发送任务成功",
 				task.HistoryID)
 		}
 

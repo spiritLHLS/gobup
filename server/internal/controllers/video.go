@@ -24,13 +24,13 @@ func SendDanmaku(c *gin.Context) {
 
 	// 添加到队列（队列会自动异步处理，使用所有有效用户并行发送）
 	if err := danmakuService.SendDanmakuForHistory(uint(historyID)); err != nil {
-		log.Printf("[弹幕发送] ❌ 加入队列失败 (history_id=%d): %v", historyID, err)
+		log.Printf("[弹幕发送] 加入队列失败 (history_id=%d): %v", historyID, err)
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": err.Error()})
 		return
 	}
 
 	queueLength := danmakuService.GetQueueManager().GetQueueLength(uint(historyID))
-	log.Printf("[弹幕发送] ✅ 任务已加入队列 (history_id=%d, 队列长度=%d)", historyID, queueLength)
+	log.Printf("[弹幕发送] 任务已加入队列 (history_id=%d, 队列长度=%d)", historyID, queueLength)
 
 	c.JSON(http.StatusOK, gin.H{
 		"type":        "success",
@@ -56,13 +56,13 @@ func BatchSendDanmaku(c *gin.Context) {
 
 	for _, historyID := range req.HistoryIDs {
 		if err := danmakuService.SendDanmakuForHistory(historyID); err != nil {
-			log.Printf("[批量弹幕发送] ⚠️  添加任务失败 history_id=%d: %v", historyID, err)
+			log.Printf("[批量弹幕发送] 添加任务失败 history_id=%d: %v", historyID, err)
 			continue
 		}
 		addedCount++
 	}
 
-	log.Printf("[批量弹幕发送] ✅ 已添加 %d/%d 个任务到队列",
+	log.Printf("[批量弹幕发送] 已添加 %d/%d 个任务到队列",
 		addedCount, len(req.HistoryIDs))
 
 	c.JSON(http.StatusOK, gin.H{
@@ -104,14 +104,14 @@ func BatchMoveFiles(c *gin.Context) {
 
 	for _, historyID := range req.HistoryIDs {
 		if err := moverService.MoveFilesForHistory(historyID); err != nil {
-			log.Printf("[批量移动文件] ⚠️  移动失败 history_id=%d: %v", historyID, err)
+			log.Printf("[批量移动文件] 移动失败 history_id=%d: %v", historyID, err)
 			failedCount++
 			continue
 		}
 		successCount++
 	}
 
-	log.Printf("[批量移动文件] ✅ 完成 %d/%d (失败 %d)",
+	log.Printf("[批量移动文件] 完成 %d/%d (失败 %d)",
 		successCount, len(req.HistoryIDs), failedCount)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -154,14 +154,14 @@ func BatchSyncVideo(c *gin.Context) {
 
 	for _, historyID := range req.HistoryIDs {
 		if err := syncService.SyncVideoInfo(historyID); err != nil {
-			log.Printf("[批量同步视频] ⚠️  同步失败 history_id=%d: %v", historyID, err)
+			log.Printf("[批量同步视频] 同步失败 history_id=%d: %v", historyID, err)
 			failedCount++
 			continue
 		}
 		successCount++
 	}
 
-	log.Printf("[批量同步视频] ✅ 完成 %d/%d (失败 %d)",
+	log.Printf("[批量同步视频] 完成 %d/%d (失败 %d)",
 		successCount, len(req.HistoryIDs), failedCount)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -384,13 +384,13 @@ func ParseDanmaku(c *gin.Context) {
 	}
 
 	if err := queue.Add(task); err != nil {
-		log.Printf("[弹幕解析] ❌ 添加到队列失败: %v", err)
+		log.Printf("[弹幕解析] 添加到队列失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": err.Error()})
 		return
 	}
 
 	queueLength := queue.GetQueueLength()
-	log.Printf("[弹幕解析] ✅ 任务已加入队列 (队列长度=%d)", queueLength)
+	log.Printf("[弹幕解析] 任务已加入队列 (队列长度=%d)", queueLength)
 
 	c.JSON(http.StatusOK, gin.H{
 		"type":        "success",
@@ -419,14 +419,14 @@ func BatchParseDanmaku(c *gin.Context) {
 			HistoryID: historyID,
 		}
 		if err := queue.Add(task); err != nil {
-			log.Printf("[批量弹幕解析] ⚠️  添加任务失败 history_id=%d: %v", historyID, err)
+			log.Printf("[批量弹幕解析] 添加任务失败 history_id=%d: %v", historyID, err)
 			continue
 		}
 		addedCount++
 	}
 
 	queueLength := queue.GetQueueLength()
-	log.Printf("[批量弹幕解析] ✅ 已添加 %d/%d 个任务到队列 (队列长度=%d)",
+	log.Printf("[批量弹幕解析] 已添加 %d/%d 个任务到队列 (队列长度=%d)",
 		addedCount, len(req.HistoryIDs), queueLength)
 
 	c.JSON(http.StatusOK, gin.H{

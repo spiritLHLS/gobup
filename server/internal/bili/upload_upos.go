@@ -80,7 +80,7 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 	maxUploadRetries := 3
 	for uploadRetry := 0; uploadRetry < maxUploadRetries; uploadRetry++ {
 		if uploadRetry > 0 {
-			log.Printf("[UPOS] ⚠️ 检测到分片上传失败，开始断点续传 (重试 %d/%d)，从分片 %d/%d 继续", uploadRetry+1, maxUploadRetries, chunkDone+1, totalParts)
+			log.Printf("[UPOS] 检测到分片上传失败，开始断点续传 (重试 %d/%d)，从分片 %d/%d 继续", uploadRetry+1, maxUploadRetries, chunkDone+1, totalParts)
 		}
 
 		err = readFileChunks(file, chunkSize, func(chunk FileChunk) error {
@@ -94,7 +94,7 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 			partNum := int(chunk.Index + 1)
 			err := u.uploadChunk(preResp, lineResp, chunk.Data, partNum, int(totalParts), fileSize)
 			if err != nil {
-				log.Printf("[UPOS] ❌ 分片 %d/%d 上传失败: %v", partNum, totalParts, err)
+				log.Printf("[UPOS] 分片 %d/%d 上传失败: %v", partNum, totalParts, err)
 				return err
 			}
 			chunkDone++

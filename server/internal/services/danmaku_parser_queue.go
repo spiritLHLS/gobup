@@ -62,26 +62,26 @@ func (q *DanmakuParserQueue) process() {
 		q.mu.Lock()
 		q.processing = false
 		q.mu.Unlock()
-		log.Printf("[弹幕解析队列] 🏁 队列处理完毕")
+		log.Printf("[弹幕解析队列] 队列处理完毕")
 	}()
 
 	for task := range q.tasks {
-		log.Printf("[弹幕解析队列] 🎬 开始处理解析任务: history_id=%d (剩余队列: %d)",
+		log.Printf("[弹幕解析队列] 开始处理解析任务: history_id=%d (剩余队列: %d)",
 			task.HistoryID, len(q.tasks))
 
 		// 执行弹幕解析
 		count, err := q.parser.ParseDanmakuForHistory(task.HistoryID)
 		if err != nil {
-			log.Printf("[弹幕解析队列] ❌ 解析任务失败: history_id=%d, error=%v",
+			log.Printf("[弹幕解析队列] 解析任务失败: history_id=%d, error=%v",
 				task.HistoryID, err)
 		} else {
-			log.Printf("[弹幕解析队列] ✅ 解析任务成功: history_id=%d, count=%d",
+			log.Printf("[弹幕解析队列] 解析任务成功: history_id=%d, count=%d",
 				task.HistoryID, count)
 		}
 
 		// 队列为空时退出
 		if len(q.tasks) == 0 {
-			log.Printf("[弹幕解析队列] ℹ️  队列已空，准备退出处理循环")
+			log.Printf("[弹幕解析队列] 队列已空，准备退出处理循环")
 			break
 		}
 	}

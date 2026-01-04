@@ -470,7 +470,7 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 		var existingHistory models.RecordHistory
 		if err := db.Where("id = ?", existingPart.HistoryID).First(&existingHistory).Error; err != nil {
 			// 历史记录不存在，这是一个孤儿分P记录，需要修复
-			log.Printf("[FileScan] ⚠️  发现孤儿分P记录: PartID=%d, FilePath=%s, HistoryID=%d 不存在",
+			log.Printf("[FileScan] 发现孤儿分P记录: PartID=%d, FilePath=%s, HistoryID=%d 不存在",
 				existingPart.ID, filePath, existingPart.HistoryID)
 
 			// 删除孤儿分P记录，重新导入
@@ -545,9 +545,9 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 		parser := NewDanmakuXMLParser()
 		count, err := parser.ParseDanmakuFile(xmlPath, metadata.SessionID)
 		if err != nil {
-			log.Printf("[FileScan] ⚠️  解析弹幕失败 %s: %v", filepath.Base(xmlPath), err)
+			log.Printf("[FileScan] 解析弹幕失败 %s: %v", filepath.Base(xmlPath), err)
 		} else {
-			log.Printf("[FileScan] ✅ 成功解析 %d 条弹幕从 %s", count, filepath.Base(xmlPath))
+			log.Printf("[FileScan] 成功解析 %d 条弹幕从 %s", count, filepath.Base(xmlPath))
 		}
 	}
 

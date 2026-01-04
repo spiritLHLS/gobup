@@ -19,16 +19,16 @@
             v-model="localConfig.danmakuProxyList"
             type="textarea"
             :rows="10"
-            placeholder="每行一个代理，支持格式：&#10;socks5://ip:port&#10;socks5://user:pass@ip:port&#10;http://ip:port&#10;http://user:pass@ip:port&#10;https://ip:port&#10;&#10;示例：&#10;socks5://127.0.0.1:1080&#10;http://user:pass@proxy.example.com:8080"
+            placeholder="每行一个代理，支持格式：&#10;socks5://ip:port&#10;http://ip:port&#10;https://ip:port&#10;&#10;注意：仅支持无用户名密码的代理&#10;&#10;示例：&#10;socks5://127.0.0.1:1080&#10;http://proxy.example.com:8080"
           />
         </div>
         <div style="margin-top: 8px; font-size: 12px; color: #666;">
-          <p style="margin: 4px 0;">💡 使用说明：</p>
+          <p style="margin: 4px 0;">使用说明：</p>
           <ul style="margin: 4px 0; padding-left: 20px;">
             <li>每行一个代理地址，支持 socks5 和 http(s) 协议</li>
-            <li>系统会自动包含本地IP，无需单独配置</li>
-            <li>每个IP独立限流（22秒/条），实现真正的并行发送</li>
-            <li>代理池会轮询使用所有可用IP</li>
+            <li>系统会自动包含本地IP（1个），无需单独配置</li>
+            <li>每个IP独立限流（26秒/条），实现真正的并行发送</li>
+            <li>代理池会轮询使用所有可用IP（包括本地IP）</li>
             <li>以 # 开头的行会被忽略（可用于注释）</li>
           </ul>
         </div>
@@ -49,6 +49,24 @@
         :closable="false"
         style="margin-top: 10px;"
       />
+
+      <el-alert
+        v-if="localConfig.enableDanmakuProxy"
+        :title="danmakuCapacityText"
+        type="info"
+        :closable="false"
+        style="margin-top: 10px;"
+      >
+        <div style="font-size: 12px; color: #666; margin-top: 4px;">
+          <div>发送能力计算：</div>
+          <div style="margin-top: 4px;">
+            总IP数：{{ totalIpCount }} 个（{{ proxyCount }} 个代理 + 1 个本地IP）<br>
+            单IP限流：26秒/条<br>
+            单IP时速：{{ perIpHourlyRate }} 条/小时<br>
+            <strong>总时速：{{ totalHourlyRate }} 条/小时</strong>
+          </div>
+        </div>
+      </el-alert>
     </el-form>
     
     <template #footer>
@@ -93,6 +111,26 @@ const proxyCount = computed(() => {
     const trimmed = line.trim()
     return trimmed && !trimmed.startsWith('#')
   }).length
+})
+
+const totalIpCount = computed(() => {
+  return proxyCount.value + 1 // 代理数 + 本地IP
+})
+
+const perIpHourlyRate = computed(() => {
+  // 每个IP：26秒/条，即每小时 3600/26 ≈ 138.46 条
+  return Math.floor(3600 / 26)
+})
+
+const totalHourlyRate = computed(() => {
+  return totalIpCount.value * perIpHourlyRate.value
+})
+
+const danmakuCapacityText = computed(() => {
+  if (totalIpCount.value === 1) {
+    return `预计发送能力：每小时约 ${totalHourlyRate.value} 条弹幕（仅使用1个本地IP）`
+  }
+  return `预计发送能力：每小时约 ${totalHourlyRate.value} 条弹幕`
 })
 
 const handleSave = () => {

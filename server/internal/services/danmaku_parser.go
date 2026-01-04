@@ -98,7 +98,7 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 	for _, d := range dmXML.D {
 		msg, err := p.parseDanmaku(d, sessionID)
 		if err != nil {
-			log.Printf("[弹幕解析] ⚠️  解析弹幕失败: %v", err)
+			log.Printf("[弹幕解析] 解析弹幕失败: %v", err)
 			continue
 		}
 		msgsToSave = append(msgsToSave, msg)
@@ -108,7 +108,7 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 	for _, sc := range dmXML.SC {
 		msg, err := p.parseSC(sc, sessionID)
 		if err != nil {
-			log.Printf("[弹幕解析] ⚠️  解析SC失败: %v", err)
+			log.Printf("[弹幕解析] 解析SC失败: %v", err)
 			continue
 		}
 		msgsToSave = append(msgsToSave, msg)
@@ -118,7 +118,7 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 	for _, guard := range dmXML.Guard {
 		msg, err := p.parseGuard(guard, sessionID)
 		if err != nil {
-			log.Printf("[弹幕解析] ⚠️  解析上舰失败: %v", err)
+			log.Printf("[弹幕解析] 解析上舰失败: %v", err)
 			continue
 		}
 		msgsToSave = append(msgsToSave, msg)
@@ -137,7 +137,7 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 
 			// 保存到数据库
 			if err := tx.Create(msg).Error; err != nil {
-				log.Printf("[弹幕解析] ❌ 保存弹幕失败: %v", err)
+				log.Printf("[弹幕解析] 保存弹幕失败: %v", err)
 				// 不中断事务，继续处理下一条
 				continue
 			}
@@ -150,7 +150,7 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 		return 0, fmt.Errorf("保存弹幕事务失败: %w", err)
 	}
 
-	log.Printf("[弹幕解析] ✅ 解析完成: 成功导入 %d 条弹幕", count)
+	log.Printf("[弹幕解析] 解析完成: 成功导入 %d 条弹幕", count)
 	return count, nil
 }
 
@@ -385,14 +385,14 @@ func (p *DanmakuXMLParser) ParseDanmakuForHistory(historyID uint) (int, error) {
 		}
 
 		if xmlPath == "" {
-			log.Printf("[弹幕解析] ⚠️  未找到弹幕XML文件: %s", part.FilePath)
+			log.Printf("[弹幕解析] 未找到弹幕XML文件: %s", part.FilePath)
 			continue
 		}
 
 		// 解析XML文件
 		count, err := p.ParseDanmakuFile(xmlPath, history.SessionID)
 		if err != nil {
-			log.Printf("[弹幕解析] ❌ 解析失败: %s, error: %v", xmlPath, err)
+			log.Printf("[弹幕解析] 解析失败: %s, error: %v", xmlPath, err)
 			continue
 		}
 
@@ -407,7 +407,7 @@ func (p *DanmakuXMLParser) ParseDanmakuForHistory(historyID uint) (int, error) {
 	history.DanmakuCount = totalCount
 	db.Save(&history)
 
-	log.Printf("[弹幕解析] ✅ 历史记录%d解析完成: 共导入 %d 条弹幕", historyID, totalCount)
+	log.Printf("[弹幕解析] 历史记录%d解析完成: 共导入 %d 条弹幕", historyID, totalCount)
 
 	return totalCount, nil
 }

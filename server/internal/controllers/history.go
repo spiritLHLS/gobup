@@ -377,14 +377,14 @@ func BatchUploadHistory(c *gin.Context) {
 		// 获取历史记录
 		var history models.RecordHistory
 		if err := db.First(&history, historyID).Error; err != nil {
-			log.Printf("[批量上传] ⚠️  历史记录不存在 history_id=%d", historyID)
+			log.Printf("[批量上传] 历史记录不存在 history_id=%d", historyID)
 			continue
 		}
 
 		// 获取房间信息
 		var room models.RecordRoom
 		if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
-			log.Printf("[批量上传] ⚠️  房间不存在 history_id=%d, room_id=%s", historyID, history.RoomID)
+			log.Printf("[批量上传] 房间不存在 history_id=%d, room_id=%s", historyID, history.RoomID)
 			continue
 		}
 
@@ -393,7 +393,7 @@ func BatchUploadHistory(c *gin.Context) {
 		if err := db.Where("history_id = ? AND upload = ? AND recording = ?", historyID, false, false).
 			Order("start_time ASC").
 			Find(&parts).Error; err != nil {
-			log.Printf("[批量上传] ⚠️  查询分P失败 history_id=%d", historyID)
+			log.Printf("[批量上传] 查询分P失败 history_id=%d", historyID)
 			continue
 		}
 
@@ -404,7 +404,7 @@ func BatchUploadHistory(c *gin.Context) {
 		// 添加所有分P到上传队列
 		for i := range parts {
 			if err := historyUploadService.UploadPart(&parts[i], &history, &room); err != nil {
-				log.Printf("[批量上传] ⚠️  添加分P失败 part_id=%d: %v", parts[i].ID, err)
+				log.Printf("[批量上传] 添加分P失败 part_id=%d: %v", parts[i].ID, err)
 				continue
 			}
 			totalParts++
@@ -412,7 +412,7 @@ func BatchUploadHistory(c *gin.Context) {
 		successHistories++
 	}
 
-	log.Printf("[批量上传] ✅ 已添加 %d 个历史记录共 %d 个分P到队列",
+	log.Printf("[批量上传] 已添加 %d 个历史记录共 %d 个分P到队列",
 		successHistories, totalParts)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -447,14 +447,14 @@ func BatchPublishHistory(c *gin.Context) {
 
 	for _, historyID := range req.HistoryIDs {
 		if err := historyUploadService.PublishHistory(historyID, req.UserID); err != nil {
-			log.Printf("[批量投稿] ⚠️  投稿失败 history_id=%d: %v", historyID, err)
+			log.Printf("[批量投稿] 投稿失败 history_id=%d: %v", historyID, err)
 			failedCount++
 			continue
 		}
 		successCount++
 	}
 
-	log.Printf("[批量投稿] ✅ 完成 %d/%d (失败 %d)",
+	log.Printf("[批量投稿] 完成 %d/%d (失败 %d)",
 		successCount, len(req.HistoryIDs), failedCount)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -488,7 +488,7 @@ func BatchResetStatus(c *gin.Context) {
 	for _, historyID := range req.HistoryIDs {
 		var history models.RecordHistory
 		if err := db.First(&history, historyID).Error; err != nil {
-			log.Printf("[批量重置] ⚠️  历史记录不存在 history_id=%d", historyID)
+			log.Printf("[批量重置] 历史记录不存在 history_id=%d", historyID)
 			continue
 		}
 
@@ -529,7 +529,7 @@ func BatchResetStatus(c *gin.Context) {
 		}
 	}
 
-	log.Printf("[批量重置] ✅ 重置完成 %d/%d", successCount, len(req.HistoryIDs))
+	log.Printf("[批量重置] 重置完成 %d/%d", successCount, len(req.HistoryIDs))
 
 	c.JSON(http.StatusOK, gin.H{
 		"type":    "success",
@@ -585,7 +585,7 @@ func BatchDeleteWithFiles(c *gin.Context) {
 		successCount++
 	}
 
-	log.Printf("[批量删除] ✅ 删除完成 %d/%d", successCount, len(req.HistoryIDs))
+	log.Printf("[批量重置] 重置完成 %d/%d", successCount, len(req.HistoryIDs))
 
 	c.JSON(http.StatusOK, gin.H{
 		"type":    "success",

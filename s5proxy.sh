@@ -16,33 +16,33 @@ if [[ "$ARCH" == "x86_64" ]]; then
 elif [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
   DEB="3proxy-${VERSION}.arm64.deb"
 else
-  echo "❌ 不支持的架构: $ARCH"
+  echo "不支持的架构: $ARCH"
   exit 1
 fi
 
-echo "▶ 安装依赖"
+echo "[1/6] 安装依赖"
 apt update -y
 apt install -y wget curl openssl
 
-echo "▶ 检查并安装 3proxy"
+echo "[2/6] 检查并安装 3proxy"
 if ! command -v 3proxy >/dev/null 2>&1; then
   cd /tmp
   rm -f ${DEB}
   wget -q https://github.com/3proxy/3proxy/releases/download/${VERSION}/${DEB}
   dpkg -i ${DEB} || apt --fix-broken install -y
 else
-  echo "✓ 3proxy 已安装，跳过安装"
+  echo "3proxy 已安装，跳过安装"
 fi
 
-echo "▶ 创建配置文件目录"
+echo "[3/6] 创建配置文件目录"
 mkdir -p "${CONF_DIR}"
 
-echo "▶ 创建 pid 文件目录"
+echo "[4/6] 创建 pid 文件目录"
 mkdir -p /run/3proxy
 chown root:root /run/3proxy
 chmod 755 /run/3proxy
 
-echo "▶ 写入配置文件（覆盖）"
+echo "[5/6] 写入配置文件（覆盖）"
 cat > "${CFG_FILE}" <<EOF
 maxconn 1024
 nscache 65536
@@ -53,7 +53,7 @@ allow *
 socks -p${PORT}
 EOF
 
-echo "▶ 重启并设置开机启动"
+echo "[6/6] 重启并设置开机启动"
 systemctl daemon-reexec
 systemctl enable 3proxy >/dev/null 2>&1 || true
 systemctl restart 3proxy
@@ -63,14 +63,13 @@ SERVER_IP=$(curl -4 -s --max-time 5 https://ipv4.icanhazip.com || curl -4 -s --m
 
 echo
 echo "========================================"
-echo "🎉 3proxy SOCKS5 已部署完成（可重复执行）"
+echo "3proxy SOCKS5 已部署完成（可重复执行）"
 echo "----------------------------------------"
-echo "【标准代理格式（直接可用）】"
-echo，无认证）】"
 echo
 echo "socks5://${SERVER_IP}:${PORT}"
 echo
 echo "----------------------------------------"
-echo "管理命令：" status 3proxy"
-echo "journalctl -u 3proxy -f"
+echo "管理命令："
+echo "  systemctl status 3proxy"
+echo "  journalctl -u 3proxy -f"
 echo "========================================"
