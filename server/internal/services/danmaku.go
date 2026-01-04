@@ -309,18 +309,20 @@ func (s *DanmakuService) sendDanmakuForHistoryWithSerialUsers(historyID uint) er
 	var danmakuItems []bili.DanmakuItem
 	sentCount := 0
 
+	// 注意：XML弹幕的Timestamp字段已经是相对于该视频片段的时间（毫秒）
+	// 多分P场景下，需要根据录制时间确定弹幕属于哪个分P
 	for _, dm := range danmakus {
-		// 找到弹幕所属的分P
-		found := false
-		for partIdx, timeRange := range partTimeMap {
-			if dm.Timestamp >= timeRange.startMs && dm.Timestamp < timeRange.endMs {
-				// 计算相对于分P的时间
-				relativeProgress := int(dm.Timestamp - timeRange.startMs)
+		// XML中的弹幕时间是相对于该XML对应的视频片段的
+		// 我们直接使用这个时间作为progress即可
+		progress := int(dm.Timestamp)
 
+		// 默认发送到第一个分P（如果只有一个分P）
+		if len(partTimeMap) == 1 {
+			for _, timeRange := range partTimeMap {
 				danmakuItems = append(danmakuItems, bili.DanmakuItem{
 					CID:      timeRange.cid,
 					BvID:     history.BvID,
-					Progress: relativeProgress,
+					Progress: progress,
 					Message:  dm.Message,
 					Mode:     dm.Mode,
 					FontSize: dm.FontSize,
@@ -330,26 +332,21 @@ func (s *DanmakuService) sendDanmakuForHistoryWithSerialUsers(historyID uint) er
 				// 更新弹幕记录
 				dm.Sent = true
 				dm.CID = timeRange.cid
-				dm.Progress = relativeProgress
+				dm.Progress = progress
 				dm.BvID = history.BvID
 				db.Save(&dm)
-
-				found = true
 				sentCount++
 				break
 			}
-
-			// 如果超出最后一个分P，归到最后一个分P
-			if !found && partIdx == len(partTimeMap)-1 {
-				relativeProgress := int(dm.Timestamp - timeRange.startMs)
-				if relativeProgress < 0 {
-					relativeProgress = 0
-				}
-
+		} else {
+			// 多分P场景：需要特殊处理
+			// TODO: 如果一个XML对应多个分P，需要根据文件名或其他方式确定弹幕属于哪个分P
+			// 目前简单处理：发送到第一个分P
+			for _, timeRange := range partTimeMap {
 				danmakuItems = append(danmakuItems, bili.DanmakuItem{
 					CID:      timeRange.cid,
 					BvID:     history.BvID,
-					Progress: relativeProgress,
+					Progress: progress,
 					Message:  dm.Message,
 					Mode:     dm.Mode,
 					FontSize: dm.FontSize,
@@ -358,10 +355,11 @@ func (s *DanmakuService) sendDanmakuForHistoryWithSerialUsers(historyID uint) er
 
 				dm.Sent = true
 				dm.CID = timeRange.cid
-				dm.Progress = relativeProgress
+				dm.Progress = progress
 				dm.BvID = history.BvID
 				db.Save(&dm)
 				sentCount++
+				break
 			}
 		}
 	}

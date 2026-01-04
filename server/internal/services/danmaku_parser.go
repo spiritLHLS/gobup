@@ -64,7 +64,10 @@ type Guard struct {
 }
 
 // ParseDanmakuFile 解析弹幕XML文件
-func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (int, error) {
+// xmlPath: XML文件路径
+// sessionID: 直播会话ID
+// partID: 对应的分P ID（可选，用于多分P场景）
+func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string, partID ...uint) (int, error) {
 	log.Printf("[弹幕解析] 开始解析文件: %s (session_id=%s)", xmlPath, sessionID)
 
 	// 打开XML文件
@@ -101,6 +104,14 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 			log.Printf("[弹幕解析] 解析弹幕失败: %v", err)
 			continue
 		}
+		// 如果指定了partID，设置RoomID关联
+		if len(partID) > 0 && partID[0] > 0 {
+			// 查询对应的分P获取RoomID
+			var part models.RecordHistoryPart
+			if err := db.First(&part, partID[0]).Error; err == nil {
+				msg.RoomID = part.RoomID
+			}
+		}
 		msgsToSave = append(msgsToSave, msg)
 	}
 
@@ -111,6 +122,12 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 			log.Printf("[弹幕解析] 解析SC失败: %v", err)
 			continue
 		}
+		if len(partID) > 0 && partID[0] > 0 {
+			var part models.RecordHistoryPart
+			if err := db.First(&part, partID[0]).Error; err == nil {
+				msg.RoomID = part.RoomID
+			}
+		}
 		msgsToSave = append(msgsToSave, msg)
 	}
 
@@ -120,6 +137,12 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 		if err != nil {
 			log.Printf("[弹幕解析] 解析上舰失败: %v", err)
 			continue
+		}
+		if len(partID) > 0 && partID[0] > 0 {
+			var part models.RecordHistoryPart
+			if err := db.First(&part, partID[0]).Error; err == nil {
+				msg.RoomID = part.RoomID
+			}
 		}
 		msgsToSave = append(msgsToSave, msg)
 	}
@@ -155,6 +178,7 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string) (i
 }
 
 // parseDanmaku 解析普通弹幕
+// 注意：XML中的时间戳是相对于该视频片段的时间（秒），不是绝对时间
 func (p *DanmakuXMLParser) parseDanmaku(d D, sessionID string) (*models.LiveMsg, error) {
 	// 解析p属性: 时间戳,模式,字号,颜色,发送时间,弹幕池,用户ID,弹幕ID
 	parts := strings.Split(d.P, ",")
@@ -163,9 +187,14 @@ func (p *DanmakuXMLParser) parseDanmaku(d D, sessionID string) (*models.LiveMsg,
 	}
 
 	// 时间戳（秒 -> 毫秒）
+	// 这个时间戳是相对于当前视频片段的，不需要加上直播开始时间
 	timestamp, err := strconv.ParseFloat(parts[0], 64)
 	if err != nil {
 		return nil, fmt.Errorf("解析时间戳失败: %w", err)
+	}
+	// 如果时间戳为负数，跳过（异常数据）
+	if timestamp < 0 {
+		return nil, fmt.Errorf("弹幕时间戳为负数，已过滤")
 	}
 	timestampMs := int64(timestamp * 1000)
 
@@ -389,13 +418,14 @@ func (p *DanmakuXMLParser) ParseDanmakuForHistory(historyID uint) (int, error) {
 			continue
 		}
 
-		// 解析XML文件
-		count, err := p.ParseDanmakuFile(xmlPath, history.SessionID)
+		// 解析XML文件，传入partID以关联分P信息
+		count, err := p.ParseDanmakuFile(xmlPath, history.SessionID, part.ID)
 		if err != nil {
 			log.Printf("[弹幕解析] 解析失败: %s, error: %v", xmlPath, err)
 			continue
 		}
 
+		log.Printf("[弹幕解析] 分P %d (%s) 解析成功: %d 条弹幕", part.ID, filepath.Base(xmlPath), count)
 		totalCount += count
 	}
 
