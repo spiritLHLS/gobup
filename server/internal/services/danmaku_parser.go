@@ -194,12 +194,14 @@ func (p *DanmakuXMLParser) parseDanmaku(d D, sessionID string) (*models.LiveMsg,
 	}
 
 	// 如果有raw数据（blrec格式），可以解析更多信息
+	isLottery := false
 	if d.Raw != "" {
-		p.parseRawData(d.Raw, msg)
-		// 检查是否为抽奖弹幕（parseRawData会将抽奖弹幕的message设为空）
-		if msg.Message == "" {
-			return nil, fmt.Errorf("抽奖弹幕，已过滤")
-		}
+		isLottery = p.parseRawData(d.Raw, msg)
+	}
+
+	// 检查是否为抽奖弹幕
+	if isLottery {
+		return nil, fmt.Errorf("抽奖弹幕，已过滤")
 	}
 
 	return msg, nil
@@ -279,57 +281,69 @@ func (p *DanmakuXMLParser) parseGuard(guard Guard, sessionID string) (*models.Li
 	}, nil
 }
 
-// parseRawData 解析原始数据（blrec格式）
-func (p *DanmakuXMLParser) parseRawData(raw string, msg *models.LiveMsg) {
+// parseRawData 解析原始数据（blrec格式），返回是否为抽奖弹幕
+func (p *DanmakuXMLParser) parseRawData(raw string, msg *models.LiveMsg) bool {
 	// raw格式: [[时间,模式,字号,颜色,时间戳,弹幕池,用户ID,弹幕ID,权重,抽奖标志],[...],[粉丝勋章信息],[用户等级,...],...]
 	var rawData []interface{}
 	if err := json.Unmarshal([]byte(raw), &rawData); err != nil {
-		return
+		// JSON 解析失败，可能是格式不正确，放行（不过滤）
+		return false
 	}
 
-	if len(rawData) < 5 {
-		return
+	// 检查数组长度，如果不足则无法完整解析，放行（不过滤）
+	if len(rawData) < 1 {
+		return false
 	}
+
+	// 标记是否为抽奖弹幕（先初始化为false）
+	isLottery := false
 
 	// 解析基本信息 rawData[0]
 	if basicInfo, ok := rawData[0].([]interface{}); ok && len(basicInfo) >= 10 {
 		// 检查是否为抽奖弹幕（索引9）
 		if lottery, ok := basicInfo[9].(float64); ok && int(lottery) != 0 {
-			msg.Message = "" // 标记为需要过滤的抽奖弹幕
-			return
+			isLottery = true // 标记为抽奖弹幕，但继续解析其他信息
 		}
 	}
 
-	// 解析粉丝勋章信息 rawData[3]
-	if medalInfo, ok := rawData[3].([]interface{}); ok && len(medalInfo) >= 4 {
-		// [勋章等级, 勋章名称, 主播名称, 房间ID]
-		if level, ok := medalInfo[0].(float64); ok {
-			msg.MedalLevel = int(level)
-		}
-		if name, ok := medalInfo[1].(string); ok {
-			msg.MedalName = name
-		}
-		// 解析勋章所属的房间ID（索引3）
-		if roomID, ok := medalInfo[3].(float64); ok {
-			msg.MedalRoomID = fmt.Sprintf("%.0f", roomID)
-		} else if roomIDStr, ok := medalInfo[3].(string); ok {
-			msg.MedalRoomID = roomIDStr
+	// 解析用户名 rawData[2] 可能包含用户名（索引2，需要检查长度）
+	if len(rawData) >= 3 {
+		if userNameInfo, ok := rawData[2].([]interface{}); ok && len(userNameInfo) >= 2 {
+			if userName, ok := userNameInfo[1].(string); ok {
+				msg.UserName = userName
+			}
 		}
 	}
 
-	// 解析用户等级信息 rawData[4]
-	if userInfo, ok := rawData[4].([]interface{}); ok && len(userInfo) >= 1 {
-		if ulLevel, ok := userInfo[0].(float64); ok {
-			msg.ULevel = int(ulLevel)
+	// 解析粉丝勋章信息 rawData[3]（索引3，需要检查长度）
+	if len(rawData) >= 4 {
+		if medalInfo, ok := rawData[3].([]interface{}); ok && len(medalInfo) >= 4 {
+			// [勋章等级, 勋章名称, 主播名称, 房间ID]
+			if level, ok := medalInfo[0].(float64); ok {
+				msg.MedalLevel = int(level)
+			}
+			if name, ok := medalInfo[1].(string); ok {
+				msg.MedalName = name
+			}
+			// 解析勋章所属的房间ID（索引3）
+			if roomID, ok := medalInfo[3].(float64); ok {
+				msg.MedalRoomID = fmt.Sprintf("%.0f", roomID)
+			} else if roomIDStr, ok := medalInfo[3].(string); ok {
+				msg.MedalRoomID = roomIDStr
+			}
 		}
 	}
 
-	// 解析用户名 rawData[2] 可能包含用户名
-	if userNameInfo, ok := rawData[2].([]interface{}); ok && len(userNameInfo) >= 2 {
-		if userName, ok := userNameInfo[1].(string); ok {
-			msg.UserName = userName
+	// 解析用户等级信息 rawData[4]（索引4，需要检查长度）
+	if len(rawData) >= 5 {
+		if userInfo, ok := rawData[4].([]interface{}); ok && len(userInfo) >= 1 {
+			if ulLevel, ok := userInfo[0].(float64); ok {
+				msg.ULevel = int(ulLevel)
+			}
 		}
 	}
+
+	return isLottery // 返回是否为抽奖弹幕
 }
 
 // ParseDanmakuForHistory 为历史记录解析弹幕XML文件
