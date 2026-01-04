@@ -75,21 +75,21 @@
           </el-button>
 
           <el-button 
-            type="success"
-            :disabled="!history?.bvId || history?.danmakuSent"
-            @click="$emit('sendDanmaku')"
-          >
-            <el-icon><ChatDotRound /></el-icon>
-            发送弹幕
-          </el-button>
-
-          <el-button 
             type="primary"
             plain
             @click="$emit('parseDanmaku')"
           >
             <el-icon><Document /></el-icon>
             解析弹幕
+          </el-button>
+
+          <el-button 
+            type="success"
+            :disabled="!history?.bvId || history?.danmakuSent"
+            @click="$emit('sendDanmaku')"
+          >
+            <el-icon><ChatDotRound /></el-icon>
+            发送弹幕
           </el-button>
 
           <el-button 
@@ -175,8 +175,8 @@ defineEmits([
   'upload',
   'publish',
   'manualPublish',
-  'sendDanmaku',
   'parseDanmaku',
+  'sendDanmaku',
   'syncVideo',
   'moveFiles',
   'resetStatus',
