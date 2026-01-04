@@ -36,7 +36,7 @@ func NewProxyPool(proxyURLs []string) *ProxyPool {
 	pool := &ProxyPool{
 		proxies:      make([]*ProxyInfo, 0),
 		current:      0,
-		localLimiter: rate.NewLimiter(rate.Every(22*time.Second), 1), // 本地IP限流：22秒1条
+		localLimiter: rate.NewLimiter(rate.Every(30*time.Second), 1), // 本地IP限流：30秒1条
 	}
 
 	// 添加本地IP（nil表示不使用代理）
@@ -62,7 +62,7 @@ func NewProxyPool(proxyURLs []string) *ProxyPool {
 
 		proxyInfo := &ProxyInfo{
 			URL:       proxyURL,
-			Limiter:   rate.NewLimiter(rate.Every(22*time.Second), 1), // 每个代理独立限流：22秒1条
+			Limiter:   rate.NewLimiter(rate.Every(30*time.Second), 1), // 每个代理独立限流：30秒1条
 			Available: true,                                           // 初始标记为可用
 			LastCheck: time.Time{},                                    // 等待首次检查
 		}
