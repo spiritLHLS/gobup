@@ -432,7 +432,7 @@ func (s *DanmakuService) sendDanmakuSerial(validUsers []models.BiliBiliUser, use
 				log.Printf("[弹幕发送] 用户%s 第%d/%d条失败 (连续失败%d次, 进度=%dms, 内容=%s): %v",
 					user.Uname, dmIdx+1, len(userDanmakus), consecutiveFailures, dm.Progress, dm.Message, err)
 
-				// 指数退避机制：30秒 -> 1分钟 -> 2分钟 -> 5分钟 -> 10分钟
+				// 指数退避机制：30秒 -> 1分钟 -> 5分钟 -> 10分钟 -> 15分钟
 				var waitTime time.Duration
 				switch consecutiveFailures {
 				case 1:
@@ -440,11 +440,11 @@ func (s *DanmakuService) sendDanmakuSerial(validUsers []models.BiliBiliUser, use
 				case 2:
 					waitTime = 1 * time.Minute
 				case 3:
-					waitTime = 2 * time.Minute
-				case 4:
 					waitTime = 5 * time.Minute
-				default:
+				case 4:
 					waitTime = 10 * time.Minute
+				default:
+					waitTime = 15 * time.Minute
 				}
 				log.Printf("[弹幕发送] 用户%s 连续失败%d次，等待%v后继续...", user.Uname, consecutiveFailures, waitTime)
 				time.Sleep(waitTime)
@@ -556,9 +556,9 @@ func (s *DanmakuService) sendDanmakuWithProxyPool(validUsers []models.BiliBiliUs
 					case 2:
 						waitTime = 1 * time.Minute
 					case 3:
-						waitTime = 2 * time.Minute
-					default:
 						waitTime = 5 * time.Minute
+					default:
+						waitTime = 10 * time.Minute
 					}
 					if consecutiveFailures >= 3 {
 						log.Printf("[弹幕发送] 用户%s 连续失败%d次，等待%v后继续...", user.Uname, consecutiveFailures, waitTime)
