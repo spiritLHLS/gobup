@@ -135,25 +135,27 @@ type RecordHistoryPart struct {
 
 // BiliBiliUser B站用户
 type BiliBiliUser struct {
-	ID           uint           `gorm:"primarykey" json:"id"`
-	CreatedAt    time.Time      `json:"createdAt"`
-	UpdatedAt    time.Time      `json:"updatedAt"`
-	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
-	UID          int64          `gorm:"uniqueIndex;not null" json:"uid"`
-	Uname        string         `gorm:"index" json:"uname"`
-	Face         string         `json:"face"`
-	Cookies      string         `gorm:"type:text" json:"cookies"`
-	AccessKey    string         `json:"accessKey"`
-	RefreshToken string         `json:"refreshToken"`
-	Login        bool           `gorm:"default:false;index" json:"login"`
-	Level        int            `json:"level"`
-	VipType      int            `json:"vipType"`
-	VipStatus    int            `json:"vipStatus"`
-	Moral        int            `json:"moral"`
-	CookieInfo   string         `gorm:"type:text" json:"cookieInfo"`
-	LoginTime    *time.Time     `json:"loginTime"`
-	ExpireTime   *time.Time     `json:"expireTime"`
-	WxPushToken  string         `json:"wxPushToken"` // 用户的WxPusher token
+	ID                 uint           `gorm:"primarykey" json:"id"`
+	CreatedAt          time.Time      `json:"createdAt"`
+	UpdatedAt          time.Time      `json:"updatedAt"`
+	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
+	UID                int64          `gorm:"uniqueIndex;not null" json:"uid"`
+	Uname              string         `gorm:"index" json:"uname"`
+	Face               string         `json:"face"`
+	Cookies            string         `gorm:"type:text" json:"cookies"`
+	AccessKey          string         `json:"accessKey"`
+	RefreshToken       string         `json:"refreshToken"`
+	Login              bool           `gorm:"default:false;index" json:"login"`
+	Level              int            `json:"level"`
+	VipType            int            `json:"vipType"`
+	VipStatus          int            `json:"vipStatus"`
+	Moral              int            `json:"moral"`
+	CookieInfo         string         `gorm:"type:text" json:"cookieInfo"`
+	LoginTime          *time.Time     `json:"loginTime"`
+	ExpireTime         *time.Time     `json:"expireTime"`
+	WxPushToken        string         `json:"wxPushToken"`                             // 用户的WxPusher token
+	EnableDanmakuProxy bool           `gorm:"default:false" json:"enableDanmakuProxy"` // 启用弹幕代理
+	DanmakuProxyList   string         `gorm:"type:text" json:"danmakuProxyList"`       // 代理列表，每行一个，格式: socks5://ip:port 或 http://user:pass@ip:port
 }
 
 type LiveMsg struct {

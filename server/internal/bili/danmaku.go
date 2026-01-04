@@ -38,6 +38,24 @@ func (c *BiliClient) SendDanmakuWithoutWait(cid int64, bvid string, progress int
 		return fmt.Errorf("等待弹幕限流器失败: %w", err)
 	}
 
+	return c.sendDanmakuInternal(cid, bvid, progress, message, mode, fontSize, color)
+}
+
+// SendDanmakuWithProxy 发送弹幕（使用代理池的限流器）
+func (c *BiliClient) SendDanmakuWithProxy(cid int64, bvid string, progress int, message string, mode, fontSize, color int, proxyInfo *ProxyInfo) error {
+	// 使用代理特定的限流器
+	if proxyInfo != nil {
+		if err := proxyInfo.WaitDanmaku(); err != nil {
+			return fmt.Errorf("等待代理限流器失败: %w", err)
+		}
+	}
+
+	return c.sendDanmakuInternal(cid, bvid, progress, message, mode, fontSize, color)
+}
+
+// sendDanmakuInternal 发送弹幕的内部实现
+func (c *BiliClient) sendDanmakuInternal(cid int64, bvid string, progress int, message string, mode, fontSize, color int) error {
+
 	csrf := GetCookieValue(c.Cookies, "bili_jct")
 	if csrf == "" {
 		return fmt.Errorf("未找到CSRF token")

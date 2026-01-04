@@ -349,10 +349,12 @@ func UpdateBiliUser(c *gin.Context) {
 
 	// 只更新允许更新的字段
 	if err := db.Model(&user).Updates(map[string]interface{}{
-		"uname":         user.Uname,
-		"face":          user.Face,
-		"level":         user.Level,
-		"wx_push_token": user.WxPushToken,
+		"uname":                user.Uname,
+		"face":                 user.Face,
+		"level":                user.Level,
+		"wx_push_token":        user.WxPushToken,
+		"enable_danmaku_proxy": user.EnableDanmakuProxy,
+		"danmaku_proxy_list":   user.DanmakuProxyList,
 	}).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "更新失败"})
 		return

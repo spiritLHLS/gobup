@@ -114,6 +114,29 @@ func NewBiliClient(accessKey, cookies string, mid int64) *BiliClient {
 	}
 }
 
+// NewBiliClientWithProxy 创建带代理的BiliClient
+func NewBiliClientWithProxy(accessKey, cookies string, mid int64, proxyURL string) *BiliClient {
+	client := req.C().
+		SetTimeout(300 * time.Second).
+		ImpersonateChrome()
+
+	if cookies != "" {
+		client.SetCommonHeader("Cookie", cookies)
+	}
+
+	// 如果提供了代理URL，设置代理
+	if proxyURL != "" {
+		client.SetProxyURL(proxyURL)
+	}
+
+	return &BiliClient{
+		AccessKey: accessKey,
+		Cookies:   cookies,
+		Mid:       mid,
+		ReqClient: client,
+	}
+}
+
 // PreUpload 预上传
 func (c *BiliClient) PreUpload(filename string, filesize int64) (*PreUploadResp, error) {
 	uploader := NewUposUploader(c)

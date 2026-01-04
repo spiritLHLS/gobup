@@ -332,7 +332,6 @@ func (s *DanmakuService) sendDanmakuForHistoryWithSerialUsers(historyID uint) er
 
 		userCount := len(validUsers)
 		successCount := 0
-		totalSent := 0
 
 		// 将弹幕按用户分组
 		userDanmakuGroups := make([][]bili.DanmakuItem, userCount)
@@ -346,77 +345,23 @@ func (s *DanmakuService) sendDanmakuForHistoryWithSerialUsers(historyID uint) er
 			userDanmakuGroups[userIdx] = append(userDanmakuGroups[userIdx], dm)
 		}
 
-		// 用户串行发送（一个用户发送完后才轮到下一个用户）
-		for userIdx, user := range validUsers {
-			userDanmakus := userDanmakuGroups[userIdx]
-			if len(userDanmakus) == 0 {
-				continue
+		// 检查是否有用户启用了代理池
+		hasProxyEnabled := false
+		for _, user := range validUsers {
+			if user.EnableDanmakuProxy && user.DanmakuProxyList != "" {
+				hasProxyEnabled = true
+				break
 			}
+		}
 
-			log.Printf("[弹幕发送] 👤 用户%s开始发送 %d 条弹幕", user.Uname, len(userDanmakus))
-
-			client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
-			userSuccessCount := 0
-			consecutiveFailures := 0 // 连续失败计数
-
-			// 该用户发送其负责的所有弹幕
-			for dmIdx, dm := range userDanmakus {
-				totalSent++
-
-				// 发送弹幕
-				err := client.SendDanmakuWithoutWait(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
-				if err != nil {
-					consecutiveFailures++
-					log.Printf("[弹幕发送] ❌ 用户%s 第%d/%d条失败 (连续失败%d次, 进度=%dms, 内容=%s): %v",
-						user.Uname, dmIdx+1, len(userDanmakus), consecutiveFailures, dm.Progress, dm.Message, err)
-
-					// 指数退避机制：30秒 -> 1分钟 -> 2分钟 -> 5分钟 -> 10分钟
-					var waitTime time.Duration
-					switch consecutiveFailures {
-					case 1:
-						waitTime = 30 * time.Second
-					case 2:
-						waitTime = 1 * time.Minute
-					case 3:
-						waitTime = 2 * time.Minute
-					case 4:
-						waitTime = 5 * time.Minute
-					default:
-						waitTime = 10 * time.Minute
-					}
-					log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败%d次，等待%v后继续...", user.Uname, consecutiveFailures, waitTime)
-					time.Sleep(waitTime)
-				} else {
-					userSuccessCount++
-					successCount++
-					consecutiveFailures = 0 // 成功后重置失败计数
-
-					// 成功后添加随机等待（全局限流器已确保至少22秒间隔）
-					// 这里添加3-8秒的额外随机延迟，总延迟在25-30秒之间，接近biliupforjava的25秒策略
-					extraWait := 3 + rand.Intn(6) // 3-8秒
-
-					log.Printf("[弹幕发送] ✓ 用户%s 第%d/%d条成功，额外等待%d秒...",
-						user.Uname, dmIdx+1, len(userDanmakus), extraWait)
-					time.Sleep(time.Duration(extraWait) * time.Second)
-				}
-
-				// 更新进度
-				if totalSent%10 == 0 || totalSent == len(danmakuItems) {
-					log.Printf("[弹幕发送] ⏳ 总进度: %d/%d (%.1f%%)",
-						totalSent, len(danmakuItems), float64(totalSent)*100/float64(len(danmakuItems)))
-				}
-				danmakuprogress.SetDanmakuProgress(int64(historyID), totalSent, len(danmakuItems), true, false)
-			}
-
-			log.Printf("[弹幕发送] ✅ 用户%s 发送完成: 成功 %d/%d 条",
-				user.Uname, userSuccessCount, len(userDanmakus))
-
-			// 用户切换时额外等待，进一步降低风控风险
-			if userIdx < len(validUsers)-1 {
-				switchWait := 10 + rand.Intn(11) // 10-20秒
-				log.Printf("[弹幕发送] 🔄 切换到下一个用户，等待%d秒...", switchWait)
-				time.Sleep(time.Duration(switchWait) * time.Second)
-			}
+		// 如果有用户启用代理池，使用并行发送
+		if hasProxyEnabled {
+			log.Printf("[弹幕发送] 检测到代理池配置，使用并行发送模式")
+			successCount = s.sendDanmakuWithProxyPool(validUsers, userDanmakuGroups, history.BvID, int64(historyID))
+		} else {
+			// 否则使用传统的串行发送
+			log.Printf("[弹幕发送] 使用传统串行发送模式")
+			successCount = s.sendDanmakuSerial(validUsers, userDanmakuGroups, history.BvID, int64(historyID), len(danmakuItems))
 		}
 
 		log.Printf("[弹幕发送] ✅ 全部发送完成: 成功 %d/%d 条 (成功率 %.1f%%)",
@@ -441,6 +386,201 @@ func (s *DanmakuService) sendDanmakuForHistoryWithSerialUsers(historyID uint) er
 	danmakuprogress.ClearDanmakuProgress(int64(historyID))
 
 	return nil
+}
+
+// sendDanmakuSerial 串行发送弹幕（传统方式）
+func (s *DanmakuService) sendDanmakuSerial(validUsers []models.BiliBiliUser, userDanmakuGroups [][]bili.DanmakuItem, bvid string, historyID int64, totalCount int) int {
+	successCount := 0
+	totalSent := 0
+
+	// 用户串行发送（一个用户发送完后才轮到下一个用户）
+	for userIdx, user := range validUsers {
+		userDanmakus := userDanmakuGroups[userIdx]
+		if len(userDanmakus) == 0 {
+			continue
+		}
+
+		log.Printf("[弹幕发送] 👤 用户%s开始发送 %d 条弹幕", user.Uname, len(userDanmakus))
+
+		client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+		userSuccessCount := 0
+		consecutiveFailures := 0 // 连续失败计数
+
+		// 该用户发送其负责的所有弹幕
+		for dmIdx, dm := range userDanmakus {
+			totalSent++
+
+			// 发送弹幕
+			err := client.SendDanmakuWithoutWait(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color)
+			if err != nil {
+				consecutiveFailures++
+				log.Printf("[弹幕发送] ❌ 用户%s 第%d/%d条失败 (连续失败%d次, 进度=%dms, 内容=%s): %v",
+					user.Uname, dmIdx+1, len(userDanmakus), consecutiveFailures, dm.Progress, dm.Message, err)
+
+				// 指数退避机制：30秒 -> 1分钟 -> 2分钟 -> 5分钟 -> 10分钟
+				var waitTime time.Duration
+				switch consecutiveFailures {
+				case 1:
+					waitTime = 30 * time.Second
+				case 2:
+					waitTime = 1 * time.Minute
+				case 3:
+					waitTime = 2 * time.Minute
+				case 4:
+					waitTime = 5 * time.Minute
+				default:
+					waitTime = 10 * time.Minute
+				}
+				log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败%d次，等待%v后继续...", user.Uname, consecutiveFailures, waitTime)
+				time.Sleep(waitTime)
+			} else {
+				userSuccessCount++
+				successCount++
+				consecutiveFailures = 0 // 成功后重置失败计数
+
+				// 成功后添加随机等待（全局限流器已确保至少22秒间隔）
+				// 这里添加3-8秒的额外随机延迟，总延迟在25-30秒之间，接近biliupforjava的25秒策略
+				extraWait := 3 + rand.Intn(6) // 3-8秒
+
+				log.Printf("[弹幕发送] ✓ 用户%s 第%d/%d条成功，额外等待%d秒...",
+					user.Uname, dmIdx+1, len(userDanmakus), extraWait)
+				time.Sleep(time.Duration(extraWait) * time.Second)
+			}
+
+			// 更新进度
+			if totalSent%10 == 0 || totalSent == totalCount {
+				log.Printf("[弹幕发送] ⏳ 总进度: %d/%d (%.1f%%)",
+					totalSent, totalCount, float64(totalSent)*100/float64(totalCount))
+			}
+			danmakuprogress.SetDanmakuProgress(historyID, totalSent, totalCount, true, false)
+		}
+
+		log.Printf("[弹幕发送] ✅ 用户%s 发送完成: 成功 %d/%d 条",
+			user.Uname, userSuccessCount, len(userDanmakus))
+
+		// 用户切换时额外等待，进一步降低风控风险
+		if userIdx < len(validUsers)-1 {
+			switchWait := 10 + rand.Intn(11) // 10-20秒
+			log.Printf("[弹幕发送] 🔄 切换到下一个用户，等待%d秒...", switchWait)
+			time.Sleep(time.Duration(switchWait) * time.Second)
+		}
+	}
+
+	return successCount
+}
+
+// sendDanmakuWithProxyPool 使用代理池并行发送弹幕
+func (s *DanmakuService) sendDanmakuWithProxyPool(validUsers []models.BiliBiliUser, userDanmakuGroups [][]bili.DanmakuItem, bvid string, historyID int64) int {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	totalSuccessCount := 0
+	totalSent := 0
+
+	// 为每个用户创建一个goroutine
+	for userIdx, user := range validUsers {
+		userDanmakus := userDanmakuGroups[userIdx]
+		if len(userDanmakus) == 0 {
+			continue
+		}
+
+		wg.Add(1)
+		go func(user models.BiliBiliUser, danmakus []bili.DanmakuItem, userIdx int) {
+			defer wg.Done()
+
+			// 创建代理池
+			var proxyPool *bili.ProxyPool
+			if user.EnableDanmakuProxy && user.DanmakuProxyList != "" {
+				proxyURLs := bili.ParseProxyList(user.DanmakuProxyList)
+				proxyPool = bili.NewProxyPool(proxyURLs)
+				log.Printf("[弹幕发送] 👤 用户%s 启用代理池，共%d个IP (包含本地)", user.Uname, proxyPool.GetProxyCount())
+			} else {
+				// 未启用代理，只使用本地IP
+				proxyPool = bili.NewProxyPool([]string{})
+				log.Printf("[弹幕发送] 👤 用户%s 使用本地IP发送", user.Uname)
+			}
+
+			userSuccessCount := 0
+			consecutiveFailures := 0
+
+			log.Printf("[弹幕发送] 👤 用户%s 开始发送 %d 条弹幕", user.Uname, len(danmakus))
+
+			for dmIdx, dm := range danmakus {
+				// 获取下一个代理
+				proxyInfo := proxyPool.GetNextProxy()
+				if proxyInfo == nil {
+					log.Printf("[弹幕发送] ❌ 用户%s 无法获取代理", user.Uname)
+					break
+				}
+
+				// 创建带代理的客户端
+				var client *bili.BiliClient
+				if proxyInfo.IsLocal() {
+					client = bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+				} else {
+					client = bili.NewBiliClientWithProxy(user.AccessKey, user.Cookies, user.UID, proxyInfo.GetProxyURL())
+				}
+
+				// 发送弹幕（使用代理特定的限流器）
+				err := client.SendDanmakuWithProxy(dm.CID, dm.BvID, dm.Progress, dm.Message, dm.Mode, dm.FontSize, dm.Color, proxyInfo)
+
+				mu.Lock()
+				totalSent++
+				currentTotal := totalSent
+				mu.Unlock()
+
+				if err != nil {
+					consecutiveFailures++
+					log.Printf("[弹幕发送] ❌ 用户%s 代理%s 第%d/%d条失败 (连续失败%d次): %v",
+						user.Uname, proxyInfo.String(), dmIdx+1, len(danmakus), consecutiveFailures, err)
+
+					// 指数退避
+					var waitTime time.Duration
+					switch consecutiveFailures {
+					case 1:
+						waitTime = 30 * time.Second
+					case 2:
+						waitTime = 1 * time.Minute
+					case 3:
+						waitTime = 2 * time.Minute
+					default:
+						waitTime = 5 * time.Minute
+					}
+					if consecutiveFailures >= 3 {
+						log.Printf("[弹幕发送] ⚠️ 用户%s 连续失败%d次，等待%v后继续...", user.Uname, consecutiveFailures, waitTime)
+						time.Sleep(waitTime)
+					}
+				} else {
+					userSuccessCount++
+					mu.Lock()
+					totalSuccessCount++
+					mu.Unlock()
+					consecutiveFailures = 0
+
+					log.Printf("[弹幕发送] ✓ 用户%s 代理%s 第%d/%d条成功",
+						user.Uname, proxyInfo.String(), dmIdx+1, len(danmakus))
+
+					// 成功后添加3-8秒随机延迟（代理限流器已保证22秒基础间隔）
+					extraWait := 3 + rand.Intn(6)
+					time.Sleep(time.Duration(extraWait) * time.Second)
+				}
+
+				// 更新进度
+				mu.Lock()
+				if currentTotal%10 == 0 {
+					log.Printf("[弹幕发送] ⏳ 总进度: %d 条已发送", currentTotal)
+				}
+				danmakuprogress.SetDanmakuProgress(historyID, currentTotal, -1, true, false)
+				mu.Unlock()
+			}
+
+			log.Printf("[弹幕发送] ✅ 用户%s 发送完成: 成功 %d/%d 条",
+				user.Uname, userSuccessCount, len(danmakus))
+		}(user, userDanmakus, userIdx)
+	}
+
+	// 等待所有用户发送完成
+	wg.Wait()
+	return totalSuccessCount
 }
 
 // deduplicateDanmakus 弹幕去重（参考biliupforjava的布隆过滤器实现）
