@@ -11,7 +11,6 @@ VERSION="0.9.5"
 CONF_DIR="/etc/3proxy/conf"
 PASSWD_FILE="${CONF_DIR}/passwd"
 CFG_FILE="${CONF_DIR}/3proxy.cfg"
-LOG_FILE="/var/log/3proxy.log"
 
 ARCH="$(uname -m)"
 
@@ -46,31 +45,20 @@ chmod 600 "${PASSWD_FILE}"
 
 echo "▶ 创建 pid 文件目录"
 mkdir -p /run/3proxy
-chown proxy:proxy /run/3proxy
+chown root:root /run/3proxy
 chmod 755 /run/3proxy
 
 echo "▶ 写入配置文件（覆盖）"
 cat > "${CFG_FILE}" <<EOF
-daemon
-pidfile /run/3proxy/3proxy.pid
-
 maxconn 1024
 nscache 65536
 
-users \$/etc/3proxy/conf/passwd
+users /etc/3proxy/conf/passwd
 auth strong
 allow ${USER_NAME}
 
 socks -p${PORT} -a
-
-log ${LOG_FILE} D
-rotate 7
 EOF
-
-echo "▶ 初始化日志"
-touch "${LOG_FILE}"
-chown proxy:proxy "${LOG_FILE}"
-chmod 644 "${LOG_FILE}"
 
 echo "▶ 重启并设置开机启动"
 systemctl daemon-reexec
