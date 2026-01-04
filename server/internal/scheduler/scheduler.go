@@ -21,8 +21,8 @@ func InitScheduler() {
 	// 初始化上传服务（用于自动上传任务）
 	uploadService = upload.NewService()
 
-	// 视频同步任务 - 每5分钟执行一次
-	cronJob.AddFunc("*/5 * * * *", func() {
+	// 视频同步任务 - 每10分钟执行一次
+	cronJob.AddFunc("*/10 * * * *", func() {
 		log.Println("执行定时任务: 视频同步")
 		syncService := services.NewVideoSyncService()
 		if err := syncService.ProcessPendingTasks(); err != nil {
@@ -76,8 +76,8 @@ func InitScheduler() {
 		}
 	})
 
-	// 直播状态监控 - 每5分钟执行一次
-	cronJob.AddFunc("*/5 * * * *", func() {
+	// 直播状态监控 - 每10分钟执行一次
+	cronJob.AddFunc("*/10 * * * *", func() {
 		log.Println("执行定时任务: 直播状态监控")
 		liveStatusService := services.NewLiveStatusService()
 		if err := liveStatusService.UpdateAllRoomsStatus(); err != nil {
