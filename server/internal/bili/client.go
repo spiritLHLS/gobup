@@ -1,13 +1,16 @@
 package bili
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/imroc/req/v3"
+	"github.com/wzshiming/socks5"
 )
 
 type BiliClient struct {
@@ -128,9 +131,22 @@ func NewBiliClientWithProxy(accessKey, cookies string, mid int64, proxyURL strin
 		client.SetCommonHeader("Cookie", cookies)
 	}
 
-	// 如果提供了代理URL，设置代理
+	// 如果提供了代理URL，使用wzshiming/socks5处理socks5代理，避免EOF错误
+	// (ref: https://github.com/imroc/req/issues/473, https://github.com/imroc/req/issues/272)
 	if proxyURL != "" {
-		client.SetProxyURL(proxyURL)
+		if strings.HasPrefix(proxyURL, "socks5://") {
+			// 使用 wzshiming/socks5 库处理 socks5 代理
+			socks5Dialer, err := socks5.NewDialer(proxyURL)
+			if err == nil {
+				// 设置自定义拨号器
+				client.SetDial(func(ctx context.Context, network, addr string) (net.Conn, error) {
+					return socks5Dialer.DialContext(ctx, network, addr)
+				})
+			}
+		} else {
+			// 非socks5代理使用原生SetProxyURL
+			client.SetProxyURL(proxyURL)
+		}
 	}
 
 	return &BiliClient{
