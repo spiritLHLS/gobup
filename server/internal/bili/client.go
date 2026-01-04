@@ -1,8 +1,10 @@
 package bili
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -118,6 +120,14 @@ func NewBiliClient(accessKey, cookies string, mid int64) *BiliClient {
 func NewBiliClientWithProxy(accessKey, cookies string, mid int64, proxyURL string) *BiliClient {
 	client := req.C().
 		SetTimeout(300 * time.Second).
+		SetDial(func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// 为代理连接设置更短的拨号超时时间(30秒)
+			dialer := &net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}
+			return dialer.DialContext(ctx, network, addr)
+		}).
 		ImpersonateChrome()
 
 	if cookies != "" {

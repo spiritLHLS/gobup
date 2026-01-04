@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/url"
 	"strings"
 	"sync"
@@ -14,9 +15,11 @@ import (
 
 // ProxyInfo 代理信息
 type ProxyInfo struct {
-	URL     string        // 代理URL
-	Limiter *rate.Limiter // 每个代理独立的限流器
-	mu      sync.Mutex
+	URL       string        // 代理URL
+	Limiter   *rate.Limiter // 每个代理独立的限流器
+	mu        sync.Mutex
+	Available bool // 代理是否可用
+	LastCheck time.Time
 }
 
 // ProxyPool 代理池
@@ -38,8 +41,10 @@ func NewProxyPool(proxyURLs []string) *ProxyPool {
 
 	// 添加本地IP（nil表示不使用代理）
 	pool.proxies = append(pool.proxies, &ProxyInfo{
-		URL:     "", // 空字符串表示本地IP
-		Limiter: pool.localLimiter,
+		URL:       "", // 空字符串表示本地IP
+		Limiter:   pool.localLimiter,
+		Available: true,
+		LastCheck: time.Now(),
 	})
 
 	// 添加代理IP，每个代理独立限流
@@ -55,11 +60,18 @@ func NewProxyPool(proxyURLs []string) *ProxyPool {
 			continue
 		}
 
-		pool.proxies = append(pool.proxies, &ProxyInfo{
-			URL:     proxyURL,
-			Limiter: rate.NewLimiter(rate.Every(22*time.Second), 1), // 每个代理独立限流：22秒1条
-		})
-		log.Printf("[代理池] ✓ 添加代理: %s", proxyURL)
+		proxyInfo := &ProxyInfo{
+			URL:       proxyURL,
+			Limiter:   rate.NewLimiter(rate.Every(22*time.Second), 1), // 每个代理独立限流：22秒1条
+			Available: true,                                           // 初始标记为可用
+			LastCheck: time.Time{},                                    // 等待首次检查
+		}
+
+		// 异步检查代理可用性
+		go pool.checkProxyHealth(proxyInfo)
+
+		pool.proxies = append(pool.proxies, proxyInfo)
+		log.Printf("[代理池] ✓ 添加代理: %s (等待健康检查...)", proxyURL)
 	}
 
 	log.Printf("[代理池] 初始化完成，共 %d 个IP (包含本地IP)", len(pool.proxies))
@@ -162,4 +174,96 @@ func ValidateProxy(proxyURL string) error {
 	}
 
 	return nil
+}
+
+// checkProxyHealth 检查代理的健康状态
+func (p *ProxyPool) checkProxyHealth(proxyInfo *ProxyInfo) {
+	if proxyInfo.IsLocal() {
+		return // 本地IP不需要检查
+	}
+
+	u, err := url.Parse(proxyInfo.URL)
+	if err != nil {
+		log.Printf("[代理池] ❌ 代理URL解析失败 %s: %v", proxyInfo.URL, err)
+		proxyInfo.mu.Lock()
+		proxyInfo.Available = false
+		proxyInfo.LastCheck = time.Now()
+		proxyInfo.mu.Unlock()
+		return
+	}
+
+	// 提取主机和端口
+	host := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		// 根据协议设置默认端口
+		switch u.Scheme {
+		case "socks5", "socks5h":
+			port = "1080"
+		case "http", "https":
+			port = "8080"
+		default:
+			port = "1080"
+		}
+	}
+
+	// 尝试建立TCP连接（5秒超时）
+	addr := net.JoinHostPort(host, port)
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+
+	proxyInfo.mu.Lock()
+	defer proxyInfo.mu.Unlock()
+
+	if err != nil {
+		proxyInfo.Available = false
+		proxyInfo.LastCheck = time.Now()
+		log.Printf("[代理池] ❌ 代理不可达 %s (%s): %v", proxyInfo.URL, addr, err)
+	} else {
+		conn.Close()
+		proxyInfo.Available = true
+		proxyInfo.LastCheck = time.Now()
+		log.Printf("[代理池] ✓ 代理可用 %s (%s)", proxyInfo.URL, addr)
+	}
+}
+
+// GetNextAvailableProxy 获取下一个可用的代理（跳过不可用的）
+func (p *ProxyPool) GetNextAvailableProxy() *ProxyInfo {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if len(p.proxies) == 0 {
+		return nil
+	}
+
+	// 最多尝试所有代理一遍
+	attempts := len(p.proxies)
+	for i := 0; i < attempts; i++ {
+		proxy := p.proxies[p.current]
+		p.current = (p.current + 1) % len(p.proxies)
+
+		// 检查是否可用
+		proxy.mu.Lock()
+		available := proxy.Available
+		lastCheck := proxy.LastCheck
+		proxy.mu.Unlock()
+
+		// 如果是本地IP，直接返回
+		if proxy.IsLocal() {
+			return proxy
+		}
+
+		// 如果代理可用，返回
+		if available {
+			return proxy
+		}
+
+		// 如果超过5分钟没检查，重新检查
+		if time.Since(lastCheck) > 5*time.Minute {
+			go p.checkProxyHealth(proxy)
+		}
+	}
+
+	// 如果所有代理都不可用，返回本地IP
+	log.Printf("[代理池] ⚠️ 所有代理都不可用，使用本地IP")
+	return p.proxies[0] // 第一个总是本地IP
 }

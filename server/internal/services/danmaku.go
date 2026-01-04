@@ -511,8 +511,8 @@ func (s *DanmakuService) sendDanmakuWithProxyPool(validUsers []models.BiliBiliUs
 			log.Printf("[弹幕发送] 👤 用户%s 开始发送 %d 条弹幕", user.Uname, len(danmakus))
 
 			for dmIdx, dm := range danmakus {
-				// 获取下一个代理
-				proxyInfo := proxyPool.GetNextProxy()
+				// 获取下一个可用代理（跳过不可达的代理）
+				proxyInfo := proxyPool.GetNextAvailableProxy()
 				if proxyInfo == nil {
 					log.Printf("[弹幕发送] ❌ 用户%s 无法获取代理", user.Uname)
 					break

@@ -44,10 +44,15 @@ PASS_HASH=$(openssl passwd -1 "${USER_PASS}")
 echo "${USER_NAME}:${PASS_HASH}" > "${PASSWD_FILE}"
 chmod 600 "${PASSWD_FILE}"
 
+echo "▶ 创建 pid 文件目录"
+mkdir -p /run/3proxy
+chown proxy:proxy /run/3proxy
+chmod 755 /run/3proxy
+
 echo "▶ 写入配置文件（覆盖）"
 cat > "${CFG_FILE}" <<EOF
 daemon
-pidfile /var/run/3proxy.pid
+pidfile /run/3proxy/3proxy.pid
 
 maxconn 1024
 nscache 65536
@@ -64,6 +69,7 @@ EOF
 
 echo "▶ 初始化日志"
 touch "${LOG_FILE}"
+chown proxy:proxy "${LOG_FILE}"
 chmod 644 "${LOG_FILE}"
 
 echo "▶ 重启并设置开机启动"
