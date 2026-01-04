@@ -66,8 +66,9 @@ type Guard struct {
 // ParseDanmakuFile 解析弹幕XML文件
 // xmlPath: XML文件路径
 // sessionID: 直播会话ID
+// room: 房间配置（用于应用过滤规则）
 // partID: 对应的分P ID（可选，用于多分P场景）
-func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string, partID ...uint) (int, error) {
+func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string, room *models.RecordRoom, partID ...uint) (int, error) {
 	log.Printf("[弹幕解析] 开始解析文件: %s (session_id=%s)", xmlPath, sessionID)
 
 	// 打开XML文件
@@ -94,6 +95,25 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string, pa
 	log.Printf("[弹幕解析] 解析到: 普通弹幕=%d, SC=%d, 礼物=%d, 上舰=%d",
 		len(dmXML.D), len(dmXML.SC), len(dmXML.Gift), len(dmXML.Guard))
 
+	// 记录过滤统计
+	var filterStats struct {
+		ulLevel int
+		medal   int
+		keyword int
+		empty   int
+	}
+
+	// 准备关键词屏蔽列表
+	var keywords []string
+	if room != nil && room.DmKeywordBlacklist != "" {
+		for _, kw := range strings.Split(room.DmKeywordBlacklist, "\n") {
+			kw = strings.TrimSpace(kw)
+			if kw != "" {
+				keywords = append(keywords, strings.ToLower(kw))
+			}
+		}
+	}
+
 	// 收集所有需要保存的弹幕
 	var msgsToSave []*models.LiveMsg
 
@@ -112,6 +132,55 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string, pa
 				msg.RoomID = part.RoomID
 			}
 		}
+
+		// 应用过滤规则
+		if room != nil {
+			// 1. 过滤空弹幕
+			if strings.TrimSpace(msg.Message) == "" {
+				filterStats.empty++
+				continue
+			}
+
+			// 2. 用户等级过滤（佩戴勋章的不受影响）
+			if room.DmUlLevel > 0 {
+				if msg.ULevel < room.DmUlLevel && msg.MedalLevel == 0 {
+					filterStats.ulLevel++
+					continue
+				}
+			}
+
+			// 3. 粉丝勋章过滤
+			if room.DmMedalLevel == 1 {
+				// 必须佩戴粉丝勋章
+				if msg.MedalLevel == 0 {
+					filterStats.medal++
+					continue
+				}
+			} else if room.DmMedalLevel == 2 {
+				// 必须佩戴主播粉丝勋章
+				if msg.MedalRoomID != msg.RoomID {
+					filterStats.medal++
+					continue
+				}
+			}
+
+			// 4. 关键词屏蔽
+			if len(keywords) > 0 {
+				msgLower := strings.ToLower(msg.Message)
+				filtered := false
+				for _, kw := range keywords {
+					if strings.Contains(msgLower, kw) {
+						filterStats.keyword++
+						filtered = true
+						break
+					}
+				}
+				if filtered {
+					continue
+				}
+			}
+		}
+
 		msgsToSave = append(msgsToSave, msg)
 	}
 
@@ -171,6 +240,26 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string, pa
 
 	if err != nil {
 		return 0, fmt.Errorf("保存弹幕事务失败: %w", err)
+	}
+
+	// 输出过滤统计
+	if room != nil {
+		var filterMsg []string
+		if filterStats.ulLevel > 0 {
+			filterMsg = append(filterMsg, fmt.Sprintf("用户等级%d条", filterStats.ulLevel))
+		}
+		if filterStats.medal > 0 {
+			filterMsg = append(filterMsg, fmt.Sprintf("粉丝勋章%d条", filterStats.medal))
+		}
+		if filterStats.keyword > 0 {
+			filterMsg = append(filterMsg, fmt.Sprintf("关键词%d条", filterStats.keyword))
+		}
+		if filterStats.empty > 0 {
+			filterMsg = append(filterMsg, fmt.Sprintf("空弹幕%d条", filterStats.empty))
+		}
+		if len(filterMsg) > 0 {
+			log.Printf("[弹幕解析] 过滤统计: %s", strings.Join(filterMsg, ", "))
+		}
 	}
 
 	log.Printf("[弹幕解析] 解析完成: 成功导入 %d 条弹幕", count)
@@ -385,6 +474,12 @@ func (p *DanmakuXMLParser) ParseDanmakuForHistory(historyID uint) (int, error) {
 		return 0, fmt.Errorf("历史记录不存在: %w", err)
 	}
 
+	// 获取房间配置（用于应用过滤规则）
+	var room models.RecordRoom
+	if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
+		log.Printf("[弹幕解析] 警告: 未找到房间配置 (room_id=%s)，将不应用过滤规则", history.RoomID)
+	}
+
 	// 获取所有分P
 	var parts []models.RecordHistoryPart
 	if err := db.Where("history_id = ?", historyID).Find(&parts).Error; err != nil {
@@ -418,8 +513,12 @@ func (p *DanmakuXMLParser) ParseDanmakuForHistory(historyID uint) (int, error) {
 			continue
 		}
 
-		// 解析XML文件，传入partID以关联分P信息
-		count, err := p.ParseDanmakuFile(xmlPath, history.SessionID, part.ID)
+		// 解析XML文件，传入room和partID以关联分P信息并应用过滤规则
+		var roomPtr *models.RecordRoom
+		if room.ID > 0 {
+			roomPtr = &room
+		}
+		count, err := p.ParseDanmakuFile(xmlPath, history.SessionID, roomPtr, part.ID)
 		if err != nil {
 			log.Printf("[弹幕解析] 解析失败: %s, error: %v", xmlPath, err)
 			continue

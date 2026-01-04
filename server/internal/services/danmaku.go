@@ -184,44 +184,10 @@ func (s *DanmakuService) sendDanmakuForHistoryWithSerialUsers(historyID uint) er
 		return fmt.Errorf("房间配置不存在: %w", err)
 	}
 
-	// 获取弹幕列表（应用过滤规则）
+	// 获取弹幕列表（过滤规则已在解析时应用）
 	var danmakus []models.LiveMsg
 	query := db.Where("session_id = ? AND sent = ?", history.SessionID, false).
-		Where("message != '' AND message IS NOT NULL"). // 过滤空弹幕和抽奖弹幕
 		Order("timestamp ASC")
-
-	// 应用弹幕过滤规则
-	if room.DmUlLevel > 0 {
-		// 用户等级过滤（佩戴勋章的不受影响）
-		query = query.Where("u_level >= ? OR medal_level > 0", room.DmUlLevel)
-		log.Printf("[弹幕发送] 应用用户等级过滤: >= %d (佩戴勋章者不受限)", room.DmUlLevel)
-	}
-
-	if room.DmMedalLevel == 1 {
-		// 必须佩戴粉丝勋章
-		query = query.Where("medal_level > 0")
-		log.Printf("[弹幕发送] 应用粉丝勋章过滤: 必须佩戴粉丝勋章")
-	} else if room.DmMedalLevel == 2 {
-		// 必须佩戴主播粉丝勋章（通过房间ID匹配）
-		query = query.Where("medal_room_id = ?", history.RoomID)
-		log.Printf("[弹幕发送] 应用粉丝勋章过滤: 必须佩戴主播【%s】(房间%s)的粉丝勋章", room.Uname, history.RoomID)
-	}
-
-	// 关键词屏蔽
-	if room.DmKeywordBlacklist != "" {
-		keywords := strings.Split(room.DmKeywordBlacklist, "\n")
-		keywordCount := 0
-		for _, keyword := range keywords {
-			keyword = strings.TrimSpace(keyword)
-			if keyword != "" {
-				query = query.Where("LOWER(message) NOT LIKE ?", "%"+strings.ToLower(keyword)+"%")
-				keywordCount++
-			}
-		}
-		if keywordCount > 0 {
-			log.Printf("[弹幕发送] 应用关键词屏蔽: %d 个关键词", keywordCount)
-		}
-	}
 
 	if err := query.Find(&danmakus).Error; err != nil {
 		log.Printf("[弹幕发送] 查询弹幕失败: %v", err)

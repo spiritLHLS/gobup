@@ -542,8 +542,17 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 	// 尝试解析弹幕XML文件
 	xmlPath := strings.TrimSuffix(filePath, filepath.Ext(filePath)) + ".xml"
 	if _, err := os.Stat(xmlPath); err == nil {
+		// 获取房间配置用于应用过滤规则
+		var room models.RecordRoom
+		var roomPtr *models.RecordRoom
+		if err := db.Where("room_id = ?", metadata.RoomID).First(&room).Error; err == nil {
+			roomPtr = &room
+		} else {
+			log.Printf("[FileScan] 警告: 未找到房间配置 (room_id=%s)，将不应用过滤规则", metadata.RoomID)
+		}
+
 		parser := NewDanmakuXMLParser()
-		count, err := parser.ParseDanmakuFile(xmlPath, metadata.SessionID)
+		count, err := parser.ParseDanmakuFile(xmlPath, metadata.SessionID, roomPtr, part.ID)
 		if err != nil {
 			log.Printf("[FileScan] 解析弹幕失败 %s: %v", filepath.Base(xmlPath), err)
 		} else {
