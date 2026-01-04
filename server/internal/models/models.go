@@ -20,9 +20,13 @@ type RecordRoom struct {
 	AreaNameChild      string         `json:"areaNameChild"`
 	HistoryID          uint           `json:"historyId"`
 	UploadUserID       uint           `gorm:"index" json:"uploadUserId"`
-	Upload             bool           `gorm:"default:true;index" json:"upload"` // 启用上传功能（总开关）
-	AutoUpload         bool           `gorm:"default:true" json:"autoUpload"`   // 录制完成后自动上传分P
-	AutoPublish        bool           `gorm:"default:false" json:"autoPublish"` // 所有分P上传完成后自动投稿
+	Upload             bool           `gorm:"default:true;index" json:"upload"`      // 启用上传功能（总开关）
+	AutoUpload         bool           `gorm:"default:true" json:"autoUpload"`        // 录制完成后自动上传分P
+	AutoPublish        bool           `gorm:"default:false" json:"autoPublish"`      // 所有分P上传完成后自动投稿
+	AutoParseDanmaku   bool           `gorm:"default:false" json:"autoParseDanmaku"` // 自动解析弹幕
+	AutoSyncInfo       bool           `gorm:"default:false" json:"autoSyncInfo"`     // 定时同步视频信息（每30分钟）
+	AutoSendDanmaku    bool           `gorm:"default:false" json:"autoSendDanmaku"`  // 自动发送弹幕（审核通过后）
+	LastSyncTime       *time.Time     `json:"lastSyncTime"`                          // 最后同步时间
 	TitleTemplate      string         `gorm:"type:text" json:"titleTemplate"`
 	PartTitleTemplate  string         `gorm:"type:text" json:"partTitleTemplate"`
 	DescTemplate       string         `gorm:"type:text" json:"descTemplate"`

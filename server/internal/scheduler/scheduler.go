@@ -134,6 +134,15 @@ func InitScheduler() {
 		}
 	})
 
+	// 房间自动任务 - 每30分钟执行一次，处理房间级别的自动同步和弹幕任务
+	cronJob.AddFunc("*/30 * * * *", func() {
+		log.Println("执行定时任务: 房间自动任务")
+		roomAutoTaskService := services.NewRoomAutoTaskService()
+		if err := roomAutoTaskService.ProcessRoomAutoTasks(); err != nil {
+			log.Printf("房间自动任务失败: %v", err)
+		}
+	})
+
 	cronJob.Start()
 	log.Println("调度器已启动")
 }

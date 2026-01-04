@@ -23,6 +23,21 @@
         <div class="help-text">开启后，所有分P上传完成后将自动提交投稿</div>
       </el-form-item>
       
+      <el-form-item label="自动解析弹幕">
+        <el-switch v-model="localForm.autoParseDanmaku" />
+        <div class="help-text">开启后，录制完成的分P将自动解析弹幕文件</div>
+      </el-form-item>
+      
+      <el-form-item label="定时同步信息">
+        <el-switch v-model="localForm.autoSyncInfo" />
+        <div class="help-text">开启后，每30分钟自动同步已投稿视频的审核状态</div>
+      </el-form-item>
+      
+      <el-form-item label="自动发送弹幕">
+        <el-switch v-model="localForm.autoSendDanmaku" />
+        <div class="help-text">开启后，在同步信息后发现视频审核通过后才将其放入发送队列（需要先开启"定时同步信息"）</div>
+      </el-form-item>
+      
       <el-form-item label="上传用户">
         <el-select 
           v-model="localForm.uploadUserId" 
