@@ -247,6 +247,8 @@ func UpdateSystemConfig(c *gin.Context) {
 	config.CustomScanPaths = req.CustomScanPaths
 	config.EnableOrphanScan = req.EnableOrphanScan
 	config.OrphanScanInterval = req.OrphanScanInterval
+	config.EnableDanmakuProxy = req.EnableDanmakuProxy
+	config.DanmakuProxyList = req.DanmakuProxyList
 
 	// 参数验证
 	if config.FileScanInterval < 10 {

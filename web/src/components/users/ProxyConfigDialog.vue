@@ -13,13 +13,15 @@
         </div>
       </el-form-item>
       
-      <el-form-item label="代理列表" v-if="localConfig.enableDanmakuProxy">
-        <el-input
-          v-model="localConfig.danmakuProxyList"
-          type="textarea"
-          :rows="10"
-          placeholder="每行一个代理，支持格式：&#10;socks5://ip:port&#10;socks5://user:pass@ip:port&#10;http://ip:port&#10;http://user:pass@ip:port&#10;https://ip:port&#10;&#10;示例：&#10;socks5://127.0.0.1:1080&#10;http://user:pass@proxy.example.com:8080"
-        />
+      <el-form-item label="代理列表">
+        <div class="proxy-input-wrapper">
+          <el-input
+            v-model="localConfig.danmakuProxyList"
+            type="textarea"
+            :rows="10"
+            placeholder="每行一个代理，支持格式：&#10;socks5://ip:port&#10;socks5://user:pass@ip:port&#10;http://ip:port&#10;http://user:pass@ip:port&#10;https://ip:port&#10;&#10;示例：&#10;socks5://127.0.0.1:1080&#10;http://user:pass@proxy.example.com:8080"
+          />
+        </div>
         <div style="margin-top: 8px; font-size: 12px; color: #666;">
           <p style="margin: 4px 0;">💡 使用说明：</p>
           <ul style="margin: 4px 0; padding-left: 20px;">
@@ -99,6 +101,15 @@ const handleSave = () => {
 </script>
 
 <style scoped>
+.proxy-input-wrapper {
+  width: 100%;
+}
+
+:deep(.el-textarea) {
+  width: 100%;
+  max-width: 100%;
+}
+
 :deep(.el-textarea__inner) {
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
   font-size: 13px;

@@ -284,7 +284,7 @@
             </div>
           </el-form-item>
 
-          <el-form-item label="代理列表" v-if="config.enableDanmakuProxy">
+          <el-form-item label="代理列表">
             <div class="proxy-input-wrapper">
               <el-input
                 v-model="config.danmakuProxyList"
@@ -891,6 +891,22 @@ onMounted(() => {
 
 :deep(.el-input) {
   max-width: 500px;
+}
+
+.proxy-input-wrapper {
+  width: 100%;
+  
+  :deep(.el-textarea) {
+    width: 100%;
+    max-width: 100%;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
+    font-size: 13px;
+  }
+  
+  :deep(.el-textarea__inner) {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
+    font-size: 13px;
+  }
 }
 
 /* 响应式 */
