@@ -3,13 +3,10 @@ set -e
 
 ### ===== 可修改参数 =====
 PORT=20338
-USER_NAME=""
-USER_PASS=""
 VERSION="0.9.5"
 ### ======================
 
 CONF_DIR="/etc/3proxy/conf"
-PASSWD_FILE="${CONF_DIR}/passwd"
 CFG_FILE="${CONF_DIR}/3proxy.cfg"
 
 ARCH="$(uname -m)"
@@ -37,11 +34,8 @@ else
   echo "✓ 3proxy 已安装，跳过安装"
 fi
 
-echo "▶ 写入认证用户（覆盖）"
+echo "▶ 创建配置文件目录"
 mkdir -p "${CONF_DIR}"
-PASS_HASH=$(openssl passwd -1 "${USER_PASS}")
-echo "${USER_NAME}:${PASS_HASH}" > "${PASSWD_FILE}"
-chmod 600 "${PASSWD_FILE}"
 
 echo "▶ 创建 pid 文件目录"
 mkdir -p /run/3proxy
@@ -53,11 +47,10 @@ cat > "${CFG_FILE}" <<EOF
 maxconn 1024
 nscache 65536
 
-users /etc/3proxy/conf/passwd
-auth strong
-allow ${USER_NAME}
+auth none
+allow *
 
-socks -p${PORT} -a
+socks -p${PORT}
 EOF
 
 echo "▶ 重启并设置开机启动"
@@ -73,11 +66,11 @@ echo "========================================"
 echo "🎉 3proxy SOCKS5 已部署完成（可重复执行）"
 echo "----------------------------------------"
 echo "【标准代理格式（直接可用）】"
+echo，无认证）】"
 echo
-echo "socks5://${USER_NAME}:${USER_PASS}@${SERVER_IP}:${PORT}"
+echo "socks5://${SERVER_IP}:${PORT}"
 echo
 echo "----------------------------------------"
-echo "管理命令："
-echo "systemctl status 3proxy"
+echo "管理命令：" status 3proxy"
 echo "journalctl -u 3proxy -f"
 echo "========================================"
