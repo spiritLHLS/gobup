@@ -302,18 +302,38 @@ type UserArchiveListResponse struct {
 	} `json:"data"`
 }
 
-// GetUserArchiveList 获取用户投稿列表
+// UAPIArchive UAPI接口的投稿视频信息
+type UAPIArchive struct {
+	Aid         int64  `json:"aid"`
+	Bvid        string `json:"bvid"`
+	Title       string `json:"title"`
+	Cover       string `json:"cover"`
+	Duration    int    `json:"duration"`
+	PlayCount   int    `json:"play_count"`
+	PublishTime int64  `json:"publish_time"`
+	CreateTime  int64  `json:"create_time"`
+	State       int    `json:"state"`
+	IsUgcPay    int    `json:"is_ugc_pay"`
+}
+
+// UAPIArchiveListResponse UAPI接口响应
+type UAPIArchiveListResponse struct {
+	Total  int           `json:"total"`
+	Page   int           `json:"page"`
+	Size   int           `json:"size"`
+	Videos []UAPIArchive `json:"videos"`
+}
+
+// GetUserArchiveList 获取用户投稿列表（使用UAPI接口）
 func (c *BiliClient) GetUserArchiveList(mid int64, pn, ps int) ([]UserArchive, error) {
-	var resp UserArchiveListResponse
+	var resp UAPIArchiveListResponse
 
 	r, err := c.ReqClient.R().
 		SetQueryParams(map[string]string{
 			"mid": fmt.Sprintf("%d", mid),
-			"pn":  fmt.Sprintf("%d", pn),
-			"ps":  fmt.Sprintf("%d", ps),
 		}).
 		SetSuccessResult(&resp).
-		Get("https://api.bilibili.com/x/space/wbi/arc/search")
+		Get("https://uapis.cn/api/v1/social/bilibili/archives")
 
 	if err != nil {
 		return nil, fmt.Errorf("获取用户投稿列表失败: %w", err)
@@ -323,11 +343,17 @@ func (c *BiliClient) GetUserArchiveList(mid int64, pn, ps int) ([]UserArchive, e
 		return nil, fmt.Errorf("获取用户投稿列表失败: HTTP %d", r.StatusCode)
 	}
 
-	if resp.Code != 0 {
-		return nil, fmt.Errorf("获取用户投稿列表失败: %s (code=%d)", resp.Message, resp.Code)
+	// 转换为UserArchive格式
+	var archives []UserArchive
+	for _, v := range resp.Videos {
+		archives = append(archives, UserArchive{
+			Aid:   v.Aid,
+			Bvid:  v.Bvid,
+			Title: v.Title,
+		})
 	}
 
-	return resp.Data.List.Vlist, nil
+	return archives, nil
 }
 
 // GetBvidByAid 通过AID获取对应的BVID
@@ -343,6 +369,37 @@ func (c *BiliClient) GetBvidByAid(mid int64, aid int64) (string, error) {
 	}
 
 	return videoInfo.Bvid, nil
+}
+
+// CheckVideoExistsInArchive 检查视频是否存在于用户投稿列表中（兜底检测）
+// 用于在投稿后验证视频是否真的提交成功
+func (c *BiliClient) CheckVideoExistsInArchive(mid int64, aid int64, bvid string) (bool, error) {
+	var resp UAPIArchiveListResponse
+
+	// 使用新的UAPI接口获取用户投稿列表
+	r, err := c.ReqClient.R().
+		SetQueryParams(map[string]string{
+			"mid": fmt.Sprintf("%d", mid),
+		}).
+		SetSuccessResult(&resp).
+		Get("https://uapis.cn/api/v1/social/bilibili/archives")
+
+	if err != nil {
+		return false, fmt.Errorf("获取用户投稿列表失败: %w", err)
+	}
+
+	if !r.IsSuccessState() {
+		return false, fmt.Errorf("获取用户投稿列表失败: HTTP %d", r.StatusCode)
+	}
+
+	// 检查视频是否在列表中
+	for _, v := range resp.Videos {
+		if (aid > 0 && v.Aid == aid) || (bvid != "" && v.Bvid == bvid) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // GetBuvid 获取buvid

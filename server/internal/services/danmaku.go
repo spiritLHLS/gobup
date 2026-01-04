@@ -31,6 +31,27 @@ func NewDanmakuService() *DanmakuService {
 	return danmakuServiceInstance
 }
 
+// getGlobalProxyPool 获取全局代理池配置
+func (s *DanmakuService) getGlobalProxyPool() *bili.ProxyPool {
+	db := database.GetDB()
+	var config models.SystemConfig
+	if err := db.First(&config).Error; err != nil {
+		// 配置不存在，使用默认（仅本地IP）
+		return bili.NewProxyPool([]string{})
+	}
+
+	if !config.EnableDanmakuProxy || config.DanmakuProxyList == "" {
+		// 未启用代理或未配置代理列表，仅使用本地IP
+		return bili.NewProxyPool([]string{})
+	}
+
+	// 解析并创建代理池
+	proxyURLs := bili.ParseProxyList(config.DanmakuProxyList)
+	proxyPool := bili.NewProxyPool(proxyURLs)
+	log.Printf("[弹幕发送] 🌐 使用全局代理池，共%d个IP (包含本地)", proxyPool.GetProxyCount())
+	return proxyPool
+}
+
 // GetQueueManager 获取队列管理器
 func (s *DanmakuService) GetQueueManager() *DanmakuQueueManager {
 	return s.queueManager
@@ -345,22 +366,17 @@ func (s *DanmakuService) sendDanmakuForHistoryWithSerialUsers(historyID uint) er
 			userDanmakuGroups[userIdx] = append(userDanmakuGroups[userIdx], dm)
 		}
 
-		// 检查是否有用户启用了代理池
-		hasProxyEnabled := false
-		for _, user := range validUsers {
-			if user.EnableDanmakuProxy && user.DanmakuProxyList != "" {
-				hasProxyEnabled = true
-				break
-			}
-		}
+		// 获取全局代理池配置
+		proxyPool := s.getGlobalProxyPool()
+		proxyCount := proxyPool.GetProxyCount()
 
-		// 如果有用户启用代理池，使用并行发送
-		if hasProxyEnabled {
-			log.Printf("[弹幕发送] 检测到代理池配置，使用并行发送模式")
-			successCount = s.sendDanmakuWithProxyPool(validUsers, userDanmakuGroups, history.BvID, int64(historyID))
+		// 如果代理池有多个IP（除了本地IP），使用并行发送
+		if proxyCount > 1 {
+			log.Printf("[弹幕发送] 使用全局代理池并行发送模式 (%d个IP)", proxyCount)
+			successCount = s.sendDanmakuWithProxyPool(validUsers, userDanmakuGroups, history.BvID, int64(historyID), proxyPool)
 		} else {
-			// 否则使用传统的串行发送
-			log.Printf("[弹幕发送] 使用传统串行发送模式")
+			// 仅本地IP，使用传统的串行发送
+			log.Printf("[弹幕发送] 使用传统串行发送模式（仅本地IP）")
 			successCount = s.sendDanmakuSerial(validUsers, userDanmakuGroups, history.BvID, int64(historyID), len(danmakuItems))
 		}
 
@@ -469,14 +485,14 @@ func (s *DanmakuService) sendDanmakuSerial(validUsers []models.BiliBiliUser, use
 	return successCount
 }
 
-// sendDanmakuWithProxyPool 使用代理池并行发送弹幕
-func (s *DanmakuService) sendDanmakuWithProxyPool(validUsers []models.BiliBiliUser, userDanmakuGroups [][]bili.DanmakuItem, bvid string, historyID int64) int {
+// sendDanmakuWithProxyPool 使用全局代理池并行发送弹幕
+func (s *DanmakuService) sendDanmakuWithProxyPool(validUsers []models.BiliBiliUser, userDanmakuGroups [][]bili.DanmakuItem, bvid string, historyID int64, proxyPool *bili.ProxyPool) int {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	totalSuccessCount := 0
 	totalSent := 0
 
-	// 为每个用户创建一个goroutine
+	// 为每个用户创建一个goroutine，所有用户共享全局代理池
 	for userIdx, user := range validUsers {
 		userDanmakus := userDanmakuGroups[userIdx]
 		if len(userDanmakus) == 0 {
@@ -487,17 +503,7 @@ func (s *DanmakuService) sendDanmakuWithProxyPool(validUsers []models.BiliBiliUs
 		go func(user models.BiliBiliUser, danmakus []bili.DanmakuItem, userIdx int) {
 			defer wg.Done()
 
-			// 创建代理池
-			var proxyPool *bili.ProxyPool
-			if user.EnableDanmakuProxy && user.DanmakuProxyList != "" {
-				proxyURLs := bili.ParseProxyList(user.DanmakuProxyList)
-				proxyPool = bili.NewProxyPool(proxyURLs)
-				log.Printf("[弹幕发送] 👤 用户%s 启用代理池，共%d个IP (包含本地)", user.Uname, proxyPool.GetProxyCount())
-			} else {
-				// 未启用代理，只使用本地IP
-				proxyPool = bili.NewProxyPool([]string{})
-				log.Printf("[弹幕发送] 👤 用户%s 使用本地IP发送", user.Uname)
-			}
+			log.Printf("[弹幕发送] 👤 用户%s 开始使用全局代理池发送 %d 条弹幕", user.Uname, len(danmakus))
 
 			userSuccessCount := 0
 			consecutiveFailures := 0

@@ -66,6 +66,15 @@
           </el-button>
 
           <el-button 
+            type="primary"
+            plain
+            @click="$emit('manualPublish')"
+          >
+            <el-icon><Edit /></el-icon>
+            手动标记投稿
+          </el-button>
+
+          <el-button 
             type="success"
             :disabled="!history?.bvId || history?.danmakuSent"
             @click="$emit('sendDanmaku')"
@@ -146,7 +155,8 @@ import {
   RefreshLeft, 
   Delete, 
   DeleteFilled,
-  Promotion
+  Promotion,
+  Edit
 } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -164,6 +174,7 @@ defineEmits([
   'update:visible',
   'upload',
   'publish',
+  'manualPublish',
   'sendDanmaku',
   'parseDanmaku',
   'syncVideo',

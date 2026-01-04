@@ -158,6 +158,7 @@
       :history="currentHistory"
       @upload="handleUploadInDialog"
       @publish="handlePublishInDialog"
+      @manual-publish="handleManualPublish"
       @send-danmaku="handleSendDanmakuInDialog"
       @parse-danmaku="handleParseDanmakuInDialog"
       @sync-video="handleSyncVideoInDialog"
@@ -165,6 +166,13 @@
       @reset-status="handleResetStatus"
       @delete-only="handleDeleteOnly"
       @delete-with-files="handleDeleteWithFiles"
+    />
+
+    <!-- 手动标记投稿对话框 -->
+    <ManualPublishDialog
+      v-model:visible="manualPublishDialogVisible"
+      :history="currentHistory"
+      @success="handleManualPublishSuccess"
     />
 
     <!-- 重置状态对话框 -->
@@ -193,6 +201,7 @@ import axios from 'axios'
 import BatchActions from '@/components/history/BatchActions.vue'
 import PartsDialog from '@/components/history/PartsDialog.vue'
 import ActionsDialog from '@/components/history/ActionsDialog.vue'
+import ManualPublishDialog from '@/components/history/ManualPublishDialog.vue'
 import ResetStatusDialog from '@/components/history/ResetStatusDialog.vue'
 import { useHistoryProgress, useHistoryOperations } from '@/composables/useHistory'
 
@@ -213,6 +222,7 @@ const parts = ref([])
 const partsLoading = ref(false)
 const currentHistoryId = ref(null)
 const actionsDialogVisible = ref(false)
+const manualPublishDialogVisible = ref(false)
 const currentHistory = ref(null)
 const resetDialogVisible = ref(false)
 const resetOptions = ref({
@@ -328,6 +338,25 @@ const handlePublishInDialog = async () => {
       currentHistory.value = updatedHistory
     }
   })
+}
+
+// 手动标记投稿
+const handleManualPublish = () => {
+  manualPublishDialogVisible.value = true
+}
+
+// 手动标记投稿成功回调
+const handleManualPublishSuccess = async () => {
+  const historyId = currentHistory.value.id
+  await fetchHistories()
+  
+  // 刷新对话框内的数据
+  const updatedHistory = histories.value.find(h => h.id === historyId)
+  if (updatedHistory) {
+    currentHistory.value = updatedHistory
+  }
+  
+  ElMessage.success('投稿信息已更新')
 }
 
 const handleSendDanmakuInDialog = async () => {

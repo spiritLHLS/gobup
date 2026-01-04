@@ -135,27 +135,25 @@ type RecordHistoryPart struct {
 
 // BiliBiliUser B站用户
 type BiliBiliUser struct {
-	ID                 uint           `gorm:"primarykey" json:"id"`
-	CreatedAt          time.Time      `json:"createdAt"`
-	UpdatedAt          time.Time      `json:"updatedAt"`
-	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
-	UID                int64          `gorm:"uniqueIndex;not null" json:"uid"`
-	Uname              string         `gorm:"index" json:"uname"`
-	Face               string         `json:"face"`
-	Cookies            string         `gorm:"type:text" json:"cookies"`
-	AccessKey          string         `json:"accessKey"`
-	RefreshToken       string         `json:"refreshToken"`
-	Login              bool           `gorm:"default:false;index" json:"login"`
-	Level              int            `json:"level"`
-	VipType            int            `json:"vipType"`
-	VipStatus          int            `json:"vipStatus"`
-	Moral              int            `json:"moral"`
-	CookieInfo         string         `gorm:"type:text" json:"cookieInfo"`
-	LoginTime          *time.Time     `json:"loginTime"`
-	ExpireTime         *time.Time     `json:"expireTime"`
-	WxPushToken        string         `json:"wxPushToken"`                             // 用户的WxPusher token
-	EnableDanmakuProxy bool           `gorm:"default:false" json:"enableDanmakuProxy"` // 启用弹幕代理
-	DanmakuProxyList   string         `gorm:"type:text" json:"danmakuProxyList"`       // 代理列表，每行一个，格式: socks5://ip:port 或 http://user:pass@ip:port
+	ID           uint           `gorm:"primarykey" json:"id"`
+	CreatedAt    time.Time      `json:"createdAt"`
+	UpdatedAt    time.Time      `json:"updatedAt"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+	UID          int64          `gorm:"uniqueIndex;not null" json:"uid"`
+	Uname        string         `gorm:"index" json:"uname"`
+	Face         string         `json:"face"`
+	Cookies      string         `gorm:"type:text" json:"cookies"`
+	AccessKey    string         `json:"accessKey"`
+	RefreshToken string         `json:"refreshToken"`
+	Login        bool           `gorm:"default:false;index" json:"login"`
+	Level        int            `json:"level"`
+	VipType      int            `json:"vipType"`
+	VipStatus    int            `json:"vipStatus"`
+	Moral        int            `json:"moral"`
+	CookieInfo   string         `gorm:"type:text" json:"cookieInfo"`
+	LoginTime    *time.Time     `json:"loginTime"`
+	ExpireTime   *time.Time     `json:"expireTime"`
+	WxPushToken  string         `json:"wxPushToken"` // 用户的WxPusher token
 }
 
 type LiveMsg struct {
@@ -204,13 +202,15 @@ type SystemConfig struct {
 	ID                 uint      `gorm:"primarykey" json:"id"`
 	CreatedAt          time.Time `json:"createdAt"`
 	UpdatedAt          time.Time `json:"updatedAt"`
-	AutoFileScan       bool      `gorm:"default:true" json:"autoFileScan"`       // 自动扫盘录入
-	FileScanInterval   int       `gorm:"default:60" json:"fileScanInterval"`     // 文件扫描间隔（分钟）
-	FileScanMinAge     int       `gorm:"default:12" json:"fileScanMinAge"`       // 文件最小年龄（小时），避免扫描正在写入的文件
-	FileScanMinSize    int64     `gorm:"default:1048576" json:"fileScanMinSize"` // 文件最小大小（字节）
-	FileScanMaxAge     int       `gorm:"default:720" json:"fileScanMaxAge"`      // 文件最大年龄（小时），30天
-	WorkPath           string    `gorm:"type:text" json:"workPath"`              // 录制文件工作目录
-	CustomScanPaths    string    `gorm:"type:text" json:"customScanPaths"`       // 自定义扫盘目录，逗号分隔，优先扫描
-	EnableOrphanScan   bool      `gorm:"default:true" json:"enableOrphanScan"`   // 启用孤儿文件扫描
-	OrphanScanInterval int       `gorm:"default:360" json:"orphanScanInterval"`  // 孤儿文件扫描间隔（分钟）
+	AutoFileScan       bool      `gorm:"default:true" json:"autoFileScan"`        // 自动扫盘录入
+	FileScanInterval   int       `gorm:"default:60" json:"fileScanInterval"`      // 文件扫描间隔（分钟）
+	FileScanMinAge     int       `gorm:"default:12" json:"fileScanMinAge"`        // 文件最小年龄（小时），避免扫描正在写入的文件
+	FileScanMinSize    int64     `gorm:"default:1048576" json:"fileScanMinSize"`  // 文件最小大小（字节）
+	FileScanMaxAge     int       `gorm:"default:720" json:"fileScanMaxAge"`       // 文件最大年龄（小时），30天
+	WorkPath           string    `gorm:"type:text" json:"workPath"`               // 录制文件工作目录
+	CustomScanPaths    string    `gorm:"type:text" json:"customScanPaths"`        // 自定义扫盘目录，逗号分隔，优先扫描
+	EnableOrphanScan   bool      `gorm:"default:true" json:"enableOrphanScan"`    // 启用孤儿文件扫描
+	OrphanScanInterval int       `gorm:"default:360" json:"orphanScanInterval"`   // 孤儿文件扫描间隔（分钟）
+	EnableDanmakuProxy bool      `gorm:"default:false" json:"enableDanmakuProxy"` // 启用弹幕代理池（全局配置）
+	DanmakuProxyList   string    `gorm:"type:text" json:"danmakuProxyList"`       // 代理列表，每行一个，格式: socks5://ip:port 或 http://user:pass@ip:port
 }

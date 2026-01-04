@@ -289,6 +289,8 @@ func ToggleSystemConfig(c *gin.Context) {
 		config.AutoFileScan = req.Value
 	case "enableOrphanScan":
 		config.EnableOrphanScan = req.Value
+	case "enableDanmakuProxy":
+		config.EnableDanmakuProxy = req.Value
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "未知的配置项"})
 		return

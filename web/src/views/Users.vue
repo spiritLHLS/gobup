@@ -69,13 +69,6 @@
             </el-button>
             <el-button
               size="small"
-              type="primary"
-              @click="handleEditProxy(row)"
-            >
-              代理配置
-            </el-button>
-            <el-button
-              size="small"
               type="danger"
               @click="handleDelete(row)"
             >
@@ -147,13 +140,6 @@
       :form="wxPushForm"
       @save="handleSaveWxPush"
     />
-
-    <!-- 代理配置对话框 -->
-    <ProxyConfigDialog
-      v-model:visible="showProxyDialog"
-      :config="proxyConfig"
-      @save="handleSaveProxy"
-    />
   </div>
 </template>
 
@@ -167,7 +153,6 @@ import QrcodeLogin from '@/components/users/QrcodeLogin.vue'
 import CookieLogin from '@/components/users/CookieLogin.vue'
 import RateLimitDialog from '@/components/users/RateLimitDialog.vue'
 import WxPushDialog from '@/components/users/WxPushDialog.vue'
-import ProxyConfigDialog from '@/components/users/ProxyConfigDialog.vue'
 import { useQrcodeLogin, useCookieLogin } from '@/composables/useUserLogin'
 
 const users = ref([])
@@ -176,7 +161,6 @@ const loginDialogVisible = ref(false)
 const loginMethod = ref('qrcode')
 const showRateLimitDialog = ref(false)
 const showWxPushDialog = ref(false)
-const showProxyDialog = ref(false)
 
 // 使用composables
 const {
@@ -203,12 +187,6 @@ const rateLimitConfig = ref({
 const wxPushForm = ref({
   userId: null,
   token: ''
-})
-
-const proxyConfig = ref({
-  userId: null,
-  enableDanmakuProxy: false,
-  danmakuProxyList: ''
 })
 
 const fetchUsers = async () => {
@@ -341,31 +319,6 @@ const handleSaveWxPush = async (form) => {
     fetchUsers()
   } catch (error) {
     console.error('保存WxPusher配置失败:', error)
-    ElMessage.error('保存失败')
-  }
-}
-
-const handleEditProxy = (row) => {
-  proxyConfig.value = {
-    userId: row.id,
-    enableDanmakuProxy: row.enableDanmakuProxy || false,
-    danmakuProxyList: row.danmakuProxyList || ''
-  }
-  showProxyDialog.value = true
-}
-
-const handleSaveProxy = async (config) => {
-  try {
-    await userAPI.update({
-      id: config.userId,
-      enableDanmakuProxy: config.enableDanmakuProxy,
-      danmakuProxyList: config.danmakuProxyList
-    })
-    ElMessage.success('代理配置已保存')
-    showProxyDialog.value = false
-    fetchUsers()
-  } catch (error) {
-    console.error('保存代理配置失败:', error)
     ElMessage.error('保存失败')
   }
 }

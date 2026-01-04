@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -592,4 +593,120 @@ func BatchDeleteWithFiles(c *gin.Context) {
 		"success": successCount,
 		"total":   len(req.HistoryIDs),
 	})
+}
+
+// ManualSetPublishInfo 手动设置投稿信息
+// 用于在系统无法自动判定投稿状态时，手动填写投稿信息标记为已投稿
+func ManualSetPublishInfo(c *gin.Context) {
+	id := c.Param("id")
+	historyID, _ := strconv.ParseUint(id, 10, 32)
+
+	type ManualPublishReq struct {
+		AvID  string `json:"avId"`                    // AV号（可选，会从BVID解析）
+		BvID  string `json:"bvId" binding:"required"` // BV号（必填）
+		Force bool   `json:"force"`                   // 是否强制覆盖（即使已有投稿信息）
+	}
+
+	var req ManualPublishReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "请提供有效的BV号"})
+		return
+	}
+
+	// 验证BV号格式
+	if len(req.BvID) != 12 || req.BvID[:2] != "BV" {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "BV号格式错误，应为12位且以BV开头"})
+		return
+	}
+
+	db := database.GetDB()
+
+	var history models.RecordHistory
+	if err := db.First(&history, historyID).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "历史记录不存在"})
+		return
+	}
+
+	// 如果已经有投稿信息且不强制覆盖，提示用户
+	if history.Publish && history.BvID != "" && !req.Force {
+		c.JSON(http.StatusOK, gin.H{
+			"type": "warning",
+			"msg":  fmt.Sprintf("该历史记录已有投稿信息 (BV: %s)，如需覆盖请勾选强制覆盖", history.BvID),
+		})
+		return
+	}
+
+	// 如果提供了AV号，使用提供的；否则尝试从BVID转换
+	avID := req.AvID
+	if avID == "" {
+		// 将BV号转换为AV号
+		aid := Bv2Av(req.BvID)
+		if aid > 0 {
+			avID = fmt.Sprintf("%d", aid)
+		}
+	}
+
+	// 更新历史记录
+	updates := map[string]interface{}{
+		"bv_id":   req.BvID,
+		"publish": true,
+		"message": "手动设置投稿信息",
+	}
+
+	if avID != "" {
+		updates["av_id"] = avID
+	}
+
+	if err := db.Model(&history).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "更新失败: " + err.Error()})
+		return
+	}
+
+	log.Printf("手动设置投稿信息 history_id=%d, bv_id=%s, av_id=%s", historyID, req.BvID, avID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type": "success",
+		"msg":  fmt.Sprintf("已成功标记为投稿 (BV: %s)", req.BvID),
+		"data": gin.H{
+			"bvId": req.BvID,
+			"avId": avID,
+		},
+	})
+}
+
+// Bv2Av 将BV号转换为AV号
+// 算法参考: https://github.com/SocialSisterYi/bilibili-API-collect
+func Bv2Av(bv string) int64 {
+	const (
+		xorCode  = int64(23442827791579)
+		maskCode = int64(2251799813685247)
+		maxAid   = int64(1) << 51
+		base     = 58
+		alphabet = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf"
+	)
+
+	// 验证BV号格式
+	if len(bv) != 12 || !strings.HasPrefix(bv, "BV") {
+		return 0
+	}
+
+	// 创建字母表索引映射
+	charMap := make(map[byte]int64)
+	for i, c := range alphabet {
+		charMap[byte(c)] = int64(i)
+	}
+
+	// 转换为字节数组并交换回原位置
+	bytes := []byte(bv)
+	bytes[3], bytes[9] = bytes[9], bytes[3]
+	bytes[4], bytes[7] = bytes[7], bytes[4]
+
+	// 从58进制转回10进制
+	var tmp int64 = 0
+	for i := 2; i < len(bytes); i++ {
+		tmp = tmp*base + charMap[bytes[i]]
+	}
+
+	// 异或运算并移除掩码
+	return (tmp ^ xorCode) & maskCode
 }

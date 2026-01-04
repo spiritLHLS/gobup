@@ -56,6 +56,7 @@ func SetupRoutes(router *gin.Engine) {
 				histories.POST("/upload/:id", controllers.UploadHistory)
 				histories.POST("/publish/:id", controllers.RePublishHistory)
 				histories.GET("/updatePublishStatus/:id", controllers.UpdatePublishStatus)
+				histories.POST("/manualSetPublish/:id", controllers.ManualSetPublishInfo) // 手动设置投稿信息
 
 				// 批量操作
 				histories.POST("/batchUpdate", controllers.BatchUpdateStatus)
