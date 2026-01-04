@@ -2,7 +2,7 @@
   <el-dialog 
     :model-value="visible"
     title="手动标记投稿" 
-    width="500px"
+    width="650px"
     @update:model-value="$emit('update:visible', $event)"
   >
     <el-alert
