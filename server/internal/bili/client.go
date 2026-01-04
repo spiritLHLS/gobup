@@ -1,10 +1,8 @@
 package bili
 
 import (
-	"context"
 	"encoding/base64"
 	"fmt"
-	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -119,16 +117,12 @@ func NewBiliClient(accessKey, cookies string, mid int64) *BiliClient {
 // NewBiliClientWithProxy 创建带代理的BiliClient
 func NewBiliClientWithProxy(accessKey, cookies string, mid int64, proxyURL string) *BiliClient {
 	client := req.C().
-		SetTimeout(300 * time.Second).
-		SetDial(func(ctx context.Context, network, addr string) (net.Conn, error) {
-			// 为代理连接设置更短的拨号超时时间(30秒)
-			dialer := &net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}
-			return dialer.DialContext(ctx, network, addr)
-		}).
-		ImpersonateChrome()
+		SetTimeout(60 * time.Second). // 降低超时时间，避免长时间等待
+		ImpersonateChrome().
+		DisableKeepAlives(). // 禁用连接复用，避免EOF错误
+		SetCommonRetryCondition(func(_ *req.Response, _ error) bool {
+			return false // 禁用自动重试，避免并发时代理失效 (ref: https://github.com/imroc/req/issues/445)
+		})
 
 	if cookies != "" {
 		client.SetCommonHeader("Cookie", cookies)
