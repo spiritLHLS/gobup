@@ -655,19 +655,26 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 	// 先尝试通过 SessionID 查找
 	var history models.RecordHistory
 	if err := db.Where("session_id = ?", metadata.SessionID).First(&history).Error; err == nil {
-		// 找到已有记录，检查标题是否一致
-		// 如果标题差异较大，可能是不同的直播，不合并
-		if !s.isSimilarTitle(history.Title, metadata.Title) {
+		// 找到已有记录，检查是否已投稿
+		if history.Publish {
+			// 已投稿的记录不应该被重复使用，创建新的历史记录
+			log.Printf("[FileScan] SessionID相同但已投稿，创建新记录避免重复投稿: SessionID=%s, 已有BvID=%s",
+				metadata.SessionID, history.BvID)
+			// 修改SessionID以避免冲突
+			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().Unix())
+		} else if !s.isSimilarTitle(history.Title, metadata.Title) {
+			// 未投稿但标题差异较大，可能是不同的直播，不合并
 			log.Printf("[FileScan] SessionID相同但标题差异过大，创建新记录: 已有=%s, 新=%s",
 				history.Title, metadata.Title)
 			// 修改SessionID以避免冲突
 			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().Unix())
 		} else {
-			// 标题相似，更新结束时间
+			// 未投稿且标题相似，更新结束时间并合并
 			if metadata.EndTime.After(history.EndTime) {
 				history.EndTime = metadata.EndTime
 				db.Save(&history)
 			}
+			log.Printf("[FileScan] 合并到未投稿的已有记录: ID=%d, SessionID=%s", history.ID, metadata.SessionID)
 			return &history, nil
 		}
 	}
@@ -687,6 +694,12 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 	if err == nil && len(histories) > 0 {
 		// 检查时间差和标题相似度
 		for _, h := range histories {
+			// 跳过已投稿的记录，避免重复投稿
+			if h.Publish {
+				log.Printf("[FileScan] 跳过已投稿的记录: ID=%d, BvID=%s", h.ID, h.BvID)
+				continue
+			}
+
 			timeDiff := metadata.StartTime.Sub(h.EndTime)
 			// 时间差在2小时内，且标题相似，才合并
 			if timeDiff >= 0 && timeDiff < 2*time.Hour && s.isSimilarTitle(h.Title, metadata.Title) {
