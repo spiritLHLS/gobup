@@ -84,6 +84,12 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	}
 	defer s.uploadingParts.Delete(part.ID)
 
+	// 检查是否已经上传过（防止重复上传）
+	if part.Upload && part.CID > 0 {
+		log.Printf("[Upload] 分P %d 已经上传过，跳过: CID=%d, FileName=%s", part.ID, part.CID, part.FileName)
+		return nil
+	}
+
 	// 标记为上传中
 	part.Uploading = true
 	db.Save(part)

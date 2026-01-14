@@ -22,6 +22,13 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("历史记录不存在: %w", err)
 	}
 
+	// 检查是否已经投稿过（防止重复投稿）
+	if history.Publish {
+		log.Printf("[Publish] 历史记录 %d 已经投稿过，拒绝重复投稿: BvID=%s",
+			historyID, history.BvID)
+		return fmt.Errorf("该历史记录已经投稿过，不能重复投稿 (BvID: %s)", history.BvID)
+	}
+
 	var room models.RecordRoom
 	if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
 		return fmt.Errorf("房间不存在: %w", err)

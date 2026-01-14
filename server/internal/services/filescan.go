@@ -481,7 +481,20 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 			log.Printf("[FileScan] 已删除孤儿分P记录，将重新导入文件: %s", filePath)
 			// 继续执行后续的导入逻辑
 		} else {
-			// 历史记录存在，文件正常跳过
+			// 历史记录存在，进一步检查是否已投稿
+			if existingHistory.Publish {
+				log.Printf("[FileScan] 警告: 文件已存在于已投稿的历史记录中: PartID=%d, HistoryID=%d, BvID=%s",
+					existingPart.ID, existingHistory.ID, existingHistory.BvID)
+				// 已投稿的文件不应该被重新导入，防止重复投稿
+				return fmt.Errorf("文件已存在于已投稿的历史记录中，不允许重复导入")
+			}
+			if existingPart.Upload {
+				log.Printf("[FileScan] 警告: 文件已存在且已上传: PartID=%d, HistoryID=%d, CID=%d",
+					existingPart.ID, existingHistory.ID, existingPart.CID)
+				// 已上传的文件不应该被重新导入
+				return fmt.Errorf("文件已存在且已上传，不允许重复导入")
+			}
+			// 文件正常跳过
 			log.Printf("[FileScan] 文件已存在，跳过: %s", filePath)
 			return ErrFileAlreadyExists
 		}
@@ -491,6 +504,20 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 	metadata := s.parseFileMetadata(filePath, info)
 	if metadata == nil {
 		return fmt.Errorf("无法解析文件元数据")
+	}
+
+	// 2.5 再次检查直播状态
+	if metadata.RoomID != "" && metadata.RoomID != "unknown" {
+		liveStatusService := NewLiveStatusService()
+		isFinished, usedFallback, err := liveStatusService.IsRoomRecordingFinished(metadata.RoomID, info.ModTime(), metadata.Title)
+		if err == nil && !isFinished {
+			if usedFallback {
+				log.Printf("[FileScan] 拒绝导入：文件修改时间过近（保底逻辑 < 1小时）: %s", filePath)
+			} else {
+				log.Printf("[FileScan] 拒绝导入：房间 %s 直播未结束或文件未稳定: %s", metadata.RoomID, filePath)
+			}
+			return fmt.Errorf("直播未结束，拒绝导入文件")
+		}
 	}
 
 	// 3. 查找或创建房间
@@ -509,13 +536,52 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 		log.Printf("[FileScan] 创建新房间: RoomID=%s, Uname=%s", room.RoomID, room.Uname)
 	}
 
-	// 4. 查找或创建历史记录
-	history, err := s.getOrCreateHistory(db, metadata, &room)
-	if err != nil {
-		return fmt.Errorf("获取或创建历史记录失败: %w", err)
+	// 4. 查找或创建历史记录（使用事务保护，防止并发问题）
+	var history *models.RecordHistory
+	var createErr error
+
+	// 重试机制：防止并发导致的SessionID冲突
+	for retry := 0; retry < 3; retry++ {
+		history, createErr = s.getOrCreateHistory(db, metadata, &room)
+		if createErr == nil {
+			break
+		}
+		// 如果是SessionID冲突，修改SessionID后重试
+		if strings.Contains(createErr.Error(), "Duplicate") || strings.Contains(createErr.Error(), "unique") {
+			log.Printf("[FileScan] 检测到SessionID冲突，修改后重试 (第%d次)", retry+1)
+			metadata.SessionID = fmt.Sprintf("%s_%d_%d", metadata.SessionID, time.Now().Unix(), retry)
+			time.Sleep(time.Millisecond * 100) // 短暂等待
+			continue
+		}
+		// 其他错误直接返回
+		break
+	}
+	if createErr != nil {
+		return fmt.Errorf("获取或创建历史记录失败: %w", createErr)
 	}
 
-	// 5. 创建分P记录
+	// 5. 创建分P记录（三次检查防止重复）
+	// 第一次检查：确认文件不存在
+	var existingPartCheck models.RecordHistoryPart
+	if err := db.Where("file_path = ?", filePath).First(&existingPartCheck).Error; err == nil {
+		log.Printf("[FileScan] 文件在导入过程中已被其他进程导入，跳过: %s", filePath)
+		return ErrFileAlreadyExists
+	}
+
+	// 第二次检查：确认文件不属于其他历史记录
+	var otherHistoryParts []models.RecordHistoryPart
+	if err := db.Where("file_path = ? AND history_id != ?", filePath, history.ID).Find(&otherHistoryParts).Error; err == nil && len(otherHistoryParts) > 0 {
+		log.Printf("[FileScan] 错误: 文件已存在于其他历史记录中: %s, 其他HistoryID=%d",
+			filePath, otherHistoryParts[0].HistoryID)
+		return fmt.Errorf("文件已存在于其他历史记录中，不能重复导入")
+	}
+
+	// 第三次检查：确认该历史记录未被投稿
+	if history.Publish {
+		log.Printf("[FileScan] 错误: 尝试将文件导入到已投稿的历史记录: HistoryID=%d, BvID=%s",
+			history.ID, history.BvID)
+		return fmt.Errorf("不能将文件导入到已投稿的历史记录")
+	}
 	part := models.RecordHistoryPart{
 		HistoryID: history.ID,
 		RoomID:    metadata.RoomID,
@@ -642,9 +708,22 @@ func (s *FileScanService) parseFileMetadata(filePath string, info os.FileInfo) *
 		}
 	}
 
+	// 验证时间的合理性（防止时间戳异常）
+	if metadata.StartTime.After(time.Now()) {
+		// 开始时间在未来，可能是时间戳错误，使用文件修改时间
+		log.Printf("[FileScan] 警告: 文件开始时间在未来 (%v)，使用文件修改时间", metadata.StartTime)
+		metadata.StartTime = info.ModTime().Add(-time.Hour)
+		metadata.EndTime = info.ModTime()
+	}
+	if metadata.EndTime.Before(metadata.StartTime) {
+		// 结束时间早于开始时间，修正
+		log.Printf("[FileScan] 警告: 结束时间早于开始时间，自动修正")
+		metadata.EndTime = metadata.StartTime.Add(time.Hour)
+	}
+
 	// 生成 SessionID（使用 房间号+日期+时间 作为session标识，避免同一天多场直播被合并）
-	// 使用小时级别的标识，同一小时内的视频可以合并
-	sessionTimeStr := metadata.StartTime.Format("2006010215") // 精确到小时
+	// 使用分钟级别的标识，提高精确度
+	sessionTimeStr := metadata.StartTime.Format("200601021504") // 精确到分钟
 	metadata.SessionID = fmt.Sprintf("%s_%s_scan", metadata.RoomID, sessionTimeStr)
 
 	return metadata
@@ -661,17 +740,28 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 			log.Printf("[FileScan] SessionID相同但已投稿，创建新记录避免重复投稿: SessionID=%s, 已有BvID=%s",
 				metadata.SessionID, history.BvID)
 			// 修改SessionID以避免冲突
-			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().Unix())
+			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().UnixNano())
 		} else if !s.isSimilarTitle(history.Title, metadata.Title) {
 			// 未投稿但标题差异较大，可能是不同的直播，不合并
 			log.Printf("[FileScan] SessionID相同但标题差异过大，创建新记录: 已有=%s, 新=%s",
 				history.Title, metadata.Title)
-			// 修改SessionID以避免冲突
-			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().Unix())
+			// 修改SessionID以避免冲突（使用纳秒时间戳增加唯一性）
+			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().UnixNano())
+		} else if history.Recording || history.Streaming {
+			// 记录显示正在录制或直播中，但我们已经通过了直播状态检查
+			// 可能是状态未及时更新，谨慎起见创建新记录
+			log.Printf("[FileScan] SessionID相同但记录显示正在录制/直播，创建新记录: SessionID=%s",
+				metadata.SessionID)
+			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().UnixNano())
 		} else {
-			// 未投稿且标题相似，更新结束时间并合并
+			// 未投稿且标题相似且未在录制，更新结束时间并合并
 			if metadata.EndTime.After(history.EndTime) {
 				history.EndTime = metadata.EndTime
+				db.Save(&history)
+			}
+			// 同时更新开始时间（取更早的）
+			if metadata.StartTime.Before(history.StartTime) {
+				history.StartTime = metadata.StartTime
 				db.Save(&history)
 			}
 			log.Printf("[FileScan] 合并到未投稿的已有记录: ID=%d, SessionID=%s", history.ID, metadata.SessionID)
@@ -692,6 +782,11 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 		Find(&histories).Error
 
 	if err == nil && len(histories) > 0 {
+		// 在合并前，检查房间当前是否在直播（避免将新开播的文件与旧记录合并）
+		liveStatusService := NewLiveStatusService()
+		roomInfo, roomErr := liveStatusService.GetRoomInfo(metadata.RoomID)
+		isCurrentlyLive := roomErr == nil && roomInfo.Data.LiveStatus == 1
+
 		// 检查时间差和标题相似度
 		for _, h := range histories {
 			// 跳过已投稿的记录，避免重复投稿
@@ -700,16 +795,69 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 				continue
 			}
 
+			// 如果房间当前正在直播，不要合并到旧记录（可能是新开的一场）
+			if isCurrentlyLive {
+				// 检查历史记录的结束时间，如果已经过去超过10分钟，说明是新的一场直播
+				timeSinceHistoryEnd := metadata.StartTime.Sub(h.EndTime)
+				if timeSinceHistoryEnd > 10*time.Minute {
+					log.Printf("[FileScan] 房间正在直播且距上次结束>10分钟，不合并到旧记录: 旧记录结束=%v, 新文件开始=%v",
+						h.EndTime, metadata.StartTime)
+					continue
+				}
+			}
+
 			timeDiff := metadata.StartTime.Sub(h.EndTime)
-			// 时间差在2小时内，且标题相似，才合并
-			if timeDiff >= 0 && timeDiff < 2*time.Hour && s.isSimilarTitle(h.Title, metadata.Title) {
+
+			// 处理文件时间倒序的情况（可能是扫盘顺序问题或文件时间戳不准）
+			if timeDiff < 0 {
+				// 新文件的开始时间早于历史记录的结束时间
+				// 检查是否是时间重叠（可能是同一场直播的不同分段）
+				if timeDiff > -10*time.Minute && s.isSimilarTitle(h.Title, metadata.Title) {
+					log.Printf("[FileScan] 检测到时间轻微重叠(%.1f分钟)，可能是同一场直播，允许合并: 已有结束=%v, 新文件开始=%v",
+						-timeDiff.Minutes(), h.EndTime, metadata.StartTime)
+					// 更新历史记录的开始时间（取更早的）
+					if metadata.StartTime.Before(h.StartTime) {
+						h.StartTime = metadata.StartTime
+					}
+					if metadata.EndTime.After(h.EndTime) {
+						h.EndTime = metadata.EndTime
+					}
+					db.Save(&h)
+					log.Printf("[FileScan] 合并到已有历史记录(时间重叠): ID=%d, SessionID=%s", h.ID, h.SessionID)
+					return &h, nil
+				} else {
+					// 时间差异过大，不合并
+					log.Printf("[FileScan] 时间倒序且差异过大(%.1f分钟)，不合并", -timeDiff.Minutes())
+					continue
+				}
+			}
+
+			// 时间间隔检查：只有时间间隔小于30分钟，且标题相似，才合并
+			// 这样可以避免将有较长间隔的多场直播合并为一场
+			const maxGapDuration = 30 * time.Minute
+			if timeDiff >= 0 && timeDiff < maxGapDuration && s.isSimilarTitle(h.Title, metadata.Title) {
+				// 进一步检查：如果该历史记录已有分P，检查最后一个分P的结束时间和当前文件的开始时间是否有间隔
+				var lastPart models.RecordHistoryPart
+				if err := db.Where("history_id = ?", h.ID).Order("end_time DESC").First(&lastPart).Error; err == nil {
+					partGap := metadata.StartTime.Sub(lastPart.EndTime)
+					if partGap >= maxGapDuration {
+						log.Printf("[FileScan] 时间间隔过大(%.1f分钟)，不合并: 已有=%s, 新=%s",
+							partGap.Minutes(), h.Title, metadata.Title)
+						continue
+					}
+				}
+
 				// 找到可合并的历史记录
 				if metadata.EndTime.After(h.EndTime) {
 					h.EndTime = metadata.EndTime
 					db.Save(&h)
 				}
-				log.Printf("[FileScan] 合并到已有历史记录: ID=%d, SessionID=%s (标题相似)", h.ID, h.SessionID)
+				log.Printf("[FileScan] 合并到已有历史记录: ID=%d, SessionID=%s (标题相似且时间间隔<30分钟)", h.ID, h.SessionID)
 				return &h, nil
+			}
+			if timeDiff >= maxGapDuration {
+				log.Printf("[FileScan] 时间间隔过大(%.1f分钟)，不合并: 已有=%s(%v), 新=%s(%v)",
+					timeDiff.Minutes(), h.Title, h.EndTime, metadata.Title, metadata.StartTime)
 			}
 		}
 	}
