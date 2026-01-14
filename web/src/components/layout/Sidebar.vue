@@ -46,11 +46,6 @@
           <el-icon><Document /></el-icon>
           <template #title>系统日志</template>
         </el-menu-item>
-        
-        <el-menu-item index="/captcha">
-          <el-icon><Warning /></el-icon>
-          <template #title>验证码处理</template>
-        </el-menu-item>
       </el-menu>
     </el-scrollbar>
   </div>

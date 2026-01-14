@@ -518,6 +518,17 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 			}
 			return fmt.Errorf("直播未结束，拒绝导入文件")
 		}
+
+		// 额外检查：如果存在相同SessionID的历史记录，确保该场直播已经完全结束
+		var existingHistory models.RecordHistory
+		if err := db.Where("session_id = ?", metadata.SessionID).First(&existingHistory).Error; err == nil {
+			// 检查该历史记录是否标记为正在录制或直播中
+			if existingHistory.Recording || existingHistory.Streaming {
+				log.Printf("[FileScan] 拒绝导入：该Session的历史记录显示仍在录制/直播中: SessionID=%s, Recording=%v, Streaming=%v",
+					metadata.SessionID, existingHistory.Recording, existingHistory.Streaming)
+				return fmt.Errorf("该场直播仍在进行中，拒绝导入文件")
+			}
+		}
 	}
 
 	// 3. 查找或创建房间
@@ -741,12 +752,6 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 				metadata.SessionID, history.BvID)
 			// 修改SessionID以避免冲突
 			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().UnixNano())
-		} else if !s.isSimilarTitle(history.Title, metadata.Title) {
-			// 未投稿但标题差异较大，可能是不同的直播，不合并
-			log.Printf("[FileScan] SessionID相同但标题差异过大，创建新记录: 已有=%s, 新=%s",
-				history.Title, metadata.Title)
-			// 修改SessionID以避免冲突（使用纳秒时间戳增加唯一性）
-			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().UnixNano())
 		} else if history.Recording || history.Streaming {
 			// 记录显示正在录制或直播中，但我们已经通过了直播状态检查
 			// 可能是状态未及时更新，谨慎起见创建新记录
@@ -754,18 +759,30 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 				metadata.SessionID)
 			metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().UnixNano())
 		} else {
-			// 未投稿且标题相似且未在录制，更新结束时间并合并
-			if metadata.EndTime.After(history.EndTime) {
-				history.EndTime = metadata.EndTime
-				db.Save(&history)
+			// 未投稿且标题相似且未在录制，但需要再次确认该场直播确实已结束
+			// 通过检查房间当前状态和历史记录的结束时间来判断
+			liveStatusService := NewLiveStatusService()
+			isHistoryFinished, _, checkErr := liveStatusService.IsRoomRecordingFinished(
+				metadata.RoomID, history.EndTime, history.Title)
+
+			if checkErr == nil && !isHistoryFinished {
+				log.Printf("[FileScan] SessionID匹配但该场直播可能仍在进行，创建新记录: SessionID=%s",
+					metadata.SessionID)
+				metadata.SessionID = fmt.Sprintf("%s_%d", metadata.SessionID, time.Now().UnixNano())
+			} else {
+				// 确认直播已结束，可以安全合并
+				if metadata.EndTime.After(history.EndTime) {
+					history.EndTime = metadata.EndTime
+					db.Save(&history)
+				}
+				// 同时更新开始时间（取更早的）
+				if metadata.StartTime.Before(history.StartTime) {
+					history.StartTime = metadata.StartTime
+					db.Save(&history)
+				}
+				log.Printf("[FileScan] 合并到未投稿的已有记录（已确认直播结束）: ID=%d, SessionID=%s", history.ID, metadata.SessionID)
+				return &history, nil
 			}
-			// 同时更新开始时间（取更早的）
-			if metadata.StartTime.Before(history.StartTime) {
-				history.StartTime = metadata.StartTime
-				db.Save(&history)
-			}
-			log.Printf("[FileScan] 合并到未投稿的已有记录: ID=%d, SessionID=%s", history.ID, metadata.SessionID)
-			return &history, nil
 		}
 	}
 
@@ -812,8 +829,9 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 			if timeDiff < 0 {
 				// 新文件的开始时间早于历史记录的结束时间
 				// 检查是否是时间重叠（可能是同一场直播的不同分段）
-				if timeDiff > -10*time.Minute && s.isSimilarTitle(h.Title, metadata.Title) {
-					log.Printf("[FileScan] 检测到时间轻微重叠(%.1f分钟)，可能是同一场直播，允许合并: 已有结束=%v, 新文件开始=%v",
+				// 只基于时间连续性判断，不依赖标题
+				if timeDiff > -10*time.Minute {
+					log.Printf("[FileScan] 检测到时间轻微重叠(%.1f分钟)，基于时间连续性判断为同一场直播，允许合并: 已有结束=%v, 新文件开始=%v",
 						-timeDiff.Minutes(), h.EndTime, metadata.StartTime)
 					// 更新历史记录的开始时间（取更早的）
 					if metadata.StartTime.Before(h.StartTime) {
@@ -832,10 +850,11 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 				}
 			}
 
-			// 时间间隔检查：只有时间间隔小于30分钟，且标题相似，才合并
+			// 时间间隔检查：只有时间间隔小于30分钟，才认为是同一场直播，才合并
 			// 这样可以避免将有较长间隔的多场直播合并为一场
+			// 不再依赖标题相似度，因为标题可能在直播过程中改变
 			const maxGapDuration = 30 * time.Minute
-			if timeDiff >= 0 && timeDiff < maxGapDuration && s.isSimilarTitle(h.Title, metadata.Title) {
+			if timeDiff >= 0 && timeDiff < maxGapDuration {
 				// 进一步检查：如果该历史记录已有分P，检查最后一个分P的结束时间和当前文件的开始时间是否有间隔
 				var lastPart models.RecordHistoryPart
 				if err := db.Where("history_id = ?", h.ID).Order("end_time DESC").First(&lastPart).Error; err == nil {
@@ -852,7 +871,8 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 					h.EndTime = metadata.EndTime
 					db.Save(&h)
 				}
-				log.Printf("[FileScan] 合并到已有历史记录: ID=%d, SessionID=%s (标题相似且时间间隔<30分钟)", h.ID, h.SessionID)
+				log.Printf("[FileScan] 合并到已有历史记录: ID=%d, SessionID=%s (基于时间连续性: 间隔%.1f分钟<30分钟)",
+					h.ID, h.SessionID, timeDiff.Minutes())
 				return &h, nil
 			}
 			if timeDiff >= maxGapDuration {

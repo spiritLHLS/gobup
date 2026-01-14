@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/gobup/server/internal/database"
@@ -251,29 +250,49 @@ func (s *LiveStatusService) IsRoomRecordingFinished(roomID string, fileModTime t
 
 	if isLive {
 		// 房间正在直播，需要区分是当前这场直播还是之前的录播
-		// 判断1：文件修改时间
+		// 关键判断依据：时间连续性，而不是标题（标题可能在直播中改变）
+		log.Printf("[LiveStatus] 房间 %s 正在直播中（live_status=%d），标题：%s",
+			roomID, roomInfo.Data.LiveStatus, roomInfo.Data.Title)
+
+		// 判断1：文件修改时间距离现在很近，大概率是当前直播的一部分
 		if timeSinceModified < liveFileThreshold {
-			// 文件最近修改过（不到1小时），可能是当前这场直播的文件，跳过
-			log.Printf("[LiveStatus] 房间 %s 正在直播（live_status=%d），文件修改时间过近（%v），跳过文件处理",
+			log.Printf("[LiveStatus] 房间 %s 正在直播（live_status=%d），文件修改时间过近（%v < 1小时），可能是当前直播的分P，跳过文件处理",
 				roomID, roomInfo.Data.LiveStatus, timeSinceModified)
 			return false, false, nil
 		}
 
-		// 判断2：标题匹配（即使文件修改时间>1小时，但如果标题与当前直播一致，可能是分P）
-		if fileTitle != "" && roomInfo.Data.Title != "" {
-			// 简单的标题匹配：去除空格后比较，或者检查是否包含
-			fileT := strings.TrimSpace(fileTitle)
-			liveT := strings.TrimSpace(roomInfo.Data.Title)
-			if fileT == liveT || strings.Contains(fileT, liveT) || strings.Contains(liveT, fileT) {
-				log.Printf("[LiveStatus] 房间 %s 正在直播（live_status=%d），文件标题与当前直播匹配（文件:%s, 直播:%s），可能是当前直播的分P，跳过处理",
-					roomID, roomInfo.Data.LiveStatus, fileTitle, roomInfo.Data.Title)
+		// 判断2：检查数据库中该房间最近的历史记录（基于时间连续性）
+		// 如果最近的历史记录结束时间距离现在很近，说明可能是当前这场直播的早期分P
+		db := database.GetDB()
+		var latestHistory models.RecordHistory
+		err := db.Where("room_id = ?", roomID).
+			Order("end_time DESC").
+			First(&latestHistory).Error
+
+		if err == nil {
+			// 计算最近历史记录的结束时间距离现在的时长
+			timeSinceLastRecord := time.Since(latestHistory.EndTime)
+			const recordContinuityThreshold = 30 * time.Minute // 30分钟内认为是连续的直播
+
+			// 如果该历史记录显示正在录制/直播，或者结束时间距离现在很近
+			// 说明当前文件很可能属于这场正在进行的直播的早期分P
+			if latestHistory.Recording || latestHistory.Streaming || timeSinceLastRecord < recordContinuityThreshold {
+				log.Printf("[LiveStatus] 房间 %s 正在直播，数据库中存在时间连续的记录（距离结束%v），文件可能属于当前直播，跳过处理",
+					roomID, timeSinceLastRecord)
+				log.Printf("[LiveStatus] 最近记录状态: Recording=%v, Streaming=%v, EndTime=%v",
+					latestHistory.Recording, latestHistory.Streaming, latestHistory.EndTime)
 				return false, false, nil
 			}
+
+			// 如果最近的记录结束时间已经很久了（>30分钟），说明是新开的一场直播
+			log.Printf("[LiveStatus] 房间 %s 正在直播，但最近记录结束已久（%v > 30分钟），文件判定为旧直播，可以处理",
+				roomID, timeSinceLastRecord)
+		} else {
+			// 没有历史记录，但房间正在直播且文件修改时间>1小时，判定为旧文件
+			log.Printf("[LiveStatus] 房间 %s 正在直播，无历史记录但文件修改时间较久（%v），判定为旧直播文件，可以处理",
+				roomID, timeSinceModified)
 		}
 
-		// 文件很久没修改了（超过1小时）且标题不匹配，这是之前那场直播的文件，可以处理
-		log.Printf("[LiveStatus] 房间 %s 正在直播（live_status=%d），但文件修改时间较久（%v）且标题不匹配（文件:%s, 直播:%s），判定为旧直播文件，可以处理",
-			roomID, roomInfo.Data.LiveStatus, timeSinceModified, fileTitle, roomInfo.Data.Title)
 		return true, false, nil
 	}
 
