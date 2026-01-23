@@ -1,11 +1,14 @@
 package bili
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/gobup/server/internal/ratelimit"
 )
 
 // ProgressCallback 进度回调函数
@@ -348,10 +351,14 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 			return err
 		}
 
+		// 应用全局上传限速
+		chunkReader := bytes.NewReader(chunk)
+		rateLimitedReader := ratelimit.NewRateLimitedReader(chunkReader, ratelimit.GetGlobalLimiter())
+
 		resp, err := u.client.ReqClient.R().
 			SetHeader("X-Upos-Auth", pre.Auth).
 			SetHeader("Content-Type", "application/octet-stream").
-			SetBody(chunk).
+			SetBody(rateLimitedReader).
 			Put(uploadURL)
 		if err != nil {
 			lastErr = err

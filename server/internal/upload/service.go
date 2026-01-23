@@ -62,6 +62,24 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) error {
 	db := database.GetDB()
 
+	// 权限检查1：房间是否启用上传功能
+	if !room.Upload {
+		log.Printf("[Upload] 房间未启用上传功能，拒绝上传: room_id=%s, part_id=%d", room.RoomID, part.ID)
+		return fmt.Errorf("房间未启用上传功能")
+	}
+
+	// 权限检查2：历史记录是否允许上传
+	if !history.Upload {
+		log.Printf("[Upload] 历史记录禁止上传，拒绝上传: history_id=%d, part_id=%d", history.ID, part.ID)
+		return fmt.Errorf("历史记录禁止上传")
+	}
+
+	// 权限检查3：房间是否配置了上传用户
+	if room.UploadUserID == 0 {
+		log.Printf("[Upload] 房间未配置上传用户，拒绝上传: room_id=%s, part_id=%d", room.RoomID, part.ID)
+		return fmt.Errorf("房间未配置上传用户")
+	}
+
 	// 检查是否在速率限制冷却期内
 	if part.RateLimitCooldownAt != nil && time.Now().Before(*part.RateLimitCooldownAt) {
 		remainingTime := time.Until(*part.RateLimitCooldownAt)
@@ -299,22 +317,60 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.RecordRoom) {
 	db := database.GetDB()
 
-	// 查询所有分P
+	// 查询所有分P的数量和已上传的分P数量
 	var totalCount int64
 	var uploadedCount int64
+	var recordingCount int64
 
 	db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", history.ID).Count(&totalCount)
 	db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND upload = ?", history.ID, true).Count(&uploadedCount)
+	db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND recording = ?", history.ID, true).Count(&recordingCount)
 
-	// 如果所有分P都上传完成且未投稿，根据房间的AutoPublish设置决定是否自动投稿
-	if totalCount > 0 && totalCount == uploadedCount && !history.Publish && room.AutoPublish {
-		log.Printf("所有分P上传完成，房间设置允许自动投稿，开始投稿: history_id=%d", history.ID)
+	// 关键判断：只有在以下所有条件满足时才自动投稿
+	// 1. 有分P存在（totalCount > 0）
+	// 2. 所有分P都已上传（totalCount == uploadedCount）
+	// 3. 没有正在录制的分P（recordingCount == 0）- 确保这场直播已完全结束
+	// 4. 历史记录未投稿（!history.Publish）
+	// 5. 历史记录未标记为正在录制/直播（!history.Recording && !history.Streaming）
+	// 6. 房间启用了自动投稿（room.AutoPublish）
+	if totalCount > 0 && totalCount == uploadedCount && recordingCount == 0 &&
+		!history.Publish && !history.Recording && !history.Streaming &&
+		room.AutoPublish {
+
+		// 额外验证：检查最后一个分P的结束时间，确保距离现在已超过10分钟
+		// 这是为了应对：同场直播的最后一个分P已上传，但可能马上又有新的分P产生的情况
+		var lastPart models.RecordHistoryPart
+		err := db.Where("history_id = ?", history.ID).
+			Order("end_time DESC").
+			First(&lastPart).Error
+
+		if err == nil {
+			timeSinceLastPart := time.Since(lastPart.EndTime)
+			if timeSinceLastPart < 10*time.Minute {
+				log.Printf("[自动投稿] 最后分P结束时间过近(%.1f分钟)，暂缓投稿等待确认直播结束: history_id=%d",
+					timeSinceLastPart.Minutes(), history.ID)
+				return
+			}
+		}
+
+		log.Printf("[自动投稿] 所有条件满足，开始自动投稿: history_id=%d, 总分P=%d, 已上传=%d",
+			history.ID, totalCount, uploadedCount)
 
 		if room.UploadUserID > 0 {
 			if err := s.PublishHistory(history.ID, room.UploadUserID); err != nil {
-				log.Printf("自动投稿失败: %v", err)
+				log.Printf("[自动投稿] 投稿失败: %v", err)
+			} else {
+				log.Printf("[自动投稿] 投稿成功: history_id=%d", history.ID)
 			}
+		} else {
+			log.Printf("[自动投稿] 房间未配置上传用户，无法投稿: history_id=%d", history.ID)
 		}
+	} else if totalCount > 0 && uploadedCount < totalCount {
+		log.Printf("[自动投稿] 等待所有分P上传完成: history_id=%d, 总分P=%d, 已上传=%d, 正在录制=%d",
+			history.ID, totalCount, uploadedCount, recordingCount)
+	} else if recordingCount > 0 {
+		log.Printf("[自动投稿] 仍有分P正在录制，等待录制完成: history_id=%d, 正在录制=%d",
+			history.ID, recordingCount)
 	}
 }
 

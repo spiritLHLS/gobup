@@ -2,10 +2,12 @@ package services
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
+	"gorm.io/gorm"
 )
 
 // AutoUploadService 自动上传服务
@@ -153,6 +155,24 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 				continue
 			}
 
+			// 权限检查：历史记录是否允许上传
+			if !history.Upload {
+				log.Printf("[自动上传] 历史记录禁止上传，跳过: history_id=%d, part_id=%d", history.ID, part.ID)
+				continue
+			}
+
+			// 检查文件是否已稳定（写入完毕5分钟未变动）
+			if !s.isFileStable(part.FilePath, 5*time.Minute) {
+				log.Printf("[自动上传] 文件尚未稳定，跳过: part_id=%d, file=%s", part.ID, part.FilePath)
+				continue
+			}
+
+			// 检查该分P是否属于仍在进行中的直播（同场直播分P间隔不超过10分钟）
+			if s.isLiveStreamInProgress(&part, db) {
+				log.Printf("[自动上传] 该分P所属的直播仍在进行中，但文件已稳定5分钟，可以预先上传: part_id=%d", part.ID)
+				// 虽然直播仍在进行，但文件已稳定5分钟，可以预先上传（不投稿）
+			}
+
 			tasks = append(tasks, PendingUploadTask{
 				Part:    part,
 				History: history,
@@ -162,6 +182,80 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 	}
 
 	return tasks, nil
+}
+
+// isFileStable 检查文件是否已稳定（修改时间超过指定时长）
+func (s *AutoUploadService) isFileStable(filePath string, stableDuration time.Duration) bool {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		log.Printf("[自动上传] 无法获取文件信息: %s, error=%v", filePath, err)
+		return false
+	}
+
+	timeSinceModified := time.Since(fileInfo.ModTime())
+	if timeSinceModified < stableDuration {
+		log.Printf("[自动上传] 文件修改时间过近: %s, 距离上次修改%.1f分钟 < %.1f分钟",
+			filePath, timeSinceModified.Minutes(), stableDuration.Minutes())
+		return false
+	}
+
+	return true
+}
+
+// isLiveStreamInProgress 检查该分P所属的直播是否仍在进行中
+// 判断依据：
+// 1. 查询同一SessionID的所有分P（包括正在录制的），检查最后一个分P的结束时间
+// 2. 如果最后一个分P的结束时间距离现在不超过10分钟，认为直播仍在进行
+// 3. 如果该SessionID的历史记录标记为正在录制/直播，则直播仍在进行
+func (s *AutoUploadService) isLiveStreamInProgress(part *models.RecordHistoryPart, db *gorm.DB) bool {
+	// 1. 检查该SessionID的历史记录状态
+	var history models.RecordHistory
+	err := db.Where("session_id = ? AND room_id = ?", part.SessionID, part.RoomID).
+		First(&history).Error
+
+	if err == nil {
+		// 找到历史记录，检查是否正在录制/直播
+		if history.Recording || history.Streaming {
+			log.Printf("[自动上传] 检测到直播仍在进行（历史记录标记）: session_id=%s, history_id=%d, Recording=%v, Streaming=%v",
+				part.SessionID, history.ID, history.Recording, history.Streaming)
+			return true
+		}
+	}
+
+	// 2. 查询同一SessionID的所有分P（包括正在录制的），按结束时间倒序
+	var latestPart models.RecordHistoryPart
+	err = db.Where("session_id = ? AND room_id = ?", part.SessionID, part.RoomID).
+		Order("end_time DESC").
+		First(&latestPart).Error
+
+	if err != nil {
+		// 没有找到同SessionID的分P，可能是第一个分P或数据异常
+		return false
+	}
+
+	// 3. 检查最后一个分P的结束时间距离现在是否不超过10分钟
+	// 注意：需要排除当前分P本身，避免误判
+	if latestPart.ID != part.ID {
+		timeSinceLastPart := time.Since(latestPart.EndTime)
+		if timeSinceLastPart <= 10*time.Minute {
+			log.Printf("[自动上传] 检测到直播可能仍在进行（最后分P间隔）: session_id=%s, 最后分P(id=%d)结束于%.1f分钟前",
+				part.SessionID, latestPart.ID, timeSinceLastPart.Minutes())
+			return true
+		}
+	}
+
+	// 4. 检查是否有正在录制的分P
+	var recordingPart models.RecordHistoryPart
+	err = db.Where("session_id = ? AND room_id = ? AND recording = ?", part.SessionID, part.RoomID, true).
+		First(&recordingPart).Error
+
+	if err == nil {
+		log.Printf("[自动上传] 检测到有正在录制的分P: session_id=%s, part_id=%d",
+			part.SessionID, recordingPart.ID)
+		return true
+	}
+
+	return false
 }
 
 // PendingUploadTask 待上传任务

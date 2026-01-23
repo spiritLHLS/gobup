@@ -4,12 +4,12 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gobup/server/internal/upload"
+	"github.com/gobup/server/internal/ratelimit"
 )
 
 // GetRateLimitConfig 获取上传限速配置
 func GetRateLimitConfig(c *gin.Context) {
-	speedMBps, enabled := upload.GetGlobalRateLimit()
+	speedMBps, enabled := ratelimit.GetGlobalRateLimit()
 
 	c.JSON(http.StatusOK, gin.H{
 		"enabled":   enabled,
@@ -35,9 +35,9 @@ func SetRateLimitConfig(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "限速值必须大于0"})
 			return
 		}
-		upload.SetGlobalRateLimit(req.SpeedMBps)
+		ratelimit.SetGlobalRateLimit(req.SpeedMBps)
 	} else {
-		upload.SetGlobalRateLimit(0) // 禁用限速
+		ratelimit.SetGlobalRateLimit(0) // 禁用限速
 	}
 
 	c.JSON(http.StatusOK, gin.H{

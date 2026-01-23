@@ -661,6 +661,7 @@ func (s *FileScanService) parseFileMetadata(filePath string, info os.FileInfo) *
 
 	fileName := filepath.Base(filePath)
 	dirPath := filepath.Dir(filePath)
+	fileExt := strings.ToLower(filepath.Ext(filePath))
 
 	metadata := &FileMetadata{
 		RoomID:    "unknown",
@@ -669,52 +670,93 @@ func (s *FileScanService) parseFileMetadata(filePath string, info os.FileInfo) *
 		AreaName:  "",
 		StartTime: info.ModTime().Add(-time.Hour), // 默认假设录制1小时
 		EndTime:   info.ModTime(),
+		SessionID: "", // 初始为空，稍后会尝试从FLV文件读取
 	}
 
-	// 尝试从目录结构中提取房间号
-	// 例如: /path/to/work/5050/2025/01/01/file.flv
-	parts := strings.Split(dirPath, string(os.PathSeparator))
-	for i := len(parts) - 1; i >= 0; i-- {
-		part := parts[i]
-		// 检查是否是纯数字（可能是房间号）
-		if len(part) > 0 && len(part) <= 10 {
-			isNumber := true
-			for _, c := range part {
-				if c < '0' || c > '9' {
-					isNumber = false
+	// 第一步：优先尝试从FLV文件中读取元数据（包含SessionID）
+	if fileExt == ".flv" {
+		flvParser := NewFLVParser()
+		if flvMetadata, err := flvParser.ParseFLVFile(filePath); err == nil {
+			// 成功读取FLV元数据
+			if flvMetadata.SessionID != "" {
+				metadata.SessionID = flvMetadata.SessionID
+				log.Printf("[FileScan] 从FLV文件读取SessionID: %s", metadata.SessionID)
+			}
+			if flvMetadata.RoomID != "" {
+				metadata.RoomID = flvMetadata.RoomID
+			}
+			if flvMetadata.Uname != "" {
+				metadata.Uname = flvMetadata.Uname
+			}
+			if flvMetadata.Title != "" {
+				metadata.Title = flvMetadata.Title
+			}
+			if !flvMetadata.StartTime.IsZero() {
+				metadata.StartTime = flvMetadata.StartTime
+			}
+			if flvMetadata.Duration > 0 {
+				metadata.EndTime = metadata.StartTime.Add(time.Duration(flvMetadata.Duration*1000) * time.Millisecond)
+			}
+		} else {
+			log.Printf("[FileScan] 读取FLV元数据失败: %v，继续使用其他方法", err)
+		}
+	}
+
+	// 第二步：尝试从目录结构中提取房间号（如果还未获取）
+	if metadata.RoomID == "unknown" {
+		// 例如: /path/to/work/5050/2025/01/01/file.flv
+		parts := strings.Split(dirPath, string(os.PathSeparator))
+		for i := len(parts) - 1; i >= 0; i-- {
+			part := parts[i]
+			// 检查是否是纯数字（可能是房间号）
+			if len(part) > 0 && len(part) <= 10 {
+				isNumber := true
+				for _, c := range part {
+					if c < '0' || c > '9' {
+						isNumber = false
+						break
+					}
+				}
+				if isNumber && len(part) >= 4 { // 房间号至少4位
+					metadata.RoomID = part
+					if metadata.Uname == "未知主播" {
+						metadata.Uname = fmt.Sprintf("房间%s", part)
+					}
 					break
 				}
-			}
-			if isNumber && len(part) >= 4 { // 房间号至少4位
-				metadata.RoomID = part
-				metadata.Uname = fmt.Sprintf("房间%s", part)
-				break
 			}
 		}
 	}
 
-	// 尝试从文件名解析（录播姬格式：录制-房间号-日期-时间-编号-标题.flv）
+	// 第三步：尝试从文件名解析（录播姬格式：录制-房间号-日期-时间-编号-标题.flv）
 	if strings.HasPrefix(fileName, "录制-") || strings.HasPrefix(fileName, "record-") {
 		fields := strings.Split(fileName, "-")
 		if len(fields) >= 3 {
-			metadata.RoomID = fields[1]
-			metadata.Uname = fmt.Sprintf("房间%s", fields[1])
+			if metadata.RoomID == "unknown" {
+				metadata.RoomID = fields[1]
+				if metadata.Uname == "未知主播" {
+					metadata.Uname = fmt.Sprintf("房间%s", fields[1])
+				}
+			}
 
 			// 尝试解析日期时间
 			if len(fields) >= 4 {
 				dateTimeStr := fields[2] + fields[3]
 				if t, err := time.Parse("20060102150405", dateTimeStr[:14]); err == nil {
-					metadata.StartTime = t.Add(-time.Hour)
-					metadata.EndTime = t
+					metadata.StartTime = t
+					metadata.EndTime = t.Add(time.Hour) // 默认1小时
 				}
 			}
 
 			// 提取标题 - 取最后一个 - 之后的内容
 			// 格式: 录制-5050-20260101-183709-843-新年第一天直播 紧张.flv
-			if len(fields) >= 5 {
+			if len(fields) >= 5 && metadata.Title == strings.TrimSuffix(fileName, filepath.Ext(fileName)) {
 				// 标题是最后一个字段，去除扩展名
-				metadata.Title = fields[len(fields)-1]
-				metadata.Title = strings.TrimSuffix(metadata.Title, filepath.Ext(metadata.Title))
+				newTitle := fields[len(fields)-1]
+				newTitle = strings.TrimSuffix(newTitle, filepath.Ext(newTitle))
+				if newTitle != "" {
+					metadata.Title = newTitle
+				}
 			}
 		}
 	}
@@ -732,10 +774,16 @@ func (s *FileScanService) parseFileMetadata(filePath string, info os.FileInfo) *
 		metadata.EndTime = metadata.StartTime.Add(time.Hour)
 	}
 
-	// 生成 SessionID（使用 房间号+日期+时间 作为session标识，避免同一天多场直播被合并）
-	// 使用分钟级别的标识，提高精确度
-	sessionTimeStr := metadata.StartTime.Format("200601021504") // 精确到分钟
-	metadata.SessionID = fmt.Sprintf("%s_%s_scan", metadata.RoomID, sessionTimeStr)
+	// 生成或验证 SessionID
+	// 如果FLV文件中已经有SessionID，直接使用
+	// 否则根据房间号和时间生成
+	if metadata.SessionID == "" {
+		// 对于同一房间的多场直播，使用更精细的时间粒度来区分
+		// 策略：使用房间号+日期+小时来生成SessionID
+		// 这样可以识别同一房间在不同时间段的直播，但同一小时内的分P会被合并
+		sessionTimeStr := metadata.StartTime.Format("2006010215") // 精确到小时
+		metadata.SessionID = fmt.Sprintf("%s_%s_scan", metadata.RoomID, sessionTimeStr)
+	}
 
 	return metadata
 }
@@ -786,16 +834,19 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 		}
 	}
 
-	// 如果没有找到，尝试查找同一天同一房间的最近记录
-	// 条件：时间差在2小时内 且 标题相似
+	// 如果没有找到，尝试查找同一房间在时间窗口内的最近记录
+	// 搜索范围：前后各9小时（总共18小时窗口），足以处理跨凌晨及间隔较长的情况
+	// 避免过大的时间窗口导致误合并不同场次的直播
 	var histories []models.RecordHistory
-	dayStart := metadata.StartTime.Truncate(24 * time.Hour)
-	dayEnd := dayStart.Add(24 * time.Hour)
 
-	err := db.Where("room_id = ? AND start_time >= ? AND start_time < ?",
-		metadata.RoomID, dayStart, dayEnd).
+	// 搜索范围：文件开始时间前后各9小时
+	searchStart := metadata.StartTime.Add(-9 * time.Hour)
+	searchEnd := metadata.StartTime.Add(9 * time.Hour)
+
+	err := db.Where("room_id = ? AND start_time >= ? AND start_time < ? AND publish = ?",
+		metadata.RoomID, searchStart, searchEnd, false).
 		Order("end_time DESC").
-		Limit(10).
+		Limit(20).
 		Find(&histories).Error
 
 	if err == nil && len(histories) > 0 {
@@ -804,7 +855,7 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 		roomInfo, roomErr := liveStatusService.GetRoomInfo(metadata.RoomID)
 		isCurrentlyLive := roomErr == nil && roomInfo.Data.LiveStatus == 1
 
-		// 检查时间差和标题相似度
+		// 检查时间差和连续性
 		for _, h := range histories {
 			// 跳过已投稿的记录，避免重复投稿
 			if h.Publish {
@@ -814,10 +865,10 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 
 			// 如果房间当前正在直播，不要合并到旧记录（可能是新开的一场）
 			if isCurrentlyLive {
-				// 检查历史记录的结束时间，如果已经过去超过10分钟，说明是新的一场直播
+				// 检查历史记录的结束时间，如果已经过去超过15分钟，说明是新的一场直播
 				timeSinceHistoryEnd := metadata.StartTime.Sub(h.EndTime)
-				if timeSinceHistoryEnd > 10*time.Minute {
-					log.Printf("[FileScan] 房间正在直播且距上次结束>10分钟，不合并到旧记录: 旧记录结束=%v, 新文件开始=%v",
+				if timeSinceHistoryEnd > 15*time.Minute {
+					log.Printf("[FileScan] 房间正在直播且距上次结束>15分钟，不合并到旧记录: 旧记录结束=%v, 新文件开始=%v",
 						h.EndTime, metadata.StartTime)
 					continue
 				}
@@ -840,6 +891,11 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 					if metadata.EndTime.After(h.EndTime) {
 						h.EndTime = metadata.EndTime
 					}
+					// 如果新文件有更新的标题，更新历史记录的标题（处理标题变化情况）
+					if metadata.Title != "" && metadata.Title != h.Title {
+						log.Printf("[FileScan] 检测到标题变化，更新为最新: %s -> %s", h.Title, metadata.Title)
+						h.Title = metadata.Title
+					}
 					db.Save(&h)
 					log.Printf("[FileScan] 合并到已有历史记录(时间重叠): ID=%d, SessionID=%s", h.ID, h.SessionID)
 					return &h, nil
@@ -851,7 +907,7 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 			}
 
 			// 时间间隔检查：只有时间间隔小于30分钟，才认为是同一场直播，才合并
-			// 这样可以避免将有较长间隔的多场直播合并为一场
+			// 考虑到可能的跨越凌晨情况和标题变化
 			// 不再依赖标题相似度，因为标题可能在直播过程中改变
 			const maxGapDuration = 30 * time.Minute
 			if timeDiff >= 0 && timeDiff < maxGapDuration {
@@ -860,17 +916,28 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 				if err := db.Where("history_id = ?", h.ID).Order("end_time DESC").First(&lastPart).Error; err == nil {
 					partGap := metadata.StartTime.Sub(lastPart.EndTime)
 					if partGap >= maxGapDuration {
-						log.Printf("[FileScan] 时间间隔过大(%.1f分钟)，不合并: 已有=%s, 新=%s",
+						log.Printf("[FileScan] 最后分P到新文件间隔过大(%.1f分钟)，不合并: 已有=%s, 新=%s",
 							partGap.Minutes(), h.Title, metadata.Title)
 						continue
+					}
+					// 如果间隔在可接受范围内但>10分钟，可能是直播过程中因为标题变化自动断开了
+					// 在这种情况下，仍然合并，并更新标题
+					if partGap > 10*time.Minute {
+						log.Printf("[FileScan] 分P间隔%.1f分钟（可能是标题变化导致），继续合并: %s -> %s",
+							partGap.Minutes(), h.Title, metadata.Title)
 					}
 				}
 
 				// 找到可合并的历史记录
 				if metadata.EndTime.After(h.EndTime) {
 					h.EndTime = metadata.EndTime
-					db.Save(&h)
 				}
+				// 如果新文件有更新的标题，更新历史记录的标题
+				if metadata.Title != "" && metadata.Title != h.Title {
+					log.Printf("[FileScan] 检测到标题变化，更新为最新: %s -> %s", h.Title, metadata.Title)
+					h.Title = metadata.Title
+				}
+				db.Save(&h)
 				log.Printf("[FileScan] 合并到已有历史记录: ID=%d, SessionID=%s (基于时间连续性: 间隔%.1f分钟<30分钟)",
 					h.ID, h.SessionID, timeDiff.Minutes())
 				return &h, nil

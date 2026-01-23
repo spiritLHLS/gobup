@@ -1,9 +1,12 @@
 package bili
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"path/filepath"
+
+	"github.com/gobup/server/internal/ratelimit"
 )
 
 // AppUploader APP端上传器
@@ -122,10 +125,14 @@ func (u *AppUploader) uploadChunk(endpoint string, chunk []byte, chunkIndex, tot
 	// 计算分片MD5
 	chunkMD5 := calculateChunkMD5(chunk)
 
+	// 应用全局上传限速
+	chunkReader := bytes.NewReader(chunk)
+	rateLimitedReader := ratelimit.NewRateLimitedReader(chunkReader, ratelimit.GetGlobalLimiter())
+
 	resp, err := u.client.ReqClient.R().
 		SetHeader("Content-Type", "application/octet-stream").
 		SetHeader("Content-MD5", chunkMD5).
-		SetBody(chunk).
+		SetBody(rateLimitedReader).
 		Post(uploadURL)
 	if err != nil {
 		return err

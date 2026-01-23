@@ -34,6 +34,18 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("房间不存在: %w", err)
 	}
 
+	// 权限检查1：房间是否启用上传功能（总开关）
+	if !room.Upload {
+		return fmt.Errorf("房间未启用上传功能，无法投稿")
+	}
+
+	// 权限检查2：验证用户ID是否匹配房间配置的上传用户
+	if room.UploadUserID != userID {
+		log.Printf("[Publish] 用户权限不匹配: 房间配置用户ID=%d, 请求用户ID=%d",
+			room.UploadUserID, userID)
+		return fmt.Errorf("用户无权操作此房间的投稿，请联系管理员")
+	}
+
 	var user models.BiliBiliUser
 	if err := db.First(&user, userID).Error; err != nil {
 		return fmt.Errorf("用户不存在: %w", err)
