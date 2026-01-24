@@ -102,7 +102,13 @@ type BuvIdResponse struct {
 
 func NewBiliClient(accessKey, cookies string, mid int64) *BiliClient {
 	client := req.C().
-		SetTimeout(300 * time.Second).
+		SetTimeout(30 * time.Minute).             // 增加超时时间到30分钟，适应大文件上传
+		SetCommonRetryCount(0).                   // 禁用自动重试，由业务层控制
+		EnableKeepAlives().                       // 启用连接保持
+		SetTLSHandshakeTimeout(30 * time.Second). // TLS握手超时
+		SetCommonRetryCondition(func(_ *req.Response, _ error) bool {
+			return false // 禁用自动重试，避免并发冲突
+		}).
 		ImpersonateChrome()
 
 	if cookies != "" {
@@ -120,7 +126,8 @@ func NewBiliClient(accessKey, cookies string, mid int64) *BiliClient {
 // NewBiliClientWithProxy 创建带代理的BiliClient
 func NewBiliClientWithProxy(accessKey, cookies string, mid int64, proxyURL string) *BiliClient {
 	client := req.C().
-		SetTimeout(60 * time.Second). // 降低超时时间，避免长时间等待
+		SetTimeout(30 * time.Minute).             // 增加超时时间到30分钟，适应大文件上传
+		SetTLSHandshakeTimeout(30 * time.Second). // TLS握手超时
 		ImpersonateChrome().
 		DisableKeepAlives(). // 禁用连接复用，避免EOF错误
 		SetCommonRetryCondition(func(_ *req.Response, _ error) bool {

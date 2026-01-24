@@ -79,11 +79,14 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 	log.Printf("[UPOS] 开始分片上传: total_parts=%d, chunk_size=%dMB", totalParts, chunkSize/(1024*1024))
 	chunkDone := 0
 
-	// 分片上传最多重试3次整个流程（如果某个分片持续失败）
-	maxUploadRetries := 3
+	// 分片上传最多重试5次整个流程（如果某个分片持续失败）
+	maxUploadRetries := 5
 	for uploadRetry := 0; uploadRetry < maxUploadRetries; uploadRetry++ {
 		if uploadRetry > 0 {
-			log.Printf("[UPOS] 检测到分片上传失败，开始断点续传 (重试 %d/%d)，从分片 %d/%d 继续", uploadRetry+1, maxUploadRetries, chunkDone+1, totalParts)
+			// 重试前等待，避免立即重试
+			retryDelay := time.Duration(uploadRetry*5) * time.Second
+			log.Printf("[UPOS] 检测到分片上传失败，等待%v后开始断点续传 (重试 %d/%d)，从分片 %d/%d 继续", retryDelay, uploadRetry+1, maxUploadRetries, chunkDone+1, totalParts)
+			time.Sleep(retryDelay)
 		}
 
 		err = readFileChunks(file, chunkSize, func(chunk FileChunk) error {
@@ -362,6 +365,13 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 			Put(uploadURL)
 		if err != nil {
 			lastErr = err
+			// 检测是否为连接被重置的错误，如果是则增加额外延迟
+			if strings.Contains(err.Error(), "connection reset") || strings.Contains(err.Error(), "broken pipe") {
+				// 连接重置，可能是网络不稳定或服务器限制，增加额外延迟
+				extraDelay := 3 * time.Second
+				log.Printf("[UPOS] 分片%d检测到连接重置错误，额外等待%v", partNum, extraDelay)
+				time.Sleep(extraDelay)
+			}
 			// 网络错误可以重试
 			continue
 		}

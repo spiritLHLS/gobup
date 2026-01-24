@@ -38,7 +38,7 @@ func GetAPILimiter() *APILimiter {
 	once.Do(func() {
 		globalLimiter = &APILimiter{
 			preUploadLimiter:   rate.NewLimiter(rate.Every(1*time.Second), 1),        // 预上传：1次/秒
-			chunkUploadLimiter: rate.NewLimiter(rate.Every(350*time.Millisecond), 3), // 分片上传：3次/秒，间隔350ms
+			chunkUploadLimiter: rate.NewLimiter(rate.Every(500*time.Millisecond), 2), // 分片上传：2次/秒，间隔500ms（降低速度提高稳定性）
 			publishLimiter:     rate.NewLimiter(rate.Every(12*time.Second), 5),       // 投稿：5次/分钟
 			danmakuLimiter:     rate.NewLimiter(rate.Every(30*time.Second), 1),       // 弹幕：30秒1条，确保同一IP至少间隔30秒
 			generalLimiter:     rate.NewLimiter(rate.Every(500*time.Millisecond), 2), // 通用：2次/秒
@@ -93,9 +93,9 @@ type RetryConfig struct {
 
 // DefaultRetryConfig 默认重试配置
 var DefaultRetryConfig = RetryConfig{
-	MaxRetries:    3,
-	InitialDelay:  2 * time.Second,
-	MaxDelay:      30 * time.Second,
+	MaxRetries:    5,                // 增加重试次数到5次
+	InitialDelay:  3 * time.Second,  // 增加初始延迟到3秒
+	MaxDelay:      60 * time.Second, // 增加最大延迟到60秒
 	BackoffFactor: 2.0,
 	RetryableErrors: []string{
 		"timeout",
