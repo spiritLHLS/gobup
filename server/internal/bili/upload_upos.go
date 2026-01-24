@@ -361,6 +361,7 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 		resp, err := u.client.ReqClient.R().
 			SetHeader("X-Upos-Auth", pre.Auth).
 			SetHeader("Content-Type", "application/octet-stream").
+			SetHeader("Content-Length", fmt.Sprintf("%d", chunkSize)). // 明确设置Content-Length
 			SetBody(rateLimitedReader).
 			Put(uploadURL)
 		if err != nil {
