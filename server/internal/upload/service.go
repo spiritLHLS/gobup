@@ -295,6 +295,31 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	// 标记上传成功并移除进度
 	s.progressTracker.MarkSuccessAndRemove(int64(part.ID))
 
+	// 弹幕烧录：如果启用且不是临时文件，则生成带弹幕版本并上传
+	if room.EnableDanmakuBurn && !part.IsTempFile {
+		log.Printf("[弹幕烧录] 检测到启用弹幕烧录功能，开始处理 part_id=%d", part.ID)
+		burnService := services.NewDanmakuBurnService()
+		
+		// 生成带弹幕的视频文件
+		burnedVideoPath, err := burnService.BurnDanmakuToVideo(part, history, room)
+		if err != nil {
+			log.Printf("[弹幕烧录] 烧录失败（将继续后续流程）: %v", err)
+		} else {
+			log.Printf("[弹幕烧录] 烧录成功，开始上传弹幕版: %s", burnedVideoPath)
+			
+			// 查询生成的弹幕版Part
+			var burnedPart models.RecordHistoryPart
+			if err := db.Where("file_path = ?", burnedVideoPath).First(&burnedPart).Error; err == nil {
+				// 自动上传弹幕版
+				if err := s.UploadPart(&burnedPart, history, room); err != nil {
+					log.Printf("[弹幕烧录] 弹幕版上传失败: %v", err)
+				} else {
+					log.Printf("[弹幕烧录] 弹幕版已加入上传队列")
+				}
+			}
+		}
+	}
+
 	// 处理文件策略：3-上传后删除, 4-上传后移动, 6-上传后复制, 7-上传完成后立即删除
 	if room.DeleteType == 3 || room.DeleteType == 4 || room.DeleteType == 6 || room.DeleteType == 7 {
 		fileMoverSvc := services.NewFileMoverService()
@@ -492,6 +517,9 @@ func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history
 			Uploading:  false,
 			Page:       0,
 			XcodeState: 0,
+			IsTempFile:   true,                 // 标记为临时文件
+			SourcePartID: originalPart.ID,      // 记录源Part ID
+			TempFileType: "split",              // 切分文件类型
 		}
 
 		if err := db.Create(newPart).Error; err != nil {

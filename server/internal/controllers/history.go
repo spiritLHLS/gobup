@@ -515,11 +515,8 @@ func BatchResetStatus(c *gin.Context) {
 		}
 
 		if req.Files && history.FilePath != "" {
-			// 删除文件
-			filePath := history.FilePath
-			if _, err := os.Stat(filePath); err == nil {
-				os.Remove(filePath)
-			}
+			// 重置状态时只清空数据库记录，不删除实际文件
+			// 如需删除文件，请使用"删除记录和文件"功能
 			updates["file_path"] = ""
 		}
 
@@ -560,11 +557,17 @@ func BatchDeleteWithFiles(c *gin.Context) {
 			continue
 		}
 
-		// 删除文件
+		// 删除文件（包括相关文件）
+		moverService := services.NewFileMoverService()
 		if history.FilePath != "" {
 			if _, err := os.Stat(history.FilePath); err == nil {
-				os.Remove(history.FilePath)
-				log.Printf("[批量删除] 删除文件: %s", history.FilePath)
+				if err := os.Remove(history.FilePath); err != nil {
+					log.Printf("[批量删除] 删除文件失败: %s, error: %v", history.FilePath, err)
+				} else {
+					log.Printf("[批量删除] 已删除主文件: %s", history.FilePath)
+				}
+				// 删除相关文件
+				moverService.DeleteRelatedFiles(history.FilePath)
 			}
 		}
 
@@ -572,9 +575,16 @@ func BatchDeleteWithFiles(c *gin.Context) {
 		var parts []models.RecordHistoryPart
 		db.Where("history_id = ?", historyID).Find(&parts)
 		for _, part := range parts {
-			if part.FileName != "" {
-				if _, err := os.Stat(part.FileName); err == nil {
-					os.Remove(part.FileName)
+			// 统一使用 FilePath 字段（与单个删除保持一致）
+			if part.FilePath != "" {
+				if _, err := os.Stat(part.FilePath); err == nil {
+					if err := os.Remove(part.FilePath); err != nil {
+						log.Printf("[批量删除] 删除分P文件失败: %s, error: %v", part.FilePath, err)
+					} else {
+						log.Printf("[批量删除] 已删除分P主文件: %s", part.FilePath)
+					}
+					// 删除相关文件（xml弹幕、jpg/jpeg封面、ass/srt字幕等）
+					moverService.DeleteRelatedFiles(part.FilePath)
 				}
 			}
 		}

@@ -326,12 +326,18 @@ func DeleteHistoryWithFiles(c *gin.Context) {
 	var parts []models.RecordHistoryPart
 	db.Where("history_id = ?", historyID).Find(&parts)
 
-	// 删除文件
+	// 删除文件（包括相关文件）
+	moverService := services.NewFileMoverService()
 	for _, part := range parts {
 		if part.FilePath != "" {
+			// 删除主视频文件
 			if err := os.Remove(part.FilePath); err != nil && !os.IsNotExist(err) {
 				log.Printf("删除文件失败: %s, %v", part.FilePath, err)
+			} else {
+				log.Printf("已删除主文件: %s", part.FilePath)
 			}
+			// 删除相关文件（xml弹幕、jpg封面等）
+			moverService.DeleteRelatedFiles(part.FilePath)
 		}
 	}
 

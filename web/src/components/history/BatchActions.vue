@@ -12,14 +12,6 @@
         <el-icon><Promotion /></el-icon>
         投稿视频
       </el-button>
-      <el-button size="small" type="success" @click="$emit('sendDanmaku')">
-        <el-icon><ChatDotRound /></el-icon>
-        发送弹幕
-      </el-button>
-      <el-button size="small" type="primary" plain @click="$emit('parseDanmaku')">
-        <el-icon><Document /></el-icon>
-        解析弹幕
-      </el-button>
       <el-button size="small" type="info" @click="$emit('syncVideo')">
         <el-icon><Refresh /></el-icon>
         同步信息
@@ -47,8 +39,6 @@
 <script setup>
 import { 
   Upload, 
-  ChatDotRound, 
-  Document,
   Refresh, 
   FolderOpened, 
   RefreshLeft, 
@@ -67,8 +57,6 @@ defineProps({
 defineEmits([
   'upload',
   'publish',
-  'sendDanmaku',
-  'parseDanmaku',
   'syncVideo',
   'moveFiles',
   'resetStatus',

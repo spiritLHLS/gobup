@@ -57,10 +57,13 @@ type RecordRoom struct {
 	DmUlLevel          int            `gorm:"default:0" json:"dmUlLevel"`          // 用户等级过滤
 	DmMedalLevel       int            `gorm:"default:0" json:"dmMedalLevel"`       // 粉丝勋章过滤 0-不过滤 1-佩戴粉丝勋章 2-佩戴主播粉丝勋章
 	DmKeywordBlacklist string         `gorm:"type:text" json:"dmKeywordBlacklist"` // 关键词屏蔽，一行一个
+	EnableDanmakuBurn  bool           `gorm:"default:false" json:"enableDanmakuBurn"` // 启用弹幕烧录（生成带弹幕版本）
+	DanmakuBurnStyle   string         `gorm:"default:default" json:"danmakuBurnStyle"` // 弹幕样式：default, compact, large
 	Recording          bool           `gorm:"default:false;index" json:"recording"`
 	Streaming          bool           `gorm:"default:false;index" json:"streaming"`
 	SessionID          string         `gorm:"index" json:"sessionId"`
 	SeasonID           int64          `json:"seasonId"`
+	MergeBySession     bool           `gorm:"default:true" json:"mergeBySession"` // 同SessionID合并到一个投稿
 	LiveStatus         int            `gorm:"default:0;index" json:"liveStatus"` // 直播状态: 0未开播 1正在直播 2轮播中
 	LastCheckTime      *time.Time     `json:"lastCheckTime"`                     // 最后检查时间
 }
@@ -135,6 +138,9 @@ type RecordHistoryPart struct {
 	UploadLine          string     `json:"uploadLine"`                           // 实际上传使用的线路
 	RateLimitCooldownAt *time.Time `gorm:"index" json:"rateLimitCooldownAt"`     // 速率限制冷却时间（24小时后恢复）
 	RateLimitRetryCount int        `gorm:"default:0" json:"rateLimitRetryCount"` // 406速率限制失败次数
+	IsTempFile          bool       `gorm:"default:false;index" json:"isTempFile"` // 是否为临时文件（自动切分、弹幕烧录等生成）
+	SourcePartID        uint       `gorm:"index" json:"sourcePartId"`              // 源Part ID（如果是从其他Part派生）
+	TempFileType        string     `json:"tempFileType"`                           // 临时文件类型：split（切分）, danmaku_burn（弹幕烧录）
 }
 
 // BiliBiliUser B站用户

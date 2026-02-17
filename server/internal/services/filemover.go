@@ -185,7 +185,7 @@ func (s *FileMoverService) copyFile(src, dst string) error {
 // moveRelatedFiles 移动相关文件（xml弹幕、封面等）
 func (s *FileMoverService) moveRelatedFiles(sourceDir, targetDir, baseName string) {
 	// 常见的相关文件扩展名
-	extensions := []string{".xml", ".jpg", ".png", ".json", ".txt"}
+	extensions := []string{".xml", ".jpg", ".jpeg", ".cover.jpg", ".png", ".json", ".txt", ".ass", ".srt"}
 
 	for _, ext := range extensions {
 		sourceFile := filepath.Join(sourceDir, baseName+ext)
@@ -348,24 +348,69 @@ func (s *FileMoverService) scheduleDelayedDelete(historyID uint) error {
 	return nil
 }
 
-// deleteRelatedFiles 删除相关文件
-func (s *FileMoverService) deleteRelatedFiles(filePath string) {
+// DeleteRelatedFiles 删除相关文件（xml弹幕、jpg封面、png、json、txt、ass、srt字幕等）
+// 严格基于主文件路径进行精确匹配，确保100%对应关系，避免误删
+func (s *FileMoverService) DeleteRelatedFiles(filePath string) {
+	// 参数验证
+	if filePath == "" {
+		log.Printf("[DeleteRelatedFiles] 警告: 文件路径为空，跳过删除")
+		return
+	}
+
+	// 验证主文件确实存在或曾经存在（可能已被删除）
 	dir := filepath.Dir(filePath)
+	if dir == "" || dir == "." {
+		log.Printf("[DeleteRelatedFiles] 警告: 无效的文件路径 %s，跳过删除", filePath)
+		return
+	}
+
+	// 获取不带扩展名的基础文件名（确保精确匹配）
 	baseName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
-	extensions := []string{".xml", ".jpg", ".png", ".json", ".txt", ".ass", ".srt"}
+	if baseName == "" {
+		log.Printf("[DeleteRelatedFiles] 警告: 无法提取文件名 %s，跳过删除", filePath)
+		return
+	}
+
+	// 相关文件扩展名列表
+	extensions := []string{".xml", ".jpg", ".jpeg", ".cover.jpg", ".png", ".json", ".txt", ".ass", ".srt"}
+
+	log.Printf("[DeleteRelatedFiles] 开始删除 %s 的相关文件", filePath)
 
 	for _, ext := range extensions {
+		// 构造精确的相关文件路径（同目录 + 同基础名 + 特定扩展名）
 		relatedFile := filepath.Join(dir, baseName+ext)
+		
+		// 二次验证：确保构造的路径与原文件在同一目录
+		if filepath.Dir(relatedFile) != dir {
+			log.Printf("[DeleteRelatedFiles] 安全检查失败: 路径不匹配 %s", relatedFile)
+			continue
+		}
+
+		// 检查文件是否存在
 		if _, err := os.Stat(relatedFile); err == nil {
-			os.Remove(relatedFile)
-			log.Printf("已删除相关文件: %s", relatedFile)
+			// 最后确认：文件名前缀必须完全匹配
+			relatedBaseName := strings.TrimSuffix(filepath.Base(relatedFile), filepath.Ext(relatedFile))
+			if relatedBaseName != baseName {
+				log.Printf("[DeleteRelatedFiles] 安全检查失败: 文件名不匹配 %s (期望: %s, 实际: %s)", 
+					relatedFile, baseName, relatedBaseName)
+				continue
+			}
+
+			// 执行删除
+			if err := os.Remove(relatedFile); err != nil {
+				log.Printf("[DeleteRelatedFiles] 删除相关文件失败: %s, error: %v", relatedFile, err)
+			} else {
+				log.Printf("[DeleteRelatedFiles] ✓ 已删除相关文件: %s", relatedFile)
+			}
+		} else if !os.IsNotExist(err) {
+			log.Printf("[DeleteRelatedFiles] 检查文件失败: %s, error: %v", relatedFile, err)
 		}
 	}
 }
 
 // copyRelatedFiles 复制相关文件
 func (s *FileMoverService) copyRelatedFiles(sourceDir, targetDir, baseName string) {
-	extensions := []string{".xml", ".jpg", ".png", ".json", ".txt", ".ass", ".srt"}
+	extensions := []string{".xml", ".jpg", ".jpeg", ".cover.jpg", ".png", ".json", ".txt", ".ass", ".srt"}
 
 	for _, ext := range extensions {
 		sourceFile := filepath.Join(sourceDir, baseName+ext)

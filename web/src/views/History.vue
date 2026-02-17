@@ -83,25 +83,6 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="弹幕" width="150">
-          <template #default="{ row }">
-            <div v-if="getDanmakuProgress(row.id)">
-              <el-progress
-                :percentage="getDanmakuProgressPercent(row.id)"
-                :status="getDanmakuProgressPercent(row.id) >= 100 ? 'success' : null"
-                :stroke-width="8"
-              >
-                <span style="font-size: 12px;">{{ getDanmakuProgressPercent(row.id) }}%</span>
-              </el-progress>
-              <div style="font-size: 11px; color: #999; margin-top: 2px;">
-                {{ getDanmakuProgress(row.id).current || 0 }}/{{ getDanmakuProgress(row.id).total || 0 }}
-              </div>
-            </div>
-            <el-tag v-else-if="row.danmakuSent" type="success">{{ row.danmakuCount || 0 }}</el-tag>
-            <el-tag v-else-if="row.bvId && row.bvId.startsWith('BV')" type="info">未发送</el-tag>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
         <el-table-column prop="startTime" label="开始时间" width="180">
           <template #default="{ row }">
             {{ formatTime(row.startTime) }}
@@ -121,8 +102,6 @@
         :selected-histories="selectedHistories"
         @upload="handleBatchUpload"
         @publish="handleBatchPublish"
-        @send-danmaku="handleBatchSendDanmaku"
-        @parse-danmaku="handleBatchParseDanmaku"
         @sync-video="handleBatchSyncVideo"
         @move-files="handleBatchMoveFiles"
         @reset-status="handleBatchResetStatus"
@@ -159,8 +138,6 @@
       @upload="handleUploadInDialog"
       @publish="handlePublishInDialog"
       @manual-publish="handleManualPublish"
-      @parse-danmaku="handleParseDanmakuInDialog"
-      @send-danmaku="handleSendDanmakuInDialog"
       @sync-video="handleSyncVideoInDialog"
       @move-files="handleMoveFilesInDialog"
       @reset-status="handleResetStatus"
@@ -249,20 +226,12 @@ const {
   getHistoryUploadPercent,
   fetchHistoryProgress,
   startHistoryProgressPolling,
-  stopHistoryProgressPolling,
-  getDanmakuProgress,
-  getDanmakuProgressPercent,
-  fetchDanmakuProgress,
-  startDanmakuProgressPolling,
-  stopDanmakuProgressPolling
+  stopHistoryProgressPolling
 } = useHistoryProgress()
 
 const {
   handleUpload,
   handlePublish,
-  handleSendDanmaku,
-  handleParseDanmaku,
-  handleBatchParseDanmaku: batchParseDanmakuOp,
   handleSyncVideo,
   handleMoveFiles,
   handleResetStatus: resetHistoryStatus,
@@ -284,9 +253,6 @@ const fetchHistories = async () => {
     } else {
       stopHistoryProgressPolling()
     }
-    
-    // 检查是否有弹幕发送进度需要更新
-    await fetchDanmakuProgress(histories.value)
   } catch (error) {
     console.error('获取历史记录失败:', error)
   } finally {
@@ -357,30 +323,6 @@ const handleManualPublishSuccess = async () => {
   }
   
   ElMessage.success('投稿信息已更新')
-}
-
-const handleSendDanmakuInDialog = async () => {
-  const historyId = currentHistory.value.id
-  
-  // 标记开始发送（初始化进度）
-  const userResponse = await axios.get('/api/biliUser/list')
-  const users = userResponse.data || []
-  
-  if (users.length === 0) {
-    ElMessage.warning('请先添加B站用户')
-    return
-  }
-  
-  await handleSendDanmaku(currentHistory.value, async () => {
-    await fetchHistories()
-    startDanmakuProgressPolling()
-    
-    // 刷新对话框内的数据
-    const updatedHistory = histories.value.find(h => h.id === historyId)
-    if (updatedHistory) {
-      currentHistory.value = updatedHistory
-    }
-  })
 }
 
 const handleSyncVideoInDialog = async () => {
@@ -533,75 +475,6 @@ const handleBatchPublish = async () => {
       ElMessage.error(error.response?.data?.msg || '批量投稿失败')
     }
   }
-}
-
-const handleBatchSendDanmaku = async () => {
-  if (selectedHistories.value.length === 0) {
-    ElMessage.warning('请先选择记录')
-    return
-  }
-
-  try {
-    await ElMessageBox.confirm(
-      `确定要批量发送弹幕到选中的 ${selectedHistories.value.length} 项吗？此操作可能需要较长时间。`, 
-      '批量发送弹幕', 
-      { type: 'warning' }
-    )
-
-    const userResponse = await axios.get('/api/biliUser/list')
-    const users = userResponse.data || []
-    
-    if (users.length === 0) {
-      ElMessage.warning('请先添加B站用户')
-      return
-    }
-    
-    const userId = users[0].id
-    const historyIds = selectedHistories.value.map(h => h.id)
-
-    ElMessage.info(`正在添加 ${historyIds.length} 个发送任务到队列...`)
-    
-    // 启动弹幕进度轮询
-    startDanmakuProgressPolling()
-    
-    const response = await axios.post('/api/history/batchSendDanmaku', {
-      historyIds,
-      userId
-    })
-    
-    ElMessage.success(response.data.msg || '批量发送任务已添加')
-    fetchHistories()
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('批量发送弹幕失败:', error)
-      ElMessage.error(error.response?.data?.msg || '批量发送弹幕失败')
-    }
-  }
-}
-
-// 批量解析弹幕
-const handleBatchParseDanmaku = async () => {
-  if (selectedHistories.value.length === 0) {
-    ElMessage.warning('请先选择记录')
-    return
-  }
-
-  try {
-    const historyIds = selectedHistories.value.map(h => h.id)
-    await batchParseDanmakuOp(historyIds, async () => {
-      await fetchHistories()
-    })
-  } catch (error) {
-    console.error('批量解析弹幕失败:', error)
-  }
-}
-
-// 对话框中解析弹幕
-const handleParseDanmakuInDialog = async () => {
-  await handleParseDanmaku(currentHistory.value, async () => {
-    await fetchHistories()
-    actionsDialogVisible.value = false
-  })
 }
 
 const handleBatchSyncVideo = async () => {

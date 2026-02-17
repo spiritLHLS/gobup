@@ -26,11 +26,6 @@
             <el-tag v-else type="info">未知</el-tag>
           </div>
           <div class="status-item">
-            <span class="status-label">弹幕状态：</span>
-            <el-tag v-if="history?.danmakuSent" type="success">已发送({{ history.danmakuCount }})</el-tag>
-            <el-tag v-else type="info">未发送</el-tag>
-          </div>
-          <div class="status-item">
             <span class="status-label">文件状态：</span>
             <el-tag v-if="history?.filesMoved" type="success">已移动</el-tag>
             <el-tag v-else type="info">未移动</el-tag>
@@ -72,24 +67,6 @@
           >
             <el-icon><Edit /></el-icon>
             手动标记投稿
-          </el-button>
-
-          <el-button 
-            type="primary"
-            plain
-            @click="$emit('parseDanmaku')"
-          >
-            <el-icon><Document /></el-icon>
-            解析弹幕
-          </el-button>
-
-          <el-button 
-            type="success"
-            :disabled="!history?.bvId || history?.danmakuSent"
-            @click="$emit('sendDanmaku')"
-          >
-            <el-icon><ChatDotRound /></el-icon>
-            发送弹幕
           </el-button>
 
           <el-button 
@@ -148,8 +125,6 @@
 import { computed } from 'vue'
 import { 
   Upload, 
-  ChatDotRound, 
-  Document,
   Refresh, 
   FolderOpened, 
   RefreshLeft, 
@@ -175,8 +150,6 @@ defineEmits([
   'upload',
   'publish',
   'manualPublish',
-  'parseDanmaku',
-  'sendDanmaku',
   'syncVideo',
   'moveFiles',
   'resetStatus',

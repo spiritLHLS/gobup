@@ -22,16 +22,46 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("历史记录不存在: %w", err)
 	}
 
-	// 检查是否已经投稿过（防止重复投稿）
+	var room models.RecordRoom
+	if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
+		return fmt.Errorf("房间不存在: %w", err)
+	}
+
+	// 核心逻辑：检查同SessionID是否已有投稿（如果启用了合并）
+	log.Printf("[投稿] 开始检查SessionID合并 (history_id=%d, room_id=%s, session_id=%s, MergeBySession=%v)", 
+		historyID, history.RoomID, history.SessionID, room.MergeBySession)
+	
+	if room.MergeBySession && history.SessionID != "" {
+		log.Printf("[投稿] SessionID合并已启用，查询同SessionID的已投稿记录 (session_id=%s)", history.SessionID)
+		
+		var existingHistory models.RecordHistory
+		err := db.Where("session_id = ? AND publish = ? AND id != ?", 
+			history.SessionID, true, historyID).
+			First(&existingHistory).Error
+
+		if err == nil {
+			// 找到同SessionID的已投稿记录，执行追加分P逻辑
+			log.Printf("[投稿] 检测到同SessionID已有投稿 (session_id=%s, existing_history_id=%d, bv_id=%s, aid=%s)，执行追加分P",
+				history.SessionID, existingHistory.ID, existingHistory.BvID, existingHistory.AvID)
+			
+			return s.AppendPartsToExisting(historyID, &existingHistory, userID)
+		}
+		// 未找到已投稿记录，继续执行新建投稿逻辑
+		log.Printf("[投稿] 同SessionID无已投稿记录，执行新建投稿 (session_id=%s, query_error=%v)", history.SessionID, err)
+	} else {
+		if !room.MergeBySession {
+			log.Printf("[投稿] SessionID合并未启用 (MergeBySession=false)")
+		}
+		if history.SessionID == "" {
+			log.Printf("[投稿] SessionID为空，跳过合并检测")
+		}
+	}
+
+	// 检查当前历史记录是否已经投稿过（防止重复投稿）
 	if history.Publish {
 		log.Printf("[Publish] 历史记录 %d 已经投稿过，拒绝重复投稿: BvID=%s",
 			historyID, history.BvID)
 		return fmt.Errorf("该历史记录已经投稿过，不能重复投稿 (BvID: %s)", history.BvID)
-	}
-
-	var room models.RecordRoom
-	if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
-		return fmt.Errorf("房间不存在: %w", err)
 	}
 
 	// 权限检查1：房间是否启用上传功能（总开关）
@@ -403,6 +433,12 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		}
 	}
 
+	// 清理临时文件（切分文件、弹幕烧录文件等）
+	burnService := services.NewDanmakuBurnService()
+	if err := burnService.CleanTempFilesBySessionID(history.SessionID); err != nil {
+		log.Printf("[临时文件清理] 清理失败: %v", err)
+	}
+
 	// 如果启用高能剪辑，创建高能剪辑任务
 	if room.HighEnergyCut {
 		go func() {
@@ -464,4 +500,189 @@ func (s *Service) GetSeasons(userID uint) ([]bili.Season, error) {
 
 	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
 	return client.GetSeasons(user.UID)
+}
+
+// AppendPartsToExisting 追加分P到已有投稿（同SessionID合并）
+func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *models.RecordHistory, userID uint) error {
+	db := database.GetDB()
+
+	log.Printf("[追加分P] 开始追加: new_history=%d -> existing_aid=%s", newHistoryID, existingHistory.AvID)
+
+	// 获取新历史记录
+	var newHistory models.RecordHistory
+	if err := db.First(&newHistory, newHistoryID).Error; err != nil {
+		return fmt.Errorf("新历史记录不存在: %w", err)
+	}
+
+	// 获取房间配置
+	var room models.RecordRoom
+	if err := db.Where("room_id = ?", newHistory.RoomID).First(&room).Error; err != nil {
+		return fmt.Errorf("房间不存在: %w", err)
+	}
+
+	// 获取用户信息
+	var user models.BiliBiliUser
+	if err := db.First(&user, userID).Error; err != nil {
+		return fmt.Errorf("用户不存在: %w", err)
+	}
+
+	if !user.Login {
+		return fmt.Errorf("用户未登录")
+	}
+
+	// 验证Cookie
+	valid, err := bili.ValidateCookie(user.Cookies)
+	if err != nil || !valid {
+		user.Login = false
+		db.Save(&user)
+		return fmt.Errorf("用户Cookie已失效，请重新登录")
+	}
+
+	// 获取已存在投稿的所有分P（按SessionID查询所有相关历史记录的分P）
+	var existingParts []models.RecordHistoryPart
+	if err := db.Joins("JOIN record_histories ON record_history_parts.history_id = record_histories.id").
+		Where("record_histories.session_id = ? AND record_history_parts.upload = ? AND record_history_parts.file_delete = ?",
+			existingHistory.SessionID, true, false).
+		Order("record_history_parts.start_time ASC").
+		Find(&existingParts).Error; err != nil {
+		return fmt.Errorf("查询已存在分P失败: %w", err)
+	}
+
+	// 获取新历史记录的已上传分P
+	var newParts []models.RecordHistoryPart
+	if err := db.Where("history_id = ? AND upload = ? AND file_delete = ?",
+		newHistoryID, true, false).
+		Order("start_time ASC").
+		Find(&newParts).Error; err != nil {
+		return fmt.Errorf("查询新分P失败: %w", err)
+	}
+
+	if len(newParts) == 0 {
+		return fmt.Errorf("没有可追加的分P")
+	}
+
+	log.Printf("[追加分P] 已存在分P数: %d, 新增分P数: %d", len(existingParts), len(newParts))
+
+	// 构建模板数据
+	templateData := map[string]interface{}{
+		"uname":     existingHistory.Uname,
+		"title":     existingHistory.Title,
+		"roomId":    existingHistory.RoomID,
+		"areaName":  existingHistory.AreaName,
+		"startTime": existingHistory.StartTime,
+		"uid":       user.UID,
+	}
+
+	// 获取原投稿信息
+	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+	
+	// 从已存在的History获取AID
+	aidInt, err := strconv.ParseInt(existingHistory.AvID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("解析AID失败: %w", err)
+	}
+
+	// 获取原视频信息
+	videoInfo, err := client.GetVideoInfoByAid(aidInt)
+	if err != nil {
+		return fmt.Errorf("获取原视频信息失败: %w", err)
+	}
+
+	// 合并分P列表
+	var allVideoParts []bili.PublishVideoPartRequest
+
+	// 1. 添加已存在的分P
+	for i, part := range existingParts {
+		partTemplateData := map[string]interface{}{
+			"index":     i + 1,
+			"startTime": part.StartTime,
+			"areaName":  part.AreaName,
+			"uname":     existingHistory.Uname,
+			"title":     existingHistory.Title,
+			"roomId":    existingHistory.RoomID,
+			"fileName":  part.FileName,
+		}
+		partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
+
+		allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
+			Title:    partTitle,
+			Desc:     "",
+			Filename: part.FileName,
+			Cid:      int64(part.CID),
+		})
+	}
+
+	// 2. 添加新分P
+	startIndex := len(existingParts)
+	for i, part := range newParts {
+		partTemplateData := map[string]interface{}{
+			"index":     startIndex + i + 1,
+			"startTime": part.StartTime,
+			"areaName":  part.AreaName,
+			"uname":     newHistory.Uname,
+			"title":     newHistory.Title,
+			"roomId":    newHistory.RoomID,
+			"fileName":  part.FileName,
+		}
+		partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
+
+		allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
+			Title:    partTitle,
+			Desc:     "",
+			Filename: part.FileName,
+			Cid:      int64(part.CID),
+		})
+	}
+
+	log.Printf("[追加分P] 合并后总分P数: %d", len(allVideoParts))
+
+	// 使用原视频的信息进行编辑
+	title := videoInfo.Title
+	desc := videoInfo.Desc
+	tags := strings.Join(videoInfo.Tag, ",")
+	tid := videoInfo.Tid
+	copyright := videoInfo.Copyright
+	cover := videoInfo.Pic
+
+	// 处理转载来源
+	source := videoInfo.Source
+	if source == "" && copyright == 2 {
+		sourceTemplate := room.SourceTemplate
+		if sourceTemplate == "" {
+			sourceTemplate = "直播间: https://live.bilibili.com/${roomId}  稿件直播源"
+		}
+		source = s.templateSvc.RenderTitle(sourceTemplate, templateData)
+	}
+
+	// 调用编辑API追加分P
+	log.Printf("[追加分P] 调用EditVideo API: aid=%d, 总分P=%d", aidInt, len(allVideoParts))
+	if err := client.EditVideo(aidInt, title, desc, tags, tid, copyright, cover, allVideoParts, source); err != nil {
+		return fmt.Errorf("追加分P失败: %w", err)
+	}
+
+	log.Printf("[追加分P] 追加成功: aid=%d, bvid=%s", aidInt, existingHistory.BvID)
+
+	// 更新新历史记录的投稿状态，指向同一个投稿
+	newHistory.Publish = true
+	newHistory.BvID = existingHistory.BvID
+	newHistory.AvID = existingHistory.AvID
+	newHistory.Message = fmt.Sprintf("已追加到 %s", existingHistory.BvID)
+	db.Save(&newHistory)
+
+	// 清理临时文件
+	burnService := services.NewDanmakuBurnService()
+	if err := burnService.CleanTempFiles(newHistoryID); err != nil {
+		log.Printf("[临时文件清理] 清理失败: %v", err)
+	}
+
+	// 推送通知
+	if room.Wxuid != "" && containsTag(room.PushMsgTags, "投稿") {
+		s.wxPusher.NotifyPublishSuccess(room.UploadUserID, room.Wxuid, newHistory.Uname,
+			fmt.Sprintf("%s (追加%d个分P)", title, len(newParts)), existingHistory.BvID)
+	}
+
+	log.Printf("[追加分P] 完成: new_history=%d 已追加到 %s (%d个新分P)",
+		newHistoryID, existingHistory.BvID, len(newParts))
+
+	return nil
 }

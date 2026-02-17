@@ -278,3 +278,4 @@ GoBup会自动扫描录制文件并入库，无需配置Webhook：
 - [spiritLHLS/LotteryAutoScript_Station](https://github.com/spiritLHLS/LotteryAutoScript_Station) - 相关项目
 - [BililiveRecorder](https://rec.danmuji.org/) - 录播姬
 - [blrec](https://github.com/acgnhiki/blrec) - 录播工具
+- [bilibili-API-collect](https://github.com/AkagiYui/bilibili-API-collect) - API合集
