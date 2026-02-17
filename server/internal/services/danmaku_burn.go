@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -220,7 +219,7 @@ func (s *DanmakuBurnService) convertDanmakuToASSEvent(dm models.LiveMsg) string 
 	switch dm.Mode {
 	case 1, 6: // 滚动弹幕（1=普通滚动，6=彩色滚动）
 		// 从右向左滚动，速度适中（10秒横跨屏幕）
-		yPos = minY + int64(dm.Timestamp%int64(maxY-minY))
+		yPos = minY + int(dm.Timestamp%int64(maxY-minY))
 		effect = fmt.Sprintf("\\move(2000,%d,-200,%d)", yPos, yPos)
 		alignment = "7" // 左上
 	case 4: // 底部固定弹幕
@@ -231,7 +230,7 @@ func (s *DanmakuBurnService) convertDanmakuToASSEvent(dm models.LiveMsg) string 
 		alignment = "8" // 顶部居中
 	default:
 		// 其他模式当作滚动处理
-		yPos = minY + int64(dm.Timestamp%int64(maxY-minY))
+		yPos = minY + int(dm.Timestamp%int64(maxY-minY))
 		effect = fmt.Sprintf("\\move(2000,%d,-200,%d)", yPos, yPos)
 		alignment = "7"
 	}
