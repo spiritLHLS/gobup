@@ -43,7 +43,7 @@ func SetupRoutes(router *gin.Engine) {
 				users.GET("/login", controllers.LoginUser)
 				users.GET("/loginCheck", controllers.LoginCheck)
 				users.GET("/loginCancel", controllers.LoginCancel)
-
+				users.GET("/delete/:id", controllers.DeleteBiliUser)
 			}
 
 			histories := auth.Group("/history")
