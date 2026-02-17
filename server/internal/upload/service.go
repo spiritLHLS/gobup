@@ -386,6 +386,13 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 				log.Printf("[自动投稿] 投稿失败: %v", err)
 			} else {
 				log.Printf("[自动投稿] 投稿成功: history_id=%d", history.ID)
+				
+				// 投稿成功后，检查同SessionID是否还有其他已上传完成但未投稿的历史记录
+				// 如果有，应该将它们追加到刚才投稿的视频上
+				if room.MergeBySession && history.SessionID != "" {
+					log.Printf("[自动投稿] 投稿成功后检查同SessionID是否有待追加记录: session_id=%s", history.SessionID)
+					go s.checkAndAppendPendingHistories(history, room)
+				}
 			}
 		} else {
 			log.Printf("[自动投稿] 房间未配置上传用户，无法投稿: history_id=%d", history.ID)
@@ -396,6 +403,62 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 	} else if recordingCount > 0 {
 		log.Printf("[自动投稿] 仍有分P正在录制，等待录制完成: history_id=%d, 正在录制=%d",
 			history.ID, recordingCount)
+	}
+}
+
+// checkAndAppendPendingHistories 检查并追加同SessionID的待投稿历史记录（延迟执行避免冲突）
+func (s *Service) checkAndAppendPendingHistories(publishedHistory *models.RecordHistory, room *models.RecordRoom) {
+	// 延迟30秒，等待视频状态稳定
+	time.Sleep(30 * time.Second)
+	
+	db := database.GetDB()
+	
+	log.Printf("[投稿后检查] 开始检查同SessionID待追加记录: session_id=%s", publishedHistory.SessionID)
+	
+	// 查询同SessionID的其他历史记录（未投稿但有已上传分P的）
+	var pendingHistories []models.RecordHistory
+	if err := db.Where("session_id = ? AND publish = ? AND room_id = ? AND id != ?", 
+		publishedHistory.SessionID, false, room.RoomID, publishedHistory.ID).Find(&pendingHistories).Error; err != nil {
+		log.Printf("[投稿后检查] 查询失败: %v", err)
+		return
+	}
+	
+	if len(pendingHistories) == 0 {
+		log.Printf("[投稿后检查] 未发现待追加记录")
+		return
+	}
+	
+	log.Printf("[投稿后检查] 发现 %d 个可能需要追加的历史记录", len(pendingHistories))
+	
+	for _, pendingHistory := range pendingHistories {
+		// 检查是否有已上传的分P
+		var uploadedCount int64
+		var totalCount int64
+		var recordingCount int64
+		
+		db.Model(&models.RecordHistoryPart{}).Where(
+			"history_id = ? AND upload = ? AND file_delete = ?", 
+			pendingHistory.ID, true, false).Count(&uploadedCount)
+		db.Model(&models.RecordHistoryPart{}).Where(
+			"history_id = ?", pendingHistory.ID).Count(&totalCount)
+		db.Model(&models.RecordHistoryPart{}).Where(
+			"history_id = ? AND recording = ?", pendingHistory.ID, true).Count(&recordingCount)
+		
+		// 只追加已全部上传完成且没有正在录制的历史记录
+		if uploadedCount > 0 && totalCount == uploadedCount && recordingCount == 0 {
+			log.Printf("[投稿后检查] 发现可追加记录: history_id=%d, 已上传分P=%d, 将触发追加", 
+				pendingHistory.ID, uploadedCount)
+			
+			// 触发投稿（会自动检测到同SessionID已有投稿并追加）
+			if err := s.PublishHistory(pendingHistory.ID, room.UploadUserID); err != nil {
+				log.Printf("[投稿后检查] 追加投稿失败: history_id=%d, error=%v", pendingHistory.ID, err)
+			} else {
+				log.Printf("[投稿后检查] 追加投稿成功: history_id=%d", pendingHistory.ID)
+			}
+			
+			// 避免请求过快，间隔5秒
+			time.Sleep(5 * time.Second)
+		}
 	}
 }
 

@@ -685,5 +685,34 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 	log.Printf("[追加分P] 完成: new_history=%d 已追加到 %s (%d个新分P)",
 		newHistoryID, existingHistory.BvID, len(newParts))
 
+	// 自动解析新追加分P的弹幕（如果房间启用了自动解析弹幕）
+	if room.AutoParseDanmaku {
+		log.Printf("[追加分P] 房间启用了自动解析弹幕，开始解析新分P的弹幕: %d个分P", len(newParts))
+		danmakuParser := services.NewDanmakuXMLParser()
+		
+		for _, part := range newParts {
+			// 检查是否有对应的XML文件
+			xmlPath := strings.TrimSuffix(part.FilePath, filepath.Ext(part.FilePath)) + ".xml"
+			if _, err := os.Stat(xmlPath); err == nil {
+				log.Printf("[追加分P] 开始解析弹幕: part_id=%d, xml=%s", part.ID, xmlPath)
+				if count, err := danmakuParser.ParseDanmakuFile(xmlPath, newHistory.SessionID, &room, part.ID); err != nil {
+					log.Printf("[追加分P] 弹幕解析失败: %v", err)
+				} else {
+					log.Printf("[追加分P] 弹幕解析成功: part_id=%d, 解析到%d条弹幕", part.ID, count)
+					
+					// 更新历史记录的弹幕数量
+					var totalDanmakuCount int64
+					db.Model(&models.DanmakuMessage{}).Where("session_id = ?", newHistory.SessionID).Count(&totalDanmakuCount)
+					
+					// 更新所有同SessionID的历史记录的弹幕数
+					db.Model(&models.RecordHistory{}).Where("session_id = ?", newHistory.SessionID).Update("danmaku_count", totalDanmakuCount)
+					log.Printf("[追加分P] 已更新SessionID %s 的弹幕总数: %d", newHistory.SessionID, totalDanmakuCount)
+				}
+			} else {
+				log.Printf("[追加分P] 未找到弹幕文件，跳过: part_id=%d, xml=%s", part.ID, xmlPath)
+			}
+		}
+	}
+
 	return nil
 }

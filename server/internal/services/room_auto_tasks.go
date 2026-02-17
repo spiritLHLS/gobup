@@ -138,6 +138,46 @@ func (s *RoomAutoTaskService) processRoomTasks(room *models.RecordRoom) {
 						log.Printf("[房间自动任务] 弹幕已加入发送队列")
 					}
 				}
+				
+				// 4b. 检查同SessionID是否有待追加的已上传分P
+				if room.MergeBySession && history.SessionID != "" && history.Publish && room.AutoUpload {
+					log.Printf("[房间自动任务] 审核通过，检查是否有待追加分P: session_id=%s", history.SessionID)
+					
+					// 查询同SessionID的其他历史记录（未投稿但有已上传分P的）
+					var pendingHistories []models.RecordHistory
+					if err := db.Where("session_id = ? AND publish = ? AND room_id = ? AND id != ?", 
+						history.SessionID, false, room.RoomID, history.ID).Find(&pendingHistories).Error; err == nil {
+						
+						for _, pendingHistory := range pendingHistories {
+							// 检查是否有已上传的分P
+							var uploadedCount int64
+							var totalCount int64
+							var recordingCount int64
+							
+							db.Model(&models.RecordHistoryPart{}).Where(
+								"history_id = ? AND upload = ? AND file_delete = ?", 
+								pendingHistory.ID, true, false).Count(&uploadedCount)
+							db.Model(&models.RecordHistoryPart{}).Where(
+								"history_id = ?", pendingHistory.ID).Count(&totalCount)
+							db.Model(&models.RecordHistoryPart{}).Where(
+								"history_id = ? AND recording = ?", pendingHistory.ID, true).Count(&recordingCount)
+							
+							// 如果有已上传分P，且所有分P都上传完成，且没有正在录制的分P，则触发追加
+							if uploadedCount > 0 && totalCount == uploadedCount && recordingCount == 0 {
+								log.Printf("[房间自动任务] 发现可追加的历史记录: history_id=%d, 已上传分P=%d, 将标记为需要投稿", 
+									pendingHistory.ID, uploadedCount)
+								
+								// 标记该历史记录为需要投稿（这样自动上传服务会检测到并触发追加）
+								// 注：由于MergeBySession开启，PublishHistory会自动检测并追加到已有投稿
+								pendingHistory.Upload = true // 确保允许上传
+								pendingHistory.UploadStatus = 2 // 标记为已上传
+								db.Save(&pendingHistory)
+								
+								log.Printf("[房间自动任务] 历史记录已标记为已上传，等待下次自动投稿检查时会自动追加到 %s", history.BvID)
+							}
+						}
+					}
+				}
 			}
 		}
 	}
