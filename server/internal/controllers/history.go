@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
+	"github.com/gobup/server/internal/services"
 	"github.com/gobup/server/internal/upload"
 )
 
