@@ -158,6 +158,7 @@ WrapStyle: 2
 PlayResX: 1920
 PlayResY: 1080
 ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
@@ -169,50 +170,84 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 }
 
 // getASSStyle 根据配置获取ASS样式
+// 固定参数（按图片设置）：不透明度79%、字号100%（38px）、显示区域50%
 func (s *DanmakuBurnService) getASSStyle(styleName string) string {
+	// 不透明度79% = 0.79 * 255 = 201 = C9（十六进制）
+	// BackColour的alpha部分设置为79%的不透明度
 	switch styleName {
 	case "compact":
-		// 紧凑样式：小字号
-		return "Style: Danmaku,Microsoft YaHei,32,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,1.5,0,2,10,10,10,1"
+		// 紧凑样式：小字号（字号100%=32px）
+		return "Style: Danmaku,Microsoft YaHei,32,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,1.5,0,2,10,10,10,1"
 	case "large":
-		// 大字号样式
-		return "Style: Danmaku,Microsoft YaHei,48,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1"
+		// 大字号样式（字号100%=48px）
+		return "Style: Danmaku,Microsoft YaHei,48,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1"
 	default:
-		// 默认样式
-		return "Style: Danmaku,Microsoft YaHei,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,1.8,0,2,10,10,10,1"
+		// 默认样式（字号100%=38px，不透明度79%）
+		return "Style: Danmaku,Microsoft YaHei,38,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,1.8,0,2,10,10,10,1"
 	}
 }
 
 // convertDanmakuToASSEvent 将弹幕转换为ASS事件
+// 按图片设置：显示区域50%、速度适中、启用滚动/固定/彩色，不启用高级弹幕
 func (s *DanmakuBurnService) convertDanmakuToASSEvent(dm models.LiveMsg) string {
+	// 过滤高级弹幕（mode 7, 8, 9等特殊弹幕）
+	if dm.Mode >= 7 {
+		return "" // 不启用高级弹幕
+	}
+
 	// 时间戳转换为ASS时间格式 (时:分:秒.毫秒)
 	startTime := s.formatASSTime(dm.Timestamp)
-	endTime := s.formatASSTime(dm.Timestamp + 8000) // 弹幕显示8秒
+	// 速度适中：滚动弹幕显示10秒，固定弹幕显示5秒
+	duration := int64(5000)
+	if dm.Mode == 1 || dm.Mode == 6 {
+		duration = 10000 // 滚动弹幕10秒（适中速度）
+	}
+	endTime := s.formatASSTime(dm.Timestamp + duration)
 
 	// 转义特殊字符
 	text := s.escapeASSText(dm.Message)
 
+	// 显示区域：50%，即只在屏幕上半部分显示（540px以内）
+	// 1080p分辨率，50%显示区域 = 0~540px
+	maxY := 540 // 显示区域50%
+	minY := 50  // 上边距
+
 	// 根据弹幕模式设置效果
 	effect := ""
-	alignment := "2" // 顶部居中
+	alignment := "2" // 底部居中
+	yPos := minY + (maxY-minY)/2
 
 	switch dm.Mode {
-	case 1: // 滚动弹幕
-		// 从右向左滚动
-		effect = fmt.Sprintf("\\move(2000,100,100,100)")
+	case 1, 6: // 滚动弹幕（1=普通滚动，6=彩色滚动）
+		// 从右向左滚动，速度适中（10秒横跨屏幕）
+		yPos = minY + int64(dm.Timestamp%int64(maxY-minY))
+		effect = fmt.Sprintf("\\move(2000,%d,-200,%d)", yPos, yPos)
 		alignment = "7" // 左上
-	case 4: // 底部弹幕
+	case 4: // 底部固定弹幕
+		yPos = maxY - 50 // 底部位置但在显示区域内
 		alignment = "2" // 底部居中
-	case 5: // 顶部弹幕
+	case 5: // 顶部固定弹幕
+		yPos = minY + 30
 		alignment = "8" // 顶部居中
+	default:
+		// 其他模式当作滚动处理
+		yPos = minY + int64(dm.Timestamp%int64(maxY-minY))
+		effect = fmt.Sprintf("\\move(2000,%d,-200,%d)", yPos, yPos)
+		alignment = "7"
 	}
 
-	// 颜色转换
+	// 颜色转换（支持彩色弹幕）
 	color := s.convertColorToASS(dm.Color)
 
 	// 构建ASS事件行
-	return fmt.Sprintf("Dialogue: 0,%s,%s,Danmaku,,0,0,0,%s,{\\c%s}%s\n",
-		startTime, endTime, effect, color, text)
+	// 注意：这里手动设置Y坐标以实现显示区域限制
+	if effect != "" {
+		return fmt.Sprintf("Dialogue: 0,%s,%s,Danmaku,,0,0,0,%s,{\\c%s}%s\n",
+			startTime, endTime, effect, color, text)
+	} else {
+		return fmt.Sprintf("Dialogue: 0,%s,%s,Danmaku,,0,0,0,,{\\c%s\\pos(960,%d)\\an%s}%s\n",
+			startTime, endTime, color, yPos, alignment, text)
+	}
 }
 
 // formatASSTime 格式化ASS时间格式
@@ -256,11 +291,12 @@ func (s *DanmakuBurnService) burnWithFFmpeg(videoPath, assPath, outputPath strin
 	// -i: 输入视频
 	// -vf subtitles: 使用字幕过滤器烧录
 	// -c:a copy: 音频直接复制，不重新编码
-	// -preset fast: 快速编码（可选：ultrafast, fast, medium）
+	// -preset fast: 快速编码
+	// 按图片设置：字号100%（38px）、不透明度79%已在ASS样式中设置
 	args := []string{
 		"-i", videoPath,
-		"-vf", fmt.Sprintf("subtitles='%s':force_style='Fontname=Microsoft YaHei,Fontsize=38'",
-			strings.ReplaceAll(assPath, "\\", "/")), // Windows路径需要转换
+		"-vf", fmt.Sprintf("subtitles='%s'",
+			strings.ReplaceAll(assPath, "\\", "/")), // Windows路径需要转换，样式已在ASS文件中
 		"-c:a", "copy",
 		"-preset", "fast", // 快速编码
 		"-y",              // 覆盖已存在的文件
