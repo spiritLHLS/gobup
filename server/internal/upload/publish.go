@@ -702,7 +702,7 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 					
 					// 更新历史记录的弹幕数量
 					var totalDanmakuCount int64
-					db.Model(&models.DanmakuMessage{}).Where("session_id = ?", newHistory.SessionID).Count(&totalDanmakuCount)
+					db.Model(&models.LiveMsg{}).Where("session_id = ?", newHistory.SessionID).Count(&totalDanmakuCount)
 					
 					// 更新所有同SessionID的历史记录的弹幕数
 					db.Model(&models.RecordHistory{}).Where("session_id = ?", newHistory.SessionID).Update("danmaku_count", totalDanmakuCount)
