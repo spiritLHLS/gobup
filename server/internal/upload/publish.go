@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -582,8 +583,8 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 		return fmt.Errorf("解析AID失败: %w", err)
 	}
 
-	// 获取原视频信息
-	videoInfo, err := client.GetVideoInfoByAid(aidInt)
+	// 获取原视频稿件详细信息（包含desc, tag, copyright, source）
+	archiveDetail, err := client.GetArchiveDetailByAid(aidInt)
 	if err != nil {
 		return fmt.Errorf("获取原视频信息失败: %w", err)
 	}
@@ -637,15 +638,15 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 	log.Printf("[追加分P] 合并后总分P数: %d", len(allVideoParts))
 
 	// 使用原视频的信息进行编辑
-	title := videoInfo.Title
-	desc := videoInfo.Desc
-	tags := strings.Join(videoInfo.Tag, ",")
-	tid := videoInfo.Tid
-	copyright := videoInfo.Copyright
-	cover := videoInfo.Pic
+	title := archiveDetail.Archive.Title
+	desc := archiveDetail.Archive.Desc
+	tags := strings.Join(archiveDetail.Archive.Tag, ",")
+	tid := archiveDetail.Archive.Tid
+	copyright := archiveDetail.Archive.Copyright
+	cover := archiveDetail.Archive.Pic
 
 	// 处理转载来源
-	source := videoInfo.Source
+	source := archiveDetail.Archive.Source
 	if source == "" && copyright == 2 {
 		sourceTemplate := room.SourceTemplate
 		if sourceTemplate == "" {
