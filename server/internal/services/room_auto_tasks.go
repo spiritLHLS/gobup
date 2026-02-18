@@ -22,8 +22,8 @@ func (s *RoomAutoTaskService) ProcessRoomAutoTasks() error {
 
 	// 查找启用了自动任务的房间
 	var rooms []models.RecordRoom
-	if err := db.Where("auto_sync_info = ? OR auto_send_danmaku = ? OR auto_parse_danmaku = ?",
-		true, true, true).Find(&rooms).Error; err != nil {
+	if err := db.Where("auto_sync_info = ? OR auto_parse_danmaku = ?",
+		true, true).Find(&rooms).Error; err != nil {
 		return err
 	}
 
@@ -106,7 +106,6 @@ func (s *RoomAutoTaskService) processRoomTasks(room *models.RecordRoom) {
 	log.Printf("[房间自动任务] 房间 %s 找到 %d 条待同步的历史记录", room.RoomID, len(histories))
 
 	videoSyncService := NewVideoSyncService()
-	danmakuService := NewDanmakuService()
 
 	for _, history := range histories {
 		// 3. 自动同步视频信息
