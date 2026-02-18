@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -248,6 +250,42 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 	}
 
 	if resp.Code != 0 {
+		// 检查是否是"稿件已成功投稿，请勿重新提交"的错误
+		// 这种情况说明投稿实际上已经成功了，需要从用户投稿列表中查找视频信息
+		if strings.Contains(resp.Msg, "稿件已成功投稿") || strings.Contains(resp.Msg, "请勿重新提交") {
+			log.Printf("[投稿] 检测到重复投稿错误，尝试从投稿列表中查找视频: %s", resp.Msg)
+			
+			// 从错误信息中提取稿件名
+			// 格式: "稿件已成功投稿，请勿重新提交哦～\n提交时间：03:54 稿件名《xxx》"
+			titleFromError := extractTitleFromDuplicateError(resp.Msg)
+			if titleFromError == "" {
+				// 如果无法从错误信息提取标题，使用请求的标题
+				titleFromError = title
+			}
+			log.Printf("[投稿] 从错误信息中提取的稿件名: %s", titleFromError)
+			
+			// 等待一下让B站处理完成
+			time.Sleep(2 * time.Second)
+			
+			// 获取用户投稿列表，查找匹配的视频
+			archives, err := c.GetUserArchiveList(c.Mid, 1, 20)
+			if err != nil {
+				log.Printf("[投稿] 获取用户投稿列表失败: %v，返回原始错误", err)
+				return 0, "", fmt.Errorf("投稿失败: %s", resp.Msg)
+			}
+			
+			// 查找标题匹配的视频（从最新的开始查找）
+			for _, archive := range archives {
+				if archive.Title == titleFromError || archive.Title == title {
+					log.Printf("[投稿] ✓ 找到匹配的视频: AID=%d, BVID=%s, Title=%s", 
+						archive.Aid, archive.Bvid, archive.Title)
+					return archive.Aid, archive.Bvid, nil
+				}
+			}
+			
+			log.Printf("[投稿] 未找到匹配的视频，返回原始错误")
+		}
+		
 		return 0, "", fmt.Errorf("投稿失败: %s", resp.Msg)
 	}
 
@@ -458,4 +496,16 @@ type Season struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
 	Count int    `json:"count"`
+}
+
+// extractTitleFromDuplicateError 从"稿件已成功投稿"错误信息中提取稿件名
+// 错误格式示例: "稿件已成功投稿，请勿重新提交哦～\n提交时间：03:54 稿件名《新年玩新游 2026年02月18日01点13分》"
+func extractTitleFromDuplicateError(errMsg string) string {
+	// 使用正则表达式提取《》中的内容
+	re := regexp.MustCompile(`稿件名[《〈]([^》〉]+)[》〉]`)
+	matches := re.FindStringSubmatch(errMsg)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
 }

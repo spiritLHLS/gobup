@@ -141,13 +141,13 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string, ro
 				continue
 			}
 
-			// 2. 用户等级过滤（佩戴勋章的不受影响）
-			if room.DmUlLevel > 0 {
-				if msg.ULevel < room.DmUlLevel && msg.MedalLevel == 0 {
-					filterStats.ulLevel++
-					continue
-				}
-			}
+			// 2. 用户等级过滤（已禁用）
+			// if room.DmUlLevel > 0 {
+			// 	if msg.ULevel < room.DmUlLevel && msg.MedalLevel == 0 {
+			// 		filterStats.ulLevel++
+			// 		continue
+			// 	}
+			// }
 
 			// 3. 粉丝勋章过滤
 			if room.DmMedalLevel == 1 {
