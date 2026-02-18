@@ -128,18 +128,8 @@ func (s *RoomAutoTaskService) processRoomTasks(room *models.RecordRoom) {
 			// 4. 检查是否审核通过（从非通过状态变为通过状态）
 			if oldState != 1 && history.VideoState == 1 {
 				log.Printf("[房间自动任务] 视频审核通过: history_id=%d, bv_id=%s", history.ID, history.BvID)
-
-				// 4a. 自动发送弹幕（如果启用且未发送且有弹幕）
-				if room.AutoSendDanmaku && !history.DanmakuSent && history.DanmakuCount > 0 {
-					log.Printf("[房间自动任务] 自动发送弹幕: history_id=%d, 弹幕数=%d", history.ID, history.DanmakuCount)
-					if err := danmakuService.SendDanmakuForHistory(history.ID); err != nil {
-						log.Printf("[房间自动任务] 发送弹幕失败: %v", err)
-					} else {
-						log.Printf("[房间自动任务] 弹幕已加入发送队列")
-					}
-				}
 				
-				// 4b. 检查同SessionID是否有待追加的已上传分P
+				// 检查同SessionID是否有待追加的已上传分P
 				if room.MergeBySession && history.SessionID != "" && history.Publish && room.AutoUpload {
 					log.Printf("[房间自动任务] 审核通过，检查是否有待追加分P: session_id=%s", history.SessionID)
 					

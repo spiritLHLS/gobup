@@ -46,6 +46,20 @@
         </el-form-item>
       </template>
       
+      <el-divider content-position="left">弹幕烧录</el-divider>
+      
+      <el-form-item label="启用弹幕烧录">
+        <el-switch v-model="localForm.enableDanmakuBurn" />
+        <div class="help-text">将弹幕烧录到视频中生成带弹幕版本（需要ffmpeg）</div>
+      </el-form-item>
+      
+      <el-form-item label="自动更新投稿" v-if="localForm.enableDanmakuBurn">
+        <el-switch v-model="localForm.autoUpdatePublished" />
+        <div class="help-text important-config">
+          ⭐ 弹幕版上传完成后，自动追加到已投稿视频（同时保留原版和弹幕版）
+        </div>
+      </el-form-item>
+      
       <el-divider content-position="left">弹幕过滤</el-divider>
       
       <el-form-item label="去除重复弹幕">

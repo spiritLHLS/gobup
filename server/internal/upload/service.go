@@ -333,6 +333,16 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		s.wxPusher.NotifyUploadSuccess(room.UploadUserID, room.Wxuid, history.Uname, part.FileName)
 	}
 
+	// 回补检测：如果是弹幕版分P上传完成且房间启用了自动更新投稿，检查是否需要更新已投稿的视频
+	if part.IsTempFile && part.TempFileType == "danmaku_burn" && part.Upload && room.AutoUpdatePublished {
+		log.Printf("[回补检测] 弹幕版上传完成，检查是否需要更新投稿: part_id=%d", part.ID)
+		if err := s.UpdatePublishedVideoWithBurnedParts(part.ID); err != nil {
+			log.Printf("[回补检测] 回补更新失败: %v", err)
+		} else {
+			log.Printf("[回补检测] 回补更新完成")
+		}
+	}
+
 	// 检查是否可以投稿
 	s.checkAndPublish(history, room)
 

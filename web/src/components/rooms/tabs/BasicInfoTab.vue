@@ -38,9 +38,9 @@
         style="margin-bottom: 20px"
       >
         <div style="line-height: 1.8">
-          <strong>完整自动化流程：</strong>录制 → 自动上传 → 自动投稿 → 状态同步 → 审核通过后发送弹幕<br>
+          <strong>完整自动化流程：</strong>录制 → 自动上传 → 自动投稿 → 状态同步<br>
           <strong>SessionID合并：</strong>同一场直播的所有分P将自动合并到一个投稿，避免创建多个视频<br>
-          <strong>推荐配置：</strong>全部开启（除了"自动发送弹幕"可根据需要选择）
+          <strong>推荐配置：</strong>全部开启
         </div>
       </el-alert>
       
@@ -71,11 +71,6 @@
       <el-form-item label="定时同步信息">
         <el-switch v-model="localForm.autoSyncInfo" />
         <div class="help-text">🔄 每30分钟自动同步已投稿视频的审核状态</div>
-      </el-form-item>
-      
-      <el-form-item label="自动发送弹幕">
-        <el-switch v-model="localForm.autoSendDanmaku" />
-        <div class="help-text">🎯 审核通过后自动将弹幕发送到视频（需要先开启"定时同步信息"）</div>
       </el-form-item>
       
       <el-divider content-position="left">视频信息</el-divider>

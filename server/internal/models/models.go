@@ -25,7 +25,6 @@ type RecordRoom struct {
 	AutoPublish        bool           `gorm:"default:false" json:"autoPublish"`      // 所有分P上传完成后自动投稿
 	AutoParseDanmaku   bool           `gorm:"default:false" json:"autoParseDanmaku"` // 自动解析弹幕
 	AutoSyncInfo       bool           `gorm:"default:false" json:"autoSyncInfo"`     // 定时同步视频信息（每30分钟）
-	AutoSendDanmaku    bool           `gorm:"default:false" json:"autoSendDanmaku"`  // 自动发送弹幕（审核通过后）
 	LastSyncTime       *time.Time     `json:"lastSyncTime"`                          // 最后同步时间
 	TitleTemplate      string         `gorm:"type:text" json:"titleTemplate"`
 	PartTitleTemplate  string         `gorm:"type:text" json:"partTitleTemplate"`
@@ -58,6 +57,7 @@ type RecordRoom struct {
 	DmMedalLevel       int            `gorm:"default:0" json:"dmMedalLevel"`       // 粉丝勋章过滤 0-不过滤 1-佩戴粉丝勋章 2-佩戴主播粉丝勋章
 	DmKeywordBlacklist string         `gorm:"type:text" json:"dmKeywordBlacklist"` // 关键词屏蔽，一行一个
 	EnableDanmakuBurn  bool           `gorm:"default:false" json:"enableDanmakuBurn"` // 启用弹幕烧录（生成带弹幕版本）
+	AutoUpdatePublished bool          `gorm:"default:false" json:"autoUpdatePublished"` // 弹幕版上传后自动更新已投稿视频
 	DanmakuBurnStyle   string         `gorm:"default:default" json:"danmakuBurnStyle"` // 弹幕样式：default, compact, large
 	Recording          bool           `gorm:"default:false;index" json:"recording"`
 	Streaming          bool           `gorm:"default:false;index" json:"streaming"`

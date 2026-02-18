@@ -90,7 +90,7 @@ const form = ref({
   mergeBySession: true,
   autoParseDanmaku: true,
   autoSyncInfo: true,
-  autoSendDanmaku: false,
+  autoUpdatePublished: false,
   uploadUserId: null,
   titleTemplate: '【直播回放】【${uname}】${title} ${yyyy年MM月dd日HH点mm分}',
   descTemplate: '直播录像\\n${uname}直播间：https://live.bilibili.com/${roomId}',
@@ -112,6 +112,8 @@ const form = ref({
   dmUlLevel: 0,
   dmMedalLevel: 0,
   dmKeywordBlacklist: '',
+  enableDanmakuBurn: false,
+  autoUpdatePublished: false,
   dynamicTemplate: '',
   moveDir: ''
 })
@@ -166,7 +168,7 @@ const handleAdd = () => {
     mergeBySession: true,
     autoParseDanmaku: true,
     autoSyncInfo: true,
-    autoSendDanmaku: false,
+    autoUpdatePublished: false,
     uploadUserId: users.value[0]?.id || null,
     titleTemplate: '【直播回放】【${uname}】${title} ${yyyy年MM月dd日HH点mm分}',
     descTemplate: '直播录像\\n${uname}直播间：https://live.bilibili.com/${roomId}',
@@ -188,6 +190,8 @@ const handleAdd = () => {
     dmUlLevel: 0,
     dmMedalLevel: 0,
     dmKeywordBlacklist: '',
+    enableDanmakuBurn: false,
+    autoUpdatePublished: false,
     dynamicTemplate: '',
     moveDir: ''
   }
