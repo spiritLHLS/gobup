@@ -29,11 +29,11 @@ RUN curl -fsSL https://xmake.io/shget.text | bash && \
 WORKDIR /build
 RUN git clone --depth=1 https://github.com/hihkm/DanmakuFactory.git && \
     cd DanmakuFactory && \
-    xmake build -y -v && \
+    xmake build -y -v --root && \
     mkdir -p /danmakufactory && \
     find build -name DanmakuFactory -type f -executable -exec cp {} /danmakufactory/ \; && \
     ls -lh /danmakufactory/ && \
-    /danmakufactory/DanmakuFactory -h || echo "DanmakuFactory built successfully"
+    test -f /danmakufactory/DanmakuFactory && echo "DanmakuFactory built successfully" || (echo "Build failed!" && exit 1)
 
 # Stage 3: Build Backend with Embedded Frontend
 FROM golang:1.24-alpine AS backend-builder
