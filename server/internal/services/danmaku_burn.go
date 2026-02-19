@@ -136,23 +136,24 @@ func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history 
 	log.Printf("[弹幕烧录] 使用 DanmakuFactory 转换: %s -> %s", xmlPath, assPath)
 
 	// 构建命令参数
-	// DanmakuFactory -i input.xml -o output.ass -s 1920x1080 -dm 60 -ds 38 -fs 50
+	// DanmakuFactory -i input.xml -o output.ass -r 1920x1080 -d -1 -S 38 --scrollarea 0.75 --displayarea 0.8
 	args := []string{
 		"-i", xmlPath,
 		"-o", assPath,
-		"-s", "1920x1080", // 分辨率
-		"-dm", "100",      // 弹幕密度：100%
-		"-fs", "50",       // 弹幕显示区域：50%
+		"-r", "1920x1080",      // 分辨率
+		"-d", "-1",             // 弹幕密度：-1=不重叠
+		"--scrollarea", "0.75", // 滚动弹幕显示区域：75%
+		"--displayarea", "0.8", // 全部弹幕显示区域：80%
 	}
 
 	// 根据房间配置调整弹幕样式
 	switch room.DanmakuBurnStyle {
 	case "compact":
-		args = append(args, "-ds", "32") // 字号32px
+		args = append(args, "-S", "32") // 字号32px
 	case "large":
-		args = append(args, "-ds", "48") // 字号48px
+		args = append(args, "-S", "48") // 字号48px
 	default:
-		args = append(args, "-ds", "38") // 默认字号38px
+		args = append(args, "-S", "38") // 默认字号38px
 	}
 
 	// 执行 DanmakuFactory

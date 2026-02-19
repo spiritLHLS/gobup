@@ -21,19 +21,29 @@ ARG TARGETARCH
 # Install build dependencies for DanmakuFactory (包括 bash，xmake 安装脚本需要)
 RUN apk add --no-cache git build-base curl tar bash p7zip cmake linux-headers
 
-# Install xmake
+# Install xmake (仅在预编译版本下载失败时需要)
 RUN curl -fsSL https://xmake.io/shget.text | bash && \
     ln -s /root/.local/bin/xmake /usr/local/bin/xmake
 
-# Clone and build DanmakuFactory
+# Download or build DanmakuFactory (优先使用预编译版本)
 WORKDIR /build
-RUN git clone --depth=1 https://github.com/hihkm/DanmakuFactory.git && \
-    cd DanmakuFactory && \
-    xmake build -y -v --root && \
+RUN ARCH_NAME=$([ "$TARGETARCH" = "amd64" ] && echo "x64" || echo "arm64") && \
+    RELEASE_URL="https://github.com/hihkm/DanmakuFactory/releases/download/dev/DanmakuFactory-linux-${ARCH_NAME}.tar.gz" && \
+    echo "Attempting to download prebuilt DanmakuFactory for ${ARCH_NAME}..." && \
     mkdir -p /danmakufactory && \
-    find build -name DanmakuFactory -type f -executable -exec cp {} /danmakufactory/ \; && \
-    ls -lh /danmakufactory/ && \
-    test -f /danmakufactory/DanmakuFactory && echo "DanmakuFactory built successfully" || (echo "Build failed!" && exit 1)
+    if curl -fsSL "$RELEASE_URL" -o danmaku.tar.gz && tar -xzf danmaku.tar.gz -C /danmakufactory --strip-components=1 && test -f /danmakufactory/DanmakuFactory; then \
+        echo "Successfully downloaded prebuilt DanmakuFactory" && \
+        chmod +x /danmakufactory/DanmakuFactory && \
+        ls -lh /danmakufactory/; \
+    else \
+        echo "Prebuilt version not available, building from source..." && \
+        git clone --depth=1 https://github.com/hihkm/DanmakuFactory.git && \
+        cd DanmakuFactory && \
+        xmake build -y -v --root && \
+        find build -name DanmakuFactory -type f -executable -exec cp {} /danmakufactory/ \; && \
+        ls -lh /danmakufactory/ && \
+        test -f /danmakufactory/DanmakuFactory && echo "DanmakuFactory built successfully from source"; \
+    fi
 
 # Stage 3: Build Backend with Embedded Frontend
 FROM golang:1.24-alpine AS backend-builder
