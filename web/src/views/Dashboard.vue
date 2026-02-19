@@ -699,21 +699,24 @@ const previewDatabaseCleanup = async () => {
     cleanupPreviewing.value = true
     const response = await api.post('/config/cleanup?preview=true')
     
-    if (response.data.code === 0) {
-      const { deletedPartsCount, orphanHistoriesCount } = response.data.data
+    if (response.code === 0) {
+      const { deletedPartsCount, orphanHistoriesCount } = response.data
       
       ElMessageBox.alert(
         `预计清理：\n` +
-        `• 已删除的分P记录：${deletedPartsCount} 条\n` +
-        `• 孤立的历史记录：${orphanHistoriesCount} 条\n\n` +
-        `这些记录对应的文件已被删除，但数据库仍保留。\n` +
-        `执行清理将永久删除这些数据库记录。`,
+        `• 已软删除的分P记录：${deletedPartsCount} 条\n` +
+        `• 孤立的历史记录（没有任何有效分P）：${orphanHistoriesCount} 条\n\n` +
+        `这些记录对应的文件已被删除，但数据库仍保留记录。\n` +
+        `执行清理将永久删除这些数据库记录，释放数据库空间。`,
         '数据库瘦身预览',
         {
           confirmButtonText: '确定',
-          type: 'info'
+          type: 'info',
+          dangerouslyUseHTMLString: false
         }
       )
+    } else {
+      ElMessage.error('预览失败: ' + (response.msg || '未知错误'))
     }
   } catch (error) {
     console.error('预览失败:', error)
@@ -739,16 +742,16 @@ const cleanupDatabase = async () => {
     cleaningDatabase.value = true
     const response = await api.post('/config/cleanup')
     
-    if (response.data.code === 0) {
-      const { deletedPartsCount, orphanHistoriesCount } = response.data.data
+    if (response.code === 0) {
+      const { deletedPartsCount, orphanHistoriesCount } = response.data
       ElMessage.success(
-        `清理完成！\n` +
-        `已删除分P记录：${deletedPartsCount} 条\n` +
-        `已删除历史记录：${orphanHistoriesCount} 条`
+        `清理完成！删除了 ${deletedPartsCount} 条分P记录，${orphanHistoriesCount} 条历史记录`
       )
       
       // 刷新统计数据
       loadStats()
+    } else {
+      ElMessage.error('清理失败: ' + (response.msg || '未知错误'))
     }
   } catch (error) {
     if (error !== 'cancel') {

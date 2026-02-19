@@ -341,11 +341,14 @@ func CleanupDatabase(c *gin.Context) {
 	var deletedPartsCount int64
 	var orphanHistoriesCount int64
 
-	// 1. 统计已软删除的分P（file_delete=true）
+	// 1. 统计已软删除的分P（file_delete=true），这些会被删除
 	db.Model(&models.RecordHistoryPart{}).Where("file_delete = ?", true).Count(&deletedPartsCount)
 
-	// 2. 统计删除软删除分P后，会变成孤立（没有任何分P）的历史记录数
-	// 包括：(1) 当前已经没有分P的历史记录  (2) 删除软删除分P后将没有分P的历史记录
+	// 2. 统计删除软删除分P后会变成孤立的历史记录数
+	// 即：删除 file_delete=true 的分P后，没有任何分P的历史记录
+	// 分两种情况：
+	//   (1) 当前已经没有任何分P的历史记录
+	//   (2) 当前只有 file_delete=true 的分P，删除后会变成没有分P
 	db.Raw(`
 		SELECT COUNT(DISTINCT h.id) 
 		FROM record_histories h
@@ -355,6 +358,8 @@ func CleanupDatabase(c *gin.Context) {
 		)
 	`).Scan(&orphanHistoriesCount)
 
+	log.Printf("[数据库瘦身] 预览: 软删除分P=%d条, 孤立历史记录=%d条", deletedPartsCount, orphanHistoriesCount)
+
 	// 如果是预览模式，只返回统计信息
 	preview := c.Query("preview") == "true"
 	if preview {
@@ -362,7 +367,12 @@ func CleanupDatabase(c *gin.Context) {
 			"code": 0,
 			"msg":  "预览成功",
 			"data": gin.H{
-				"deletedPartsCount":     deletedPartsCount,
+				"deletedPartsCount":    deletedPartsCount,
+				"orphanHistoriesCount": orphanHistoriesCount,
+			},
+		})
+		return
+	}
 				"orphanHistoriesCount":  orphanHistoriesCount,
 			},
 		})
@@ -382,9 +392,10 @@ func CleanupDatabase(c *gin.Context) {
 		})
 		return
 	}
+	actualDeletedParts := result.RowsAffected
+	log.Printf("[数据库瘦身] 已删除 %d 条软删除的分P记录", actualDeletedParts)
 
-	// 2. 删除没有任何有效分P的历史记录
-	// SQLite中需要先查询出ID列表，再删除
+	// 2. 删除删除分P后变成孤立的历史记录（没有任何分P的）
 	var orphanIDs []uint
 	tx.Raw(`
 		SELECT h.id FROM record_histories h
@@ -394,6 +405,7 @@ func CleanupDatabase(c *gin.Context) {
 		)
 	`).Scan(&orphanIDs)
 	
+	actualDeletedHistories := 0
 	if len(orphanIDs) > 0 {
 		result = tx.Where("id IN ?", orphanIDs).Delete(&models.RecordHistory{})
 		if result.Error != nil {
@@ -404,7 +416,8 @@ func CleanupDatabase(c *gin.Context) {
 			})
 			return
 		}
-		log.Printf("[数据库瘦身] 已删除 %d 条孤立历史记录", len(orphanIDs))
+		actualDeletedHistories = int(result.RowsAffected)
+		log.Printf("[数据库瘦身] 已删除 %d 条孤立的历史记录", actualDeletedHistories)
 	}
 
 	// 提交事务
@@ -416,12 +429,14 @@ func CleanupDatabase(c *gin.Context) {
 		return
 	}
 
+	log.Printf("[数据库瘦身] 清理完成: 分P记录=%d条, 历史记录=%d条", actualDeletedParts, actualDeletedHistories)
+
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "数据库瘦身完成",
 		"data": gin.H{
-			"deletedPartsCount":     deletedPartsCount,
-			"orphanHistoriesCount":  orphanHistoriesCount,
+			"deletedPartsCount":    actualDeletedParts,
+			"orphanHistoriesCount": actualDeletedHistories,
 		},
 	})
 }
