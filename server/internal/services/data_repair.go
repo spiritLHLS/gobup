@@ -20,9 +20,9 @@ func NewDataRepairService() *DataRepairService {
 // RepairResult 修复结果
 type RepairResult struct {
 	OrphanParts           int      `json:"orphanParts"`           // 孤儿分P（有分P但无历史记录）
-	EmptyHistories        int      `json:"emptyHistories"`        // 空历史记录（有历史记录但无分P）
+	EmptyHistories        int      `json:"emptyHistories"`        // 孤立历史记录（有历史记录但无分P）
 	CreatedHistories      int      `json:"createdHistories"`      // 新创建的历史记录
-	DeletedEmptyHistories int      `json:"deletedEmptyHistories"` // 删除的空历史记录
+	DeletedEmptyHistories int      `json:"deletedEmptyHistories"` // 删除的孤立历史记录
 	UpdatedHistoryTimes   int      `json:"updatedHistoryTimes"`   // 更新的历史记录时间
 	ReassignedParts       int      `json:"reassignedParts"`       // 重新分配的分P
 	Errors                []string `json:"errors"`                // 错误列表
@@ -41,9 +41,9 @@ func (s *DataRepairService) CheckAndRepairDataConsistency(dryRun bool) (*RepairR
 		return result, fmt.Errorf("修复孤儿分P失败: %w", err)
 	}
 
-	// 2. 处理空历史记录（有历史记录但无分P）
+	// 2. 处理孤立历史记录（有历史记录但无分P）
 	if err := s.handleEmptyHistories(result, dryRun); err != nil {
-		return result, fmt.Errorf("处理空历史记录失败: %w", err)
+		return result, fmt.Errorf("处理孤立历史记录失败: %w", err)
 	}
 
 	// 3. 修复历史记录的时间范围（确保与分P时间一致）
@@ -51,7 +51,7 @@ func (s *DataRepairService) CheckAndRepairDataConsistency(dryRun bool) (*RepairR
 		return result, fmt.Errorf("修复历史记录时间失败: %w", err)
 	}
 
-	log.Printf("[DataRepair] 数据一致性检查完成: 孤儿分P=%d, 空历史=%d, 新建历史=%d, 删除空历史=%d, 更新时间=%d",
+	log.Printf("[DataRepair] 数据一致性检查完成: 孤儿分P=%d, 孤立历史记录=%d, 新建历史=%d, 删除孤立历史=%d, 更新时间=%d",
 		result.OrphanParts, result.EmptyHistories, result.CreatedHistories,
 		result.DeletedEmptyHistories, result.UpdatedHistoryTimes)
 
@@ -146,7 +146,7 @@ func (s *DataRepairService) repairOrphanParts(result *RepairResult, dryRun bool)
 	return nil
 }
 
-// handleEmptyHistories 处理空历史记录（有历史记录但无分P）
+// handleEmptyHistories 处理孤立历史记录（有历史记录但无分P）
 func (s *DataRepairService) handleEmptyHistories(result *RepairResult, dryRun bool) error {
 	db := database.GetDB()
 
@@ -161,48 +161,48 @@ func (s *DataRepairService) handleEmptyHistories(result *RepairResult, dryRun bo
 	`).Scan(&emptyHistories).Error
 
 	if err != nil {
-		return fmt.Errorf("查询空历史记录失败: %w", err)
+		return fmt.Errorf("查询孤立历史记录失败: %w", err)
 	}
 
 	result.EmptyHistories = len(emptyHistories)
 
 	if len(emptyHistories) == 0 {
-		log.Printf("[DataRepair] 未发现空历史记录")
+		log.Printf("[DataRepair] 未发现孤立历史记录")
 		return nil
 	}
 
-	log.Printf("[DataRepair] 发现 %d 个空历史记录", len(emptyHistories))
+	log.Printf("[DataRepair] 发现 %d 个孤立历史记录", len(emptyHistories))
 
-	// 保护策略：只保留正在录制中的记录，或最近1小时内创建的记录（可能是刚开始录制）
-	oneHourAgo := time.Now().Add(-1 * time.Hour)
+	// 保护策略：只保留正在录制中的记录，或最近10分钟内创建的记录（可能是刚开始录制）
+	tenMinutesAgo := time.Now().Add(-10 * time.Minute)
 	for _, history := range emptyHistories {
 		// 如果正在录制或直播中，保留
 		if history.Recording || history.Streaming {
-			log.Printf("[DataRepair] 保留录制中的空历史记录: ID=%d, SessionID=%s, Recording=%v, Streaming=%v",
+			log.Printf("[DataRepair] 保留录制中的孤立历史记录: ID=%d, SessionID=%s, Recording=%v, Streaming=%v",
 				history.ID, history.SessionID, history.Recording, history.Streaming)
 			continue
 		}
 
-		// 如果是最近1小时内创建的，保留（可能是刚开始的录制会话）
-		if history.CreatedAt.After(oneHourAgo) {
-			log.Printf("[DataRepair] 保留最近的空历史记录: ID=%d, SessionID=%s, 创建时间=%s (不到1小时)",
+		// 如果是最近10分钟内创建的，保留（可能是刚开始的录制会话）
+		if history.CreatedAt.After(tenMinutesAgo) {
+			log.Printf("[DataRepair] 保留最近的孤立历史记录: ID=%d, SessionID=%s, 创建时间=%s (不到10分钟)",
 				history.ID, history.SessionID, history.CreatedAt.Format("2006-01-02 15:04:05"))
 			continue
 		}
 
-		// 删除已完成录制但没有分P的空历史记录
+		// 删除已完成录制但没有分P的孤立历史记录
 		if !dryRun {
 			if err := db.Delete(&history).Error; err != nil {
-				errMsg := fmt.Sprintf("删除空历史记录 %d 失败: %v", history.ID, err)
+				errMsg := fmt.Sprintf("删除孤立历史记录 %d 失败: %v", history.ID, err)
 				result.Errors = append(result.Errors, errMsg)
 				log.Printf("[DataRepair] %s", errMsg)
 			} else {
 				result.DeletedEmptyHistories++
-				log.Printf("[DataRepair] 删除空历史记录: ID=%d, SessionID=%s, 创建时间=%s, Recording=%v",
+				log.Printf("[DataRepair] 删除孤立历史记录: ID=%d, SessionID=%s, 创建时间=%s, Recording=%v",
 					history.ID, history.SessionID, history.CreatedAt.Format("2006-01-02 15:04:05"), history.Recording)
 			}
 		} else {
-			log.Printf("[DataRepair] [DryRun] 将删除空历史记录: ID=%d, SessionID=%s, 创建时间=%s, Recording=%v",
+			log.Printf("[DataRepair] [DryRun] 将删除孤立历史记录: ID=%d, SessionID=%s, 创建时间=%s, Recording=%v",
 				history.ID, history.SessionID, history.CreatedAt.Format("2006-01-02 15:04:05"), history.Recording)
 			result.DeletedEmptyHistories++
 		}

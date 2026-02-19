@@ -225,7 +225,7 @@
               >
                 修复数据
               </el-button>
-              <span class="help-text">检查并修复分P与历史记录之间的数据不一致问题</span>
+              <span class="help-text">检查并修复数据不一致问题（孤儿分P、孤立历史记录、时间错误等）</span>
             </div>
           </el-form-item>
 
@@ -575,7 +575,11 @@ const openFileScanDialog = () => {
 const checkDataConsistency = async () => {
   try {
     await ElMessageBox.confirm(
-      '将检查分P与历史记录之间的数据一致性问题（不会修改数据）。是否继续？',
+      '将检查以下数据一致性问题（不会修改数据）：\n' +
+      '1. 孤儿分P（有分P但无历史记录）\n' +
+      '2. 孤立历史记录（有历史记录但无分P）\n' +
+      '3. 时间范围错误\n\n' +
+      '是否继续？',
       '数据一致性检查',
       {
         confirmButtonText: '检查',
@@ -592,7 +596,8 @@ const checkDataConsistency = async () => {
       
       let message = `检查完成！\n\n`
       message += `发现孤儿分P: ${response.orphanParts} 个\n`
-      message += `发现空历史记录: ${response.emptyHistories} 个\n`
+      message += `发现孤立历史记录: ${response.emptyHistories} 个\n`
+      message += `\n注：孤立历史记录将被删除（保留正在录制中的和最近10分钟内创建的）`
       
       if (hasIssues) {
         message += `\n如需修复，请点击"修复数据"按钮。`
@@ -626,9 +631,9 @@ const repairDataConsistency = async () => {
   try {
     await ElMessageBox.confirm(
       '将自动修复以下问题：\n' +
-      '1. 孤儿分P（有分P但无历史记录）\n' +
-      '2. 空历史记录（有历史记录但无分P）\n' +
-      '3. 历史记录时间范围错误\n\n' +
+      '1. 孤儿分P（有分P但无历史记录） → 创建或关联历史记录\n' +
+      '2. 孤立历史记录（有历史记录但无分P） → 删除（保留正在录制中的）\n' +
+      '3. 历史记录时间范围错误 → 根据分P更新\n\n' +
       '是否继续？',
       '数据一致性修复',
       {
@@ -648,8 +653,8 @@ const repairDataConsistency = async () => {
                         response.updatedHistoryTimes > 0
       
       let message = `修复完成！\n\n`
-      message += `孤儿分P: ${response.orphanParts} 个\n`
-      message += `空历史记录: ${response.emptyHistories} 个\n`
+      message += `发现孤儿分P: ${response.orphanParts} 个\n`
+      message += `发现孤立历史记录: ${response.emptyHistories} 个\n`
       
       if (hasChanges) {
         message += `\n修复操作：\n`
@@ -657,7 +662,7 @@ const repairDataConsistency = async () => {
           message += `- 创建历史记录: ${response.createdHistories} 个\n`
         }
         if (response.deletedEmptyHistories > 0) {
-          message += `- 删除空历史记录: ${response.deletedEmptyHistories} 个\n`
+          message += `- 删除孤立历史记录: ${response.deletedEmptyHistories} 个\n`
         }
         if (response.reassignedParts > 0) {
           message += `- 重新分配分P: ${response.reassignedParts} 个\n`
