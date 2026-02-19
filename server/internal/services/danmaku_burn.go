@@ -13,6 +13,11 @@ import (
 	"github.com/gobup/server/internal/models"
 )
 
+const (
+	// DanmakuFactory 路径（可通过环境变量配置）
+	DanmakuFactoryPath = "/usr/local/bin/danmakufactory/DanmakuFactory"
+)
+
 // DanmakuBurnService 弹幕烧录服务
 type DanmakuBurnService struct{}
 
@@ -41,9 +46,14 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 	log.Printf("[弹幕烧录] 弹幕文件: %s", xmlPath)
 
 	// 1. 将XML转换为ASS字幕文件
-	assPath, err := s.convertXMLToASS(xmlPath, history, room)
+	// 优先使用 DanmakuFactory，如果不可用则使用内置转换
+	assPath, err := s.convertXMLToASSWithFactory(xmlPath, history, room)
 	if err != nil {
-		return "", fmt.Errorf("转换弹幕为ASS失败: %w", err)
+		log.Printf("[弹幕烧录] DanmakuFactory 转换失败，尝试使用内置转换: %v", err)
+		assPath, err = s.convertXMLToASS(xmlPath, history, room)
+		if err != nil {
+			return "", fmt.Errorf("转换弹幕为ASS失败: %w", err)
+		}
 	}
 	defer os.Remove(assPath) // 临时文件，用完删除
 
@@ -107,7 +117,63 @@ func (s *DanmakuBurnService) findDanmakuXML(videoPath string) string {
 	return ""
 }
 
-// convertXMLToASS 将XML弹幕转换为ASS字幕格式
+// convertXMLToASSWithFactory 使用 DanmakuFactory 将XML转换为ASS
+func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history *models.RecordHistory, room *models.RecordRoom) (string, error) {
+	// 获取 DanmakuFactory 路径
+	factoryPath := os.Getenv("DANMAKU_FACTORY_PATH")
+	if factoryPath == "" {
+		factoryPath = DanmakuFactoryPath
+	}
+
+	// 检查 DanmakuFactory 是否存在
+	if _, err := os.Stat(factoryPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("DanmakuFactory 未安装: %s", factoryPath)
+	}
+
+	// 生成输出ASS文件路径
+	assPath := strings.TrimSuffix(xmlPath, filepath.Ext(xmlPath)) + "_danmaku.ass"
+
+	log.Printf("[弹幕烧录] 使用 DanmakuFactory 转换: %s -> %s", xmlPath, assPath)
+
+	// 构建命令参数
+	// DanmakuFactory -i input.xml -o output.ass -s 1920x1080 -dm 60 -ds 38 -fs 50
+	args := []string{
+		"-i", xmlPath,
+		"-o", assPath,
+		"-s", "1920x1080", // 分辨率
+		"-dm", "100",      // 弹幕密度：100%
+		"-fs", "50",       // 弹幕显示区域：50%
+	}
+
+	// 根据房间配置调整弹幕样式
+	switch room.DanmakuBurnStyle {
+	case "compact":
+		args = append(args, "-ds", "32") // 字号32px
+	case "large":
+		args = append(args, "-ds", "48") // 字号48px
+	default:
+		args = append(args, "-ds", "38") // 默认字号38px
+	}
+
+	// 执行 DanmakuFactory
+	cmd := exec.Command(factoryPath, args...)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		log.Printf("[弹幕烧录] DanmakuFactory 执行失败: %s", string(output))
+		return "", fmt.Errorf("DanmakuFactory 执行失败: %w", err)
+	}
+
+	// 检查输出文件是否生成
+	if _, err := os.Stat(assPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("ASS文件未生成: %s", assPath)
+	}
+
+	log.Printf("[弹幕烧录] DanmakuFactory 转换成功: %s", assPath)
+	return assPath, nil
+}
+
+// convertXMLToASS 将XML弹幕转换为ASS字幕格式（内置实现，作为后备方案）
 func (s *DanmakuBurnService) convertXMLToASS(xmlPath string, history *models.RecordHistory, room *models.RecordRoom) (string, error) {
 	db := database.GetDB()
 
@@ -120,7 +186,33 @@ func (s *DanmakuBurnService) convertXMLToASS(xmlPath string, history *models.Rec
 	}
 
 	if len(danmakus) == 0 {
-		return "", fmt.Errorf("没有弹幕数据")
+		log.Printf("[弹幕烧录] 数据库中没有弹幕数据（session_id=%s），尝试先解析XML文件", history.SessionID)
+		
+		// 如果数据库中没有弹幕，尝试解析XML文件
+		parser := NewDanmakuXMLParser()
+		var roomPtr *models.RecordRoom
+		if room.ID > 0 {
+			roomPtr = room
+		}
+		
+		// 解析XML文件到数据库
+		count, err := parser.ParseDanmakuFile(xmlPath, history.SessionID, roomPtr)
+		if err != nil {
+			return "", fmt.Errorf("解析弹幕失败: %w", err)
+		}
+		
+		log.Printf("[弹幕烧录] XML解析完成，导入了 %d 条弹幕", count)
+		
+		// 重新查询弹幕
+		if err := db.Where("session_id = ?", history.SessionID).
+			Order("timestamp ASC").
+			Find(&danmakus).Error; err != nil {
+			return "", fmt.Errorf("重新查询弹幕失败: %w", err)
+		}
+		
+		if len(danmakus) == 0 {
+			return "", fmt.Errorf("没有弹幕数据可供烧录")
+		}
 	}
 
 	log.Printf("[弹幕烧录] 读取到 %d 条弹幕", len(danmakus))

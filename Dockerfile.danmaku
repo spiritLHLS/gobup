@@ -1,0 +1,88 @@
+# Gobup All-in-One Container with DanmakuFactory - Frontend Embedded Build
+
+# Stage 1: Build Frontend
+FROM node:20-slim AS frontend-builder
+ARG TARGETARCH
+WORKDIR /app/web
+COPY web/package*.json ./
+RUN npm ci --include=optional
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        npm install --no-save @rollup/rollup-linux-x64-gnu; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        npm install --no-save @rollup/rollup-linux-arm64-gnu; \
+    fi
+COPY web/ ./
+RUN npm run build
+
+# Stage 2: Build DanmakuFactory
+FROM alpine:latest AS danmaku-builder
+ARG TARGETARCH
+
+# Install build dependencies for DanmakuFactory
+RUN apk add --no-cache git build-base curl tar
+
+# Install xmake
+RUN curl -fsSL https://xmake.io/shget.text | sh && \
+    ln -s /root/.local/bin/xmake /usr/local/bin/xmake
+
+# Clone and build DanmakuFactory
+WORKDIR /build
+RUN git clone --depth=1 https://github.com/hihkm/DanmakuFactory.git && \
+    cd DanmakuFactory && \
+    xmake build -y -v && \
+    mkdir -p /danmakufactory && \
+    find build -name DanmakuFactory -type f -executable -exec cp {} /danmakufactory/ \; && \
+    ls -lh /danmakufactory/ && \
+    /danmakufactory/DanmakuFactory -h || echo "DanmakuFactory built successfully"
+
+# Stage 3: Build Backend with Embedded Frontend
+FROM golang:1.24-alpine AS backend-builder
+ARG TARGETARCH
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates build-base sqlite-dev
+
+# Copy backend source
+COPY server/ ./server/
+
+# Copy frontend dist to embed location
+COPY --from=frontend-builder /app/web/dist ./server/internal/routes/dist
+
+# Build backend with embed tag
+WORKDIR /app/server
+RUN go mod download
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} go build -tags embed -a -installsuffix cgo -ldflags "-w -s" -o gobup .
+
+# Stage 4: Final Runtime Image with DanmakuFactory
+FROM alpine:latest
+ARG TARGETARCH
+
+# Install runtime dependencies (DanmakuFactory 是 C 语言编译的，只需要基础运行库)
+RUN apk add --no-cache ca-certificates tzdata sqlite ffmpeg libstdc++ libgcc wget
+
+# Copy compiled DanmakuFactory from builder stage
+COPY --from=danmaku-builder /danmakufactory/DanmakuFactory /usr/local/bin/danmakufactory/DanmakuFactory
+RUN chmod +x /usr/local/bin/danmakufactory/DanmakuFactory
+
+ENV TZ=Asia/Shanghai
+ENV DANMAKU_FACTORY_PATH=/usr/local/bin/danmakufactory/DanmakuFactory
+WORKDIR /app
+
+# Create necessary directories
+RUN mkdir -p /rec /app/data
+
+# Copy binary with embedded frontend
+COPY --from=backend-builder /app/server/gobup ./gobup
+
+# Set permissions
+RUN chmod +x ./gobup
+
+EXPOSE 12380
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:12380/api/health || exit 1
+
+# Run the application
+CMD ["./gobup"]

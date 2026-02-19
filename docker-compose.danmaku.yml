@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  gobup-danmaku:
+    build:
+      context: .
+      dockerfile: Dockerfile.danmaku
+    container_name: gobup-danmaku
+    restart: unless-stopped
+    ports:
+      - "22380:12380"
+    volumes:
+      - ./bilirecord:/rec
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+      - USERNAME=${GOBUP_USERNAME:-admin}  # 管理员用户名，首次启动时创建
+      - PASSWORD=${GOBUP_PASSWORD:-admin123}  # 管理员密码，首次启动时创建
+      - DANMAKU_FACTORY_PATH=/usr/local/bin/danmakufactory/DanmakuFactory
+    networks:
+      - gobup-network
+
+networks:
+  gobup-network:
+    driver: bridge

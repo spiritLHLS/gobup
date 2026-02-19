@@ -528,15 +528,26 @@ func (p *DanmakuXMLParser) ParseDanmakuForHistory(historyID uint) (int, error) {
 		totalCount += count
 	}
 
-	if totalCount == 0 {
+	// 检查数据库中是否已有该session_id的弹幕数据
+	var existingCount int64
+	db.Model(&models.LiveMsg{}).Where("session_id = ?", history.SessionID).Count(&existingCount)
+
+	if totalCount == 0 && existingCount == 0 {
 		return 0, fmt.Errorf("没有解析到任何弹幕")
 	}
 
+	// 如果本次导入了新弹幕，或者数据库中已有弹幕，都认为解析成功
+	finalCount := totalCount
+	if totalCount == 0 && existingCount > 0 {
+		log.Printf("[弹幕解析] 弹幕已存在数据库中，跳过导入: 共 %d 条", existingCount)
+		finalCount = int(existingCount)
+	}
+
 	// 更新历史记录的弹幕统计
-	history.DanmakuCount = totalCount
+	history.DanmakuCount = finalCount
 	db.Save(&history)
 
-	log.Printf("[弹幕解析] 历史记录%d解析完成: 共导入 %d 条弹幕", historyID, totalCount)
+	log.Printf("[弹幕解析] 历史记录%d解析完成: 本次导入 %d 条，数据库已有 %d 条", historyID, totalCount, existingCount)
 
-	return totalCount, nil
+	return finalCount, nil
 }

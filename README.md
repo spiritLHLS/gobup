@@ -53,7 +53,7 @@ bash install.sh upgrade
 
 ### 方式二：使用预构建 Docker 镜像
 
-所有镜像均支持 `linux/amd64` 和 `linux/arm64` 架构。
+所有镜像均支持 `linux/amd64` 和 `linux/arm64` 架构，**已内置 DanmakuFactory 专业弹幕转换工具**。
 
 **完整配置运行**
 
@@ -71,7 +71,9 @@ docker run -d \
   spiritlhl/gobup:latest
 ```
 
-> 注意：USERNAME 和 PASSWORD 仅用于首次启动时创建管理员账户，后续修改环境变量不会更新已存在的账户
+> 注意：
+> - USERNAME 和 PASSWORD 仅用于首次启动时创建管理员账户，后续修改环境变量不会更新已存在的账户
+> - 镜像已内置 DanmakuFactory，启用弹幕烧录功能可获得专业弹幕效果
 
 ### 方式三：使用 Docker Compose
 
@@ -109,8 +111,11 @@ docker-compose up -d
 git clone https://github.com/spiritlhls/gobup.git
 cd gobup
 
-# 构建镜像
-docker build -t gobup .
+# 构建镜像（默认使用 Dockerfile.danmaku，包含 DanmakuFactory）
+docker build -f Dockerfile.danmaku -t gobup .
+
+# 或构建标准版（仅内置弹幕转换）
+# docker build -f Dockerfile -t gobup .
 
 # 运行容器
 docker run -d \
@@ -231,6 +236,46 @@ GoBup会自动扫描录制文件并入库，无需配置Webhook：
   - 单个视频最大大小
   - 分P标题模板
 
+### 配置弹幕烧录（可选）
+
+GoBup 支持将弹幕烧录到视频中。**预构建的 Docker 镜像已内置 DanmakuFactory 专业弹幕转换工具**，无需额外配置即可使用。
+
+#### 启用弹幕烧录
+
+1. 在房间配置 -> 视频处理 -> 启用"弹幕烧录"
+2. 选择弹幕样式（默认/紧凑/大字号）
+3. 系统会自动将弹幕烧录到视频中并作为额外分P上传
+
+**转换方式**：
+- ✅ **DanmakuFactory（推荐）**：预构建镜像已内置，专业 C 实现，性能优异
+  - 自动使用 DanmakuFactory 进行转换
+  - 更好的弹幕效果和自定义选项
+  - 原生性能，转换速度快
+- ✅ **内置转换（备用）**：如果 DanmakuFactory 不可用时自动回退
+  - 无额外依赖，保证功能可用
+  - 基础弹幕效果
+
+#### 从源码构建（高级用户）
+
+如果需要从源码构建镜像：
+
+**标准版（仅内置转换）**：
+```bash
+# 构建标准镜像（不含 DanmakuFactory）
+docker build -f Dockerfile -t gobup:standard .
+```
+
+**DanmakuFactory 版（推荐）**：
+```bash
+# 构建带 DanmakuFactory 的镜像
+docker build -f Dockerfile.danmaku -t gobup:danmaku .
+
+# 或使用 docker-compose
+docker-compose -f docker-compose.danmaku.yml up -d
+```
+
+详细说明请参考 [DANMAKU_FACTORY.md](DANMAKU_FACTORY.md)
+
 ### 配置WxPusher消息推送（可选）
 
 1. 注册WxPusher账号：https://wxpusher.zjiecode.com/
@@ -278,4 +323,5 @@ GoBup会自动扫描录制文件并入库，无需配置Webhook：
 - [spiritLHLS/LotteryAutoScript_Station](https://github.com/spiritLHLS/LotteryAutoScript_Station) - 相关项目
 - [BililiveRecorder](https://rec.danmuji.org/) - 录播姬
 - [blrec](https://github.com/acgnhiki/blrec) - 录播工具
+- [DanmakuFactory](https://github.com/hihkm/DanmakuFactory) - 专业弹幕转换工具
 - [bilibili-API-collect](https://github.com/AkagiYui/bilibili-API-collect) - API合集

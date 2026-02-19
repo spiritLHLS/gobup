@@ -38,9 +38,22 @@ FROM alpine:latest
 ARG TARGETARCH
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata sqlite ffmpeg
+RUN apk add --no-cache ca-certificates tzdata sqlite ffmpeg wget unzip
+
+# Install DanmakuFactory (如果可用)
+# 注意: DanmakuFactory 需要 .NET runtime，如果需要使用请取消注释以下行
+# RUN apk add --no-cache dotnet8-runtime
+# WORKDIR /tmp
+# RUN ARCH=$([ "$TARGETARCH" = "amd64" ] && echo "x64" || echo "$TARGETARCH") && \
+#     wget -q https://github.com/hihkm/DanmakuFactory/releases/latest/download/DanmakuFactory-linux-${ARCH}.zip || true && \
+#     if [ -f DanmakuFactory-linux-${ARCH}.zip ]; then \
+#         unzip -q DanmakuFactory-linux-${ARCH}.zip -d /usr/local/bin/danmakufactory && \
+#         chmod +x /usr/local/bin/danmakufactory/DanmakuFactory && \
+#         rm DanmakuFactory-linux-${ARCH}.zip; \
+#     fi
 
 ENV TZ=Asia/Shanghai
+ENV DANMAKU_FACTORY_PATH=/usr/local/bin/danmakufactory/DanmakuFactory
 WORKDIR /app
 
 # Create necessary directories
