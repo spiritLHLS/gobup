@@ -19,7 +19,7 @@ FROM alpine:latest AS danmaku-builder
 ARG TARGETARCH
 
 # Install build dependencies for DanmakuFactory (包括 bash，xmake 安装脚本需要)
-RUN apk add --no-cache git build-base curl tar bash p7zip
+RUN apk add --no-cache git build-base curl tar bash p7zip cmake linux-headers
 
 # Install xmake
 RUN curl -fsSL https://xmake.io/shget.text | bash && \
