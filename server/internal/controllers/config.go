@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -330,4 +331,97 @@ func GetSystemStats(c *gin.Context) {
 	db.Model(&models.RecordHistory{}).Where("video_state = ? OR (upload_status = ? AND message LIKE ?)", 2, 2, "%失败%").Count(&stats.FailedCount)
 
 	c.JSON(http.StatusOK, stats)
+}
+
+// CleanupDatabase 数据库瘦身 - 删除已软删除的记录
+func CleanupDatabase(c *gin.Context) {
+	db := database.GetDB()
+
+	// 统计待清理的记录数
+	var deletedPartsCount int64
+	var orphanHistoriesCount int64
+
+	// 1. 统计已软删除的分P（file_delete=true）
+	db.Model(&models.RecordHistoryPart{}).Where("file_delete = ?", true).Count(&deletedPartsCount)
+
+	// 2. 统计删除软删除分P后，会变成孤立（没有任何分P）的历史记录数
+	// 包括：(1) 当前已经没有分P的历史记录  (2) 删除软删除分P后将没有分P的历史记录
+	db.Raw(`
+		SELECT COUNT(DISTINCT h.id) 
+		FROM record_histories h
+		WHERE NOT EXISTS (
+			SELECT 1 FROM record_history_parts p 
+			WHERE p.history_id = h.id AND p.file_delete = false
+		)
+	`).Scan(&orphanHistoriesCount)
+
+	// 如果是预览模式，只返回统计信息
+	preview := c.Query("preview") == "true"
+	if preview {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 0,
+			"msg":  "预览成功",
+			"data": gin.H{
+				"deletedPartsCount":     deletedPartsCount,
+				"orphanHistoriesCount":  orphanHistoriesCount,
+			},
+		})
+		return
+	}
+
+	// 执行清理
+	tx := db.Begin()
+
+	// 1. 删除所有软删除的分P记录
+	result := tx.Where("file_delete = ?", true).Delete(&models.RecordHistoryPart{})
+	if result.Error != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": -1,
+			"msg":  "删除分P记录失败: " + result.Error.Error(),
+		})
+		return
+	}
+
+	// 2. 删除没有任何有效分P的历史记录
+	// SQLite中需要先查询出ID列表，再删除
+	var orphanIDs []uint
+	tx.Raw(`
+		SELECT h.id FROM record_histories h
+		WHERE NOT EXISTS (
+			SELECT 1 FROM record_history_parts p 
+			WHERE p.history_id = h.id
+		)
+	`).Scan(&orphanIDs)
+	
+	if len(orphanIDs) > 0 {
+		result = tx.Where("id IN ?", orphanIDs).Delete(&models.RecordHistory{})
+		if result.Error != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code": -1,
+				"msg":  "删除历史记录失败: " + result.Error.Error(),
+			})
+			return
+		}
+		log.Printf("[数据库瘦身] 已删除 %d 条孤立历史记录", len(orphanIDs))
+	}
+
+	// 提交事务
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code": -1,
+			"msg":  "事务提交失败: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"msg":  "数据库瘦身完成",
+		"data": gin.H{
+			"deletedPartsCount":     deletedPartsCount,
+			"orphanHistoriesCount":  orphanHistoriesCount,
+		},
+	})
 }

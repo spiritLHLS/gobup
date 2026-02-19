@@ -132,6 +132,9 @@ func SetupRoutes(router *gin.Engine) {
 				config.PUT("/system", controllers.UpdateSystemConfig)
 				config.POST("/toggle", controllers.ToggleSystemConfig)
 				config.GET("/stats", controllers.GetSystemStats)
+				
+				// 数据库瘦身
+				config.POST("/cleanup", controllers.CleanupDatabase)
 			}
 
 			// 日志API

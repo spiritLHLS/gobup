@@ -434,11 +434,8 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		}
 	}
 
-	// 清理临时文件（切分文件、弹幕烧录文件等）
-	burnService := services.NewDanmakuBurnService()
-	if err := burnService.CleanTempFilesBySessionID(history.SessionID); err != nil {
-		log.Printf("[临时文件清理] 清理失败: %v", err)
-	}
+	// 注意：临时文件（切分文件、弹幕烧录文件等）的清理已移至审核通过后执行
+	// 见 videosync.go 中的审核通过逻辑
 
 	// 如果启用高能剪辑，创建高能剪辑任务
 	if room.HighEnergyCut {

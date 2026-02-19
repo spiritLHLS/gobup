@@ -229,6 +229,28 @@
             </div>
           </el-form-item>
 
+          <el-form-item label="数据库瘦身">
+            <div class="button-group">
+              <el-button 
+                type="info" 
+                @click="previewDatabaseCleanup" 
+                :loading="cleanupPreviewing"
+                :icon="View"
+              >
+                预览清理
+              </el-button>
+              <el-button 
+                type="danger" 
+                @click="cleanupDatabase" 
+                :loading="cleaningDatabase"
+                :icon="Delete"
+              >
+                执行清理
+              </el-button>
+              <span class="help-text">删除已软删除的记录（文件已删除但数据库仍保留的记录）</span>
+            </div>
+          </el-form-item>
+
           <el-form-item label="孤儿文件扫描">
             <div class="switch-item">
               <el-switch 
@@ -345,7 +367,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { VideoCamera, Upload, Clock, Warning, Check, Refresh, FolderOpened, Search, Tools, Delete } from '@element-plus/icons-vue'
+import { VideoCamera, Upload, Clock, Warning, Check, Refresh, FolderOpened, Search, Tools, Delete, View } from '@element-plus/icons-vue'
 import api, { filescanAPI, dataRepairAPI } from '../api'
 import FileScanDialog from '../components/filescan/FileScanDialog.vue'
 import CleanFilesDialog from '../components/filescan/CleanFilesDialog.vue'
@@ -356,6 +378,8 @@ const scanning = ref(false)
 const checking = ref(false)
 const repairing = ref(false)
 const cleaning = ref(false)
+const cleanupPreviewing = ref(false)
+const cleaningDatabase = ref(false)
 const fileScanDialogRef = ref(null)
 const cleanFilesDialogRef = ref(null)
 const config = ref({
@@ -666,6 +690,73 @@ const repairDataConsistency = async () => {
     }
   } finally {
     repairing.value = false
+  }
+}
+
+// 预览数据库瘦身
+const previewDatabaseCleanup = async () => {
+  try {
+    cleanupPreviewing.value = true
+    const response = await api.post('/config/cleanup?preview=true')
+    
+    if (response.data.code === 0) {
+      const { deletedPartsCount, orphanHistoriesCount } = response.data.data
+      
+      ElMessageBox.alert(
+        `预计清理：\n` +
+        `• 已删除的分P记录：${deletedPartsCount} 条\n` +
+        `• 孤立的历史记录：${orphanHistoriesCount} 条\n\n` +
+        `这些记录对应的文件已被删除，但数据库仍保留。\n` +
+        `执行清理将永久删除这些数据库记录。`,
+        '数据库瘦身预览',
+        {
+          confirmButtonText: '确定',
+          type: 'info'
+        }
+      )
+    }
+  } catch (error) {
+    console.error('预览失败:', error)
+    ElMessage.error('预览失败: ' + (error.response?.data?.msg || error.message || '网络错误'))
+  } finally {
+    cleanupPreviewing.value = false
+  }
+}
+
+// 执行数据库瘦身
+const cleanupDatabase = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '此操作将永久删除已软删除的记录（文件已删除但数据库仍保留），是否继续？',
+      '确认数据库瘦身',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    cleaningDatabase.value = true
+    const response = await api.post('/config/cleanup')
+    
+    if (response.data.code === 0) {
+      const { deletedPartsCount, orphanHistoriesCount } = response.data.data
+      ElMessage.success(
+        `清理完成！\n` +
+        `已删除分P记录：${deletedPartsCount} 条\n` +
+        `已删除历史记录：${orphanHistoriesCount} 条`
+      )
+      
+      // 刷新统计数据
+      loadStats()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('清理失败:', error)
+      ElMessage.error('清理失败: ' + (error.response?.data?.msg || error.message || '网络错误'))
+    }
+  } finally {
+    cleaningDatabase.value = false
   }
 }
 

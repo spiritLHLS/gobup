@@ -182,10 +182,10 @@ func (s *FileMoverService) copyFile(src, dst string) error {
 	return err
 }
 
-// moveRelatedFiles 移动相关文件（xml弹幕、封面等）
+// moveRelatedFiles 移动相关文件（xml弹幕、封面、其他视频格式等）
 func (s *FileMoverService) moveRelatedFiles(sourceDir, targetDir, baseName string) {
-	// 常见的相关文件扩展名
-	extensions := []string{".xml", ".jpg", ".jpeg", ".cover.jpg", ".png", ".json", ".txt", ".ass", ".srt"}
+	// 常见的相关文件扩展名（包括其他视频格式，以防转码或多格式录制）
+	extensions := []string{".xml", ".jpg", ".jpeg", ".cover.jpg", ".png", ".json", ".txt", ".ass", ".srt", ".flv", ".mp4", ".mkv", ".ts", ".avi"}
 
 	for _, ext := range extensions {
 		sourceFile := filepath.Join(sourceDir, baseName+ext)
@@ -250,19 +250,22 @@ func (s *FileMoverService) deleteFiles(historyID uint) error {
 			continue
 		}
 
+		// 删除主视频文件
 		if err := os.Remove(part.FilePath); err != nil {
 			log.Printf("删除文件失败: %s, error: %v", part.FilePath, err)
 			continue
 		}
 
-		// 注意：投稿成功后只删除视频文件，不删除XML弹幕文件和封面文件
-		// 弹幕可能还没有填充完毕，封面可能还需要使用
-		// 如果需要删除相关文件，请手动删除或配置其他策略
+		// 删除相关文件（XML弹幕、封面、字幕等）
+		// 注意：仅删除原始文件的相关文件，不删除临时文件的相关文件
+		if !part.IsTempFile {
+			s.DeleteRelatedFiles(part.FilePath)
+		}
 
 		part.FileDelete = true
 		db.Save(&part)
 		successCount++
-		log.Printf("已删除文件: %s", part.FilePath)
+		log.Printf("已删除文件及其相关文件: %s", part.FilePath)
 	}
 
 	history.FilesMoved = true
@@ -371,8 +374,8 @@ func (s *FileMoverService) DeleteRelatedFiles(filePath string) {
 		return
 	}
 
-	// 相关文件扩展名列表
-	extensions := []string{".xml", ".jpg", ".jpeg", ".cover.jpg", ".png", ".json", ".txt", ".ass", ".srt"}
+	// 相关文件扩展名列表（包括其他视频格式，以防转码或多格式录制）
+	extensions := []string{".xml", ".jpg", ".jpeg", ".cover.jpg", ".png", ".json", ".txt", ".ass", ".srt", ".flv", ".mp4", ".mkv", ".ts", ".avi"}
 
 	log.Printf("[DeleteRelatedFiles] 开始删除 %s 的相关文件", filePath)
 
@@ -410,7 +413,7 @@ func (s *FileMoverService) DeleteRelatedFiles(filePath string) {
 
 // copyRelatedFiles 复制相关文件
 func (s *FileMoverService) copyRelatedFiles(sourceDir, targetDir, baseName string) {
-	extensions := []string{".xml", ".jpg", ".jpeg", ".cover.jpg", ".png", ".json", ".txt", ".ass", ".srt"}
+	extensions := []string{".xml", ".jpg", ".jpeg", ".cover.jpg", ".png", ".json", ".txt", ".ass", ".srt", ".flv", ".mp4", ".mkv", ".ts", ".avi"}
 
 	for _, ext := range extensions {
 		sourceFile := filepath.Join(sourceDir, baseName+ext)

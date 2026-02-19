@@ -204,6 +204,16 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 			}
 		}
 		
+		// 1.5. 清理临时文件（切分文件、弹幕烧录文件等）
+		if history.SessionID != "" {
+			burnService := NewDanmakuBurnService()
+			if err := burnService.CleanTempFilesBySessionID(history.SessionID); err != nil {
+				log.Printf("[审核通过后] 临时文件清理失败: %v", err)
+			} else {
+				log.Printf("[审核通过后] 临时文件清理成功: session_id=%s", history.SessionID)
+			}
+		}
+		
 		// 2. 如果启用了SessionID合并，检查是否有待上传的同SessionID分P需要追加
 		if room.MergeBySession && history.SessionID != "" && history.Publish {
 			log.Printf("[审核通过] 检查同SessionID是否有待上传分P需要追加: session_id=%s", history.SessionID)
