@@ -373,11 +373,6 @@ func CleanupDatabase(c *gin.Context) {
 		})
 		return
 	}
-				"orphanHistoriesCount":  orphanHistoriesCount,
-			},
-		})
-		return
-	}
 
 	// 执行清理
 	tx := db.Begin()
