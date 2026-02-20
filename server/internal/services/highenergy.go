@@ -105,26 +105,40 @@ type DanmakuDensity struct {
 	Count     int   // 弹幕数量
 }
 
-// calculateDanmakuDensity 计算弹幕密度
+// calculateDanmakuDensity 计算弹幕密度（双指针滑动窗口，O(n + k)，原 O(n²) 已修复）
 func (s *HighEnergyCutService) calculateDanmakuDensity(danmakus []models.LiveMsg, windowMs int) []DanmakuDensity {
 	if len(danmakus) == 0 {
 		return nil
 	}
 
-	// 找出时间范围
+	// 找出时间范围（弹幕已按 timestamp ASC 排序）
 	minTime := danmakus[0].Timestamp
 	maxTime := danmakus[len(danmakus)-1].Timestamp
 
+	windowLen := int64(windowMs)
+	step := int64(windowMs / 2) // 窗口重叠 50%
+
 	var densities []DanmakuDensity
 
-	// 以时间窗口滑动计算密度
-	for t := minTime; t <= maxTime; t += int64(windowMs / 2) { // 窗口重叠50%
-		count := 0
-		for _, dm := range danmakus {
-			if dm.Timestamp >= t && dm.Timestamp < t+int64(windowMs) {
-				count++
-			}
+	// 双指针：left/right 均只向右移动，总复杂度 O(n + k)
+	left, right := 0, 0
+	count := 0
+
+	for t := minTime; t <= maxTime; t += step {
+		windowEnd := t + windowLen
+
+		// 向右扩展：将所有 timestamp < windowEnd 的弹幕纳入窗口
+		for right < len(danmakus) && danmakus[right].Timestamp < windowEnd {
+			count++
+			right++
 		}
+
+		// 向右收缩：将所有 timestamp < t（窗口左边界）的弹幕移出窗口
+		for left < right && danmakus[left].Timestamp < t {
+			count--
+			left++
+		}
+
 		densities = append(densities, DanmakuDensity{
 			Timestamp: t,
 			Count:     count,

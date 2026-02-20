@@ -236,8 +236,9 @@ func CleanOldHistories(c *gin.Context) {
 	// 计算截止时间
 	cutoffTime := time.Now().AddDate(0, 0, -req.Days)
 
-	// 只删除未上传、未发布的旧记录
-	result := db.Where("end_time < ? AND publish = false", cutoffTime).
+	// 只删除未上传、未发布、不在上传中的旧记录
+	// 原来条件未排除 upload_status>0 的记录，会删除上传中/已上传的记录并导致数据循环损坏
+	result := db.Where("end_time < ? AND publish = false AND upload_status = 0 AND recording = false", cutoffTime).
 		Delete(&models.RecordHistory{})
 
 	c.JSON(http.StatusOK, gin.H{

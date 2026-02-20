@@ -72,6 +72,7 @@ func InitDB(dbPath string) error {
 			CustomScanPaths:    "",      // 默认为空
 			EnableOrphanScan:   true,
 			OrphanScanInterval: 360, // 6小时
+			AutoDataRepair:     true, // 默认开启数据修复
 		}
 		DB.Create(&config)
 	}

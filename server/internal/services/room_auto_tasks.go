@@ -153,16 +153,21 @@ func (s *RoomAutoTaskService) processRoomTasks(room *models.RecordRoom) {
 							
 							// 如果有已上传分P，且所有分P都上传完成，且没有正在录制的分P，则触发追加
 							if uploadedCount > 0 && totalCount == uploadedCount && recordingCount == 0 {
-								log.Printf("[房间自动任务] 发现可追加的历史记录: history_id=%d, 已上传分P=%d, 将标记为需要投稿", 
-									pendingHistory.ID, uploadedCount)
-								
-								// 标记该历史记录为需要投稿（这样自动上传服务会检测到并触发追加）
-								// 注：由于MergeBySession开启，PublishHistory会自动检测并追加到已有投稿
-								pendingHistory.Upload = true // 确保允许上传
-								pendingHistory.UploadStatus = 2 // 标记为已上传
-								db.Save(&pendingHistory)
-								
-								log.Printf("[房间自动任务] 历史记录已标记为已上传，等待下次自动投稿检查时会自动追加到 %s", history.BvID)
+							log.Printf("[房间自动任务] 发现可追加的历史记录: history_id=%d, 已上传分P=%d，触发追加投稿",
+								pendingHistory.ID, uploadedCount)
+
+							// Bug4修复: 原来只设置 UploadStatus=2 但没有代码会读取该字段并触发投稿，逻辑死环。
+							// 现在通过注入的 TriggerPublish 回调直接触发投稿，
+							// PublishHistory 内部会检测 MergeBySession 并自动追加到已有投稿。
+							if TriggerPublish != nil {
+								if err := TriggerPublish(pendingHistory.ID, room.UploadUserID); err != nil {
+									log.Printf("[房间自动任务] 触发追加投稿失败: history_id=%d, error=%v", pendingHistory.ID, err)
+								} else {
+									log.Printf("[房间自动任务] 追加投稿成功: history_id=%d 已追加到 %s", pendingHistory.ID, history.BvID)
+								}
+							} else {
+								log.Printf("[房间自动任务] TriggerPublish 未注册，跳过追加: history_id=%d", pendingHistory.ID)
+							}
 							}
 						}
 					}

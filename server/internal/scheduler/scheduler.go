@@ -21,6 +21,11 @@ func InitScheduler() {
 	// 初始化上传服务（用于自动上传任务）
 	uploadService = upload.NewService()
 
+	// Bug4修复: 向 services 包注入投稿回调，使 room_auto_tasks.go 能触发投稿而不产生循环依赖
+	services.TriggerPublish = func(historyID uint, userID uint) error {
+		return uploadService.PublishHistory(historyID, userID)
+	}
+
 	// 服务启动后立即恢复因重启而滞留的临时分P（弹幕烧录版等）
 	go func() {
 		// 稍等5秒让DB连接和其他服务完全就绪后再执行
@@ -174,6 +179,8 @@ func isFeatureEnabled(feature string) bool {
 		return config.AutoFileScan
 	case "EnableOrphanScan":
 		return config.EnableOrphanScan
+	case "AutoDataRepair":
+		return config.AutoDataRepair
 	default:
 		return true
 	}

@@ -57,23 +57,38 @@ func (q *UserUploadQueue) Add(task *UploadTask) error {
 
 // process 处理队列中的任务
 func (q *UserUploadQueue) process() {
+	defer func() {
+		//捕获 panic，重置 processing 标志，并在有剩余任务时自动重启 goroutine
+		r := recover()
+		q.mu.Lock()
+		if r != nil {
+			log.Printf("[队列] 用户%d的上传goroutine发生panic: %v，尝试重启", q.userID, r)
+			if len(q.tasks) > 0 {
+				// 还有待处理任务，1秒后重启
+				go func() {
+					time.Sleep(time.Second)
+					q.process()
+				}()
+			} else {
+				q.processing = false
+			}
+		} else {
+			// 正常退出（channel 关闭），重置标志
+			q.processing = false
+		}
+		q.mu.Unlock()
+	}()
+
 	for task := range q.tasks {
 		log.Printf("[队列] 开始处理用户%d的上传任务: part_id=%d, file=%s (剩余队列: %d)",
 			q.userID, task.Part.ID, task.Part.FileName, len(q.tasks))
 
-		// 检查是否在速率限制冷却期内
+		// 速率限制冷却期内直接丢弃任务，由10分钟调度器重新入队
+		// 原来的做法是将任务放回队列尾部并立即 continue，导致忙等死循环（CPU 100%）
 		if task.Part.RateLimitCooldownAt != nil && time.Now().Before(*task.Part.RateLimitCooldownAt) {
 			remainingTime := time.Until(*task.Part.RateLimitCooldownAt)
-			log.Printf("[队列] 用户%d的任务part_id=%d处于速率限制冷却期，剩余%.0f分钟，暂时跳过",
+			log.Printf("[队列] 用户%d的任务part_id=%d处于速率限制冷却期，剩余%.0f分钟，丢弃任务（调度器将在冷却期结束后重新入队）",
 				q.userID, task.Part.ID, remainingTime.Minutes())
-
-			// 将任务重新放回队列尾部，等待下次处理
-			select {
-			case q.tasks <- task:
-				log.Printf("[队列] 任务part_id=%d已重新放回队列等待冷却期结束", task.Part.ID)
-			default:
-				log.Printf("[队列] 队列已满，无法重新放入任务part_id=%d", task.Part.ID)
-			}
 			continue
 		}
 

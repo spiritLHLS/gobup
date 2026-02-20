@@ -253,45 +253,26 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		log.Printf("构建分P[%d]: filename=%s, cid=%d", i, filename, part.CID)
 
 		// 检查CID是否为0（参考biliupforjava实现）
-		// 如果CID为0，说明视频还没有上传完成或上传出错，需要立即上传
+		// 原来CID=0时会在当前goroutine中同步执行完整上传流程（可能耗时数小时），
+		// 导致整个投稿调用链阻塞，进而阻塞上传队列中所有其他任务。
+		// 现在改为: 重置分P上传状态后返回错误，让自动上传调度器在下一轮（10分钟内）重新上传，
+		// 上传完成后 checkAndPublish 会再次触发投稿。
 		var cid int64
 		if part.CID > 0 {
 			cid = int64(part.CID)
 		} else {
-			log.Printf("检测到分P[%d]的CID为0，立即触发上传: %s", i, part.FilePath)
+			log.Printf("检测到分P[%d]的CID为0（数据异常），重置上传状态等待自动重传: part_id=%d, file=%s", i, part.ID, part.FilePath)
 
-			// 检查文件是否存在
-			if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
-				return fmt.Errorf("分P[%d]文件不存在，无法上传: %s", i, part.FilePath)
-			}
-
-			// 重置上传状态，准备上传
-			part.Upload = false
-			part.Uploading = false
-			part.FileName = ""
-			part.CID = 0
-			part.UploadRetryCount = 0
-			part.UploadErrorMsg = ""
-			db.Save(&part)
-
-			// 立即上传该分P
-			log.Printf("开始上传分P[%d]: %s", i, part.FilePath)
-			if err := s.uploadPartInternal(&part, &history, &room); err != nil {
-				return fmt.Errorf("分P[%d]上传失败: %w，请稍后重试投稿", i, err)
-			}
-
-			// 重新加载分P信息，获取上传后的CID
-			if err := db.First(&part, part.ID).Error; err != nil {
-				return fmt.Errorf("重新加载分P[%d]信息失败: %w", i, err)
-			}
-
-			if part.CID == 0 {
-				return fmt.Errorf("分P[%d]上传后CID仍为0，上传可能失败", i)
-			}
-
-			cid = int64(part.CID)
-			filename = part.FileName // 使用上传后获得的服务器文件名
-			log.Printf("分P[%d]上传成功，CID=%d, FileName=%s", i, part.CID, filename)
+			// 重置上传状态，让自动上传调度器在下次轮询时重新上传
+			db.Model(&part).Updates(map[string]interface{}{
+				"upload":            false,
+				"uploading":         false,
+				"file_name":         "",
+				"c_id":              0,
+				"upload_retry_count": 0,
+				"upload_error_msg":  "CID为0，数据异常，已重置等待自动重传",
+			})
+			return fmt.Errorf("分P[%d](part_id=%d)的CID为0，已重置上传状态，自动上传调度器将在10分钟内重传，请稍后重试投稿", i, part.ID)
 		}
 
 		videoParts = append(videoParts, bili.PublishVideoPartRequest{

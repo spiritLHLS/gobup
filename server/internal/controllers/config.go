@@ -250,6 +250,7 @@ func UpdateSystemConfig(c *gin.Context) {
 	config.OrphanScanInterval = req.OrphanScanInterval
 	config.EnableDanmakuProxy = req.EnableDanmakuProxy
 	config.DanmakuProxyList = req.DanmakuProxyList
+	config.AutoDataRepair = req.AutoDataRepair
 
 	// 参数验证
 	if config.FileScanInterval < 10 {
@@ -294,6 +295,8 @@ func ToggleSystemConfig(c *gin.Context) {
 		config.EnableOrphanScan = req.Value
 	case "enableDanmakuProxy":
 		config.EnableDanmakuProxy = req.Value
+	case "autoDataRepair":
+		config.AutoDataRepair = req.Value
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "未知的配置项"})
 		return

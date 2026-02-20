@@ -167,7 +167,7 @@ type BiliBiliUser struct {
 }
 
 type LiveMsg struct {
-	uint        `gorm:"primarykey" json:"id"`
+	ID          uint           `gorm:"primarykey" json:"id"`
 	CreatedAt   time.Time      `json:"createdAt"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 	BvID        string         `gorm:"index" json:"bvid"`
@@ -223,4 +223,5 @@ type SystemConfig struct {
 	OrphanScanInterval int       `gorm:"default:360" json:"orphanScanInterval"`   // 孤儿文件扫描间隔（分钟）
 	EnableDanmakuProxy bool      `gorm:"default:false" json:"enableDanmakuProxy"` // 启用弹幕代理池（全局配置）
 	DanmakuProxyList   string    `gorm:"type:text" json:"danmakuProxyList"`       // 代理列表，每行一个，格式: socks5://ip:port 或 http://user:pass@ip:port
+	AutoDataRepair     bool      `gorm:"default:true" json:"autoDataRepair"`      // 开启每日凌晨进行数据一致性修复
 }

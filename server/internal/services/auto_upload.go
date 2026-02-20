@@ -10,6 +10,11 @@ import (
 	"gorm.io/gorm"
 )
 
+// TriggerPublish 是供 services 包内部使用的投稿回调，由 scheduler 在启动时注入。
+// Bug4修复: room_auto_tasks.go 需要触发投稿，但 services 包不能导入 upload 包（循环依赖）。
+// 通过函数变量解耦，scheduler 注册，services 调用。
+var TriggerPublish func(historyID uint, userID uint) error
+
 // AutoUploadService 自动上传服务
 type AutoUploadService struct{}
 
