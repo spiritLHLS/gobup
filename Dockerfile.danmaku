@@ -69,7 +69,7 @@ FROM alpine:latest
 ARG TARGETARCH
 
 # Install runtime dependencies (DanmakuFactory 是 C 语言编译的，只需要基础运行库)
-RUN apk add --no-cache ca-certificates tzdata sqlite ffmpeg libstdc++ libgcc wget
+RUN apk add --no-cache ca-certificates tzdata sqlite ffmpeg libstdc++ libgcc wget fontconfig font-wqy-zenhei
 
 # Copy compiled DanmakuFactory from builder stage
 COPY --from=danmaku-builder /danmakufactory/DanmakuFactory /usr/local/bin/danmakufactory/DanmakuFactory

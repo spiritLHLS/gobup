@@ -38,7 +38,7 @@ FROM alpine:latest
 ARG TARGETARCH
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata sqlite ffmpeg wget unzip
+RUN apk add --no-cache ca-certificates tzdata sqlite ffmpeg wget unzip fontconfig font-wqy-zenhei
 
 # Install DanmakuFactory (如果可用)
 # 注意: DanmakuFactory 需要 .NET runtime，如果需要使用请取消注释以下行

@@ -16,6 +16,12 @@ import (
 const (
 	// DanmakuFactory 路径（可通过环境变量配置）
 	DanmakuFactoryPath = "/usr/local/bin/danmakufactory/DanmakuFactory"
+
+	// DanmakuFontName 弹幕字体名（容器内通过 font-wqy-zenhei 安装）
+	DanmakuFontName = "WenQuanYi Zen Hei"
+
+	// DanmakuFontsDir 字体目录（供 libass 查找字体）
+	DanmakuFontsDir = "/usr/share/fonts"
 )
 
 // DanmakuBurnService 弹幕烧录服务
@@ -266,16 +272,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 func (s *DanmakuBurnService) getASSStyle(styleName string) string {
 	// 不透明度79% = 0.79 * 255 = 201 = C9（十六进制）
 	// BackColour的alpha部分设置为79%的不透明度
+	// 注意：字体使用容器内安装的 WenQuanYi Zen Hei（通过 font-wqy-zenhei 安装）
+	// 若通过环境变量 DANMAKU_FONT_NAME 自定义字体，仍以 burnWithFFmpeg 中的 force_style 为准
 	switch styleName {
 	case "compact":
 		// 紧凑样式：小字号（字号100%=32px）
-		return "Style: Danmaku,Microsoft YaHei,32,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,1.5,0,2,10,10,10,1"
+		return "Style: Danmaku,WenQuanYi Zen Hei,32,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,1.5,0,2,10,10,10,1"
 	case "large":
 		// 大字号样式（字号100%=48px）
-		return "Style: Danmaku,Microsoft YaHei,48,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1"
+		return "Style: Danmaku,WenQuanYi Zen Hei,48,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1"
 	default:
 		// 默认样式（字号100%=38px，不透明度79%）
-		return "Style: Danmaku,Microsoft YaHei,38,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,1.8,0,2,10,10,10,1"
+		return "Style: Danmaku,WenQuanYi Zen Hei,38,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,1.8,0,2,10,10,10,1"
 	}
 }
 
@@ -379,19 +387,39 @@ func (s *DanmakuBurnService) burnWithFFmpeg(videoPath, assPath, outputPath strin
 		return fmt.Errorf("ffmpeg未安装或不在PATH中: %w", err)
 	}
 
+	// 转义ASS路径：统一为正斜杠，并转义冒号（Windows盘符路径需要）
+	assPathEscaped := strings.ReplaceAll(assPath, "\\", "/")
+	assPathEscaped = strings.ReplaceAll(assPathEscaped, ":", "\\:")
+
+	// 确定字体目录和字体名（支持环境变量覆盖）
+	fontsDir := os.Getenv("DANMAKU_FONTS_DIR")
+	if fontsDir == "" {
+		fontsDir = DanmakuFontsDir
+	}
+	fontName := os.Getenv("DANMAKU_FONT_NAME")
+	if fontName == "" {
+		fontName = DanmakuFontName
+	}
+
+	// subtitles 滤镜参数：
+	// - fontsdir: 告知 libass 到哪里找字体（容器内需安装 font-wqy-zenhei）
+	// - force_style: 强制覆盖 ASS 文件中的字体名，防止 Microsoft YaHei 等字体找不到
+	vfFilter := fmt.Sprintf("subtitles='%s':fontsdir=%s:force_style='Fontname=%s'",
+		assPathEscaped, fontsDir, fontName)
+
 	// ffmpeg命令：烧录字幕
-	// -i: 输入视频
-	// -vf subtitles: 使用字幕过滤器烧录
-	// -c:a copy: 音频直接复制，不重新编码
-	// -preset fast: 快速编码
-	// 按图片设置：字号100%（38px）、不透明度79%已在ASS样式中设置
+	// -c:v libx264: 显式指定H.264编码避免FLV等容器用错编码器
+	// -crf 18:      视觉无损质量（0最好，51最差，18接近无损）
+	// -preset fast: 编码速度（ultrafast/superfast/fast/medium/slow）
+	// -c:a copy:    音频直接复制，不重新编码
 	args := []string{
 		"-i", videoPath,
-		"-vf", fmt.Sprintf("subtitles='%s'",
-			strings.ReplaceAll(assPath, "\\", "/")), // Windows路径需要转换，样式已在ASS文件中
+		"-vf", vfFilter,
+		"-c:v", "libx264",
+		"-crf", "18",
+		"-preset", "fast",
 		"-c:a", "copy",
-		"-preset", "fast", // 快速编码
-		"-y",              // 覆盖已存在的文件
+		"-y", // 覆盖已存在的文件
 		outputPath,
 	}
 
@@ -408,15 +436,15 @@ func (s *DanmakuBurnService) burnWithFFmpeg(videoPath, assPath, outputPath strin
 	return nil
 }
 
-// generateOutputPath 生成输出文件路径
+// generateOutputPath 生成输出文件路径（统一输出为mp4，确保H.264编码兼容性）
 func (s *DanmakuBurnService) generateOutputPath(inputPath string) string {
 	dir := filepath.Dir(inputPath)
 	baseName := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
-	ext := filepath.Ext(inputPath)
 
 	// 生成带时间戳的文件名，避免冲突
+	// 统一使用 .mp4 输出，配合 -c:v libx264 确保兼容性
 	timestamp := time.Now().Format("20060102_150405")
-	return filepath.Join(dir, fmt.Sprintf("%s_danmaku_%s%s", baseName, timestamp, ext))
+	return filepath.Join(dir, fmt.Sprintf("%s_danmaku_%s.mp4", baseName, timestamp))
 }
 
 // CleanTempFiles 清理临时文件（上传成功后调用）
