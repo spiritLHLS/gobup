@@ -58,6 +58,95 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 	return s.queueManager.AddTask(room.UploadUserID, part, history, room)
 }
 
+// RequeueStuckTempParts 将服务重启后滞留在DB中的临时分P重新加入上传队列
+// 触发场景：弹幕烧录成功 → 临时Part入库 → 服务崩溃/重启 → 内存队列丢失
+// 由调度器在启动后调用一次，确保这些分P不丢失
+// 通过立即将 Uploading 置为 true 防止10分钟周期调用时重复入队
+func (s *Service) RequeueStuckTempParts() {
+	db := database.GetDB()
+
+	var stuckParts []models.RecordHistoryPart
+	if err := db.Where(
+		"is_temp_file = ? AND upload = ? AND uploading = ? AND file_delete = ?",
+		true, false, false, false,
+	).Find(&stuckParts).Error; err != nil {
+		log.Printf("[重启恢复] 查询滞留临时分P失败: %v", err)
+		return
+	}
+
+	if len(stuckParts) == 0 {
+		return
+	}
+
+	log.Printf("[重启恢复] 发现 %d 个滞留临时分P，准备重新入队", len(stuckParts))
+
+	for _, part := range stuckParts {
+		// 检查物理文件是否存在
+		if part.FilePath == "" {
+			continue
+		}
+		if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
+			// 文件不存在，标记为已删除
+			log.Printf("[重启恢复] 临时分P文件不存在，标记为已删除: part_id=%d, file=%s", part.ID, part.FilePath)
+			part.FileDelete = true
+			part.UploadErrorMsg = "临时文件不存在，已自动清理"
+			db.Save(&part)
+			continue
+		}
+
+		// 先标记 Uploading=true 防止下次10分钟周期调用重复入队
+		// uploadPartInternal 内部也会设置 Uploading=true（幂等），defer 会在完成后重置为 false
+		part.Uploading = true
+		db.Save(&part)
+
+		// 重新获取关联的历史记录和房间配置
+		var history models.RecordHistory
+		if err := db.First(&history, part.HistoryID).Error; err != nil {
+			log.Printf("[重启恢复] 获取历史记录失败: part_id=%d, err=%v", part.ID, err)
+			part.Uploading = false
+			db.Save(&part)
+			continue
+		}
+
+		var room models.RecordRoom
+		if err := db.Where("room_id = ?", part.RoomID).First(&room).Error; err != nil {
+			log.Printf("[重启恢复] 获取房间配置失败: part_id=%d, err=%v", part.ID, err)
+			part.Uploading = false
+			db.Save(&part)
+			continue
+		}
+
+		if room.UploadUserID == 0 {
+			part.Uploading = false
+			db.Save(&part)
+			continue
+		}
+
+		if err := s.UploadPart(&part, &history, &room); err != nil {
+			// 入队失败才重置，让下次定时任务重试
+			part.Uploading = false
+			db.Save(&part)
+			log.Printf("[重启恢复] 临时分P重新入队失败: part_id=%d, err=%v", part.ID, err)
+		} else {
+			log.Printf("[重启恢复] 临时分P重新入队成功: part_id=%d, file=%s", part.ID, part.FilePath)
+		}
+	}
+}
+
+// ResetStuckUploadingParts 重置服务崩溃时卡在 uploading=true 的分P（启动时调用一次）
+// 防止因上次崩溃留下的 uploading=true 状态导致分P永远不被重试
+func (s *Service) ResetStuckUploadingParts() {
+	db := database.GetDB()
+	result := db.Model(&models.RecordHistoryPart{}).
+		Where("uploading = ? AND upload = ?", true, false).
+		Updates(map[string]interface{}{"uploading": false})
+	if result.Error != nil {
+		log.Printf("[启动恢复] 重置滞留 uploading 状态失败: %v", result.Error)
+	} else if result.RowsAffected > 0 {
+		log.Printf("[启动恢复] 重置了 %d 个上次崩溃时卡在 uploading=true 的分P", result.RowsAffected)
+	}
+}
+
 // uploadPartInternal 实际执行上传分P（内部方法，由队列调用）
 func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) error {
 	db := database.GetDB()
@@ -296,6 +385,7 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	s.progressTracker.MarkSuccessAndRemove(int64(part.ID))
 
 	// 弹幕烧录：如果启用且不是临时文件，则生成带弹幕版本并上传
+	// 注意：必须在删除策略(DeleteType 3/7)之前执行，否则原始文件被先删除导致烧录失败
 	if room.EnableDanmakuBurn && !part.IsTempFile {
 		log.Printf("[弹幕烧录] 检测到启用弹幕烧录功能，开始处理 part_id=%d", part.ID)
 		burnService := services.NewDanmakuBurnService()
@@ -321,6 +411,7 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	}
 
 	// 处理文件策略：3-上传后删除, 4-上传后移动, 6-上传后复制, 7-上传完成后立即删除
+	// 注意：弹幕烧录在前面已执行，此时原始文件已不再需要可以安全删除
 	if room.DeleteType == 3 || room.DeleteType == 4 || room.DeleteType == 6 || room.DeleteType == 7 {
 		fileMoverSvc := services.NewFileMoverService()
 		if err := fileMoverSvc.ProcessFilesByStrategy(history.ID, room.DeleteType); err != nil {
@@ -352,14 +443,23 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.RecordRoom) {
 	db := database.GetDB()
 
-	// 查询所有分P的数量和已上传的分P数量
+	// 查询分P数统计
+	// totalCount 排除“已标记删除且未上传”的孤尤录制：
+	//   - file_delete=true 且 upload=false ：孤尤临时分P（烧录失败后清理标记），不能阻塞投稿
+	//   - file_delete=true 且 upload=true  ：正常已上传并补删（应计入 uploadedCount）
 	var totalCount int64
 	var uploadedCount int64
 	var recordingCount int64
 
-	db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", history.ID).Count(&totalCount)
-	db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND upload = ?", history.ID, true).Count(&uploadedCount)
-	db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND recording = ?", history.ID, true).Count(&recordingCount)
+	db.Model(&models.RecordHistoryPart{}).Where(
+		"history_id = ? AND NOT (file_delete = true AND upload = false)",
+		history.ID).Count(&totalCount)
+	db.Model(&models.RecordHistoryPart{}).Where(
+		"history_id = ? AND upload = ?",
+		history.ID, true).Count(&uploadedCount)
+	db.Model(&models.RecordHistoryPart{}).Where(
+		"history_id = ? AND recording = ?",
+		history.ID, true).Count(&recordingCount)
 
 	// 关键判断：只有在以下所有条件满足时才自动投稿
 	// 1. 有分P存在（totalCount > 0）

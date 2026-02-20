@@ -127,10 +127,12 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 		}
 
 		// 查询该房间所有录制完成但未上传的分P
+		// 注意：排除临时文件（is_temp_file=true），临时文件由 uploadPartInternal 内部直接入队
+		// 自动调度器只负责原始录制分P，避免弹幕烧录版/切分文件被重复入队
 		var parts []models.RecordHistoryPart
 		if err := db.Where(
-			"room_id = ? AND recording = ? AND upload = ? AND uploading = ?",
-			room.RoomID, false, false, false,
+			"room_id = ? AND recording = ? AND upload = ? AND uploading = ? AND is_temp_file = ?",
+			room.RoomID, false, false, false, false,
 		).Order("start_time ASC").Find(&parts).Error; err != nil {
 			log.Printf("[自动上传] 查询房间 %s 的待上传分P失败: %v", room.RoomID, err)
 			continue
@@ -263,4 +265,39 @@ type PendingUploadTask struct {
 	Part    models.RecordHistoryPart
 	History models.RecordHistory
 	Room    models.RecordRoom
+}
+
+// CleanOrphanedTempParts 清理孤立的临时分P记录（文件已不存在但DB记录仍为未上传状态）
+// 典型场景：弹幕烧录失败/被手动删除，导致 is_temp_file=true 的分P记录永远卡在 upload=false
+func (s *AutoUploadService) CleanOrphanedTempParts() {
+	db := database.GetDB()
+
+	var stuckParts []models.RecordHistoryPart
+	if err := db.Where("is_temp_file = ? AND upload = ? AND uploading = ? AND file_delete = ?",
+		true, false, false, false).Find(&stuckParts).Error; err != nil {
+		log.Printf("[自动上传] 查询孤立临时分P失败: %v", err)
+		return
+	}
+
+	if len(stuckParts) == 0 {
+		return
+	}
+
+	cleaned := 0
+	for _, part := range stuckParts {
+		if part.FilePath == "" {
+			continue
+		}
+		if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
+			log.Printf("[自动上传] 临时分P文件不存在，标记为已删除: part_id=%d, file=%s", part.ID, part.FilePath)
+			part.FileDelete = true
+			part.UploadErrorMsg = "临时文件不存在，已自动清理"
+			db.Save(&part)
+			cleaned++
+		}
+	}
+
+	if cleaned > 0 {
+		log.Printf("[自动上传] 清理孤立临时分P完成: 共清理 %d 条记录", cleaned)
+	}
 }

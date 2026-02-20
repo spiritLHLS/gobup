@@ -21,6 +21,18 @@ func InitScheduler() {
 	// 初始化上传服务（用于自动上传任务）
 	uploadService = upload.NewService()
 
+	// 服务启动后立即恢复因重启而滞留的临时分P（弹幕烧录版等）
+	go func() {
+		// 稍等5秒让DB连接和其他服务完全就绪后再执行
+		time.Sleep(5 * time.Second)
+		// 1. 先重置上次崩溃时卡在 uploading=true 的分P，避免永远不被重试
+		log.Println("[启动恢复] 重置崩溃时卡在 uploading 状态的分P")
+		uploadService.ResetStuckUploadingParts()
+		// 2. 重新入队滞留但文件仍存在的临时分P
+		log.Println("[启动恢复] 检查并重新入队滞留的临时分P")
+		uploadService.RequeueStuckTempParts()
+	}()
+
 	// 视频同步任务 - 每10分钟执行一次
 	cronJob.AddFunc("*/10 * * * *", func() {
 		log.Println("执行定时任务: 视频同步")
@@ -241,6 +253,12 @@ func refreshAllUserTokens() error {
 func processAutoUpload() error {
 	// 获取自动上传服务
 	autoUploadSvc := services.NewAutoUploadService()
+
+	// 先清理孤立的临时分P记录（文件不存在却卡在未上传状态的）
+	autoUploadSvc.CleanOrphanedTempParts()
+
+	// 恢复滞留的临时分P（文件存在但未入队，如服务重启导致的）
+	uploadService.RequeueStuckTempParts()
 
 	// 获取所有待上传的分P
 	tasks, err := autoUploadSvc.GetPendingUploadParts()

@@ -244,6 +244,12 @@ func (s *FileMoverService) deleteFiles(historyID uint) error {
 			continue
 		}
 
+		// 跳过正在上传中的分P，避免删除中类弹幕烧录版等正在进行的文件
+		if part.Uploading {
+			log.Printf("跳过正在上传中的分P: part_id=%d, file=%s", part.ID, part.FilePath)
+			continue
+		}
+
 		if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
 			part.FileDelete = true
 			db.Save(&part)
