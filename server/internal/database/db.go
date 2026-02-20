@@ -35,6 +35,13 @@ func InitDB(dbPath string) error {
 	sqlDB.SetMaxIdleConns(1)    // 空闲连接数
 	sqlDB.SetConnMaxLifetime(0) // 连接可以一直重用
 
+	// 在 AutoMigrate 之前修复历史遗留的 live_msgs 表结构。
+	// 旧版本用匿名 uint 作为主键，实际列名为 "uint"；新版本改为具名 ID，列名为 "id"。
+	// SQLite 不支持 ALTER TABLE ADD PRIMARY KEY，AutoMigrate 会直接报错，必须手动重建表。
+	if err := migrateLiveMsgsTable(); err != nil {
+		return fmt.Errorf("迁移 live_msgs 表失败: %w", err)
+	}
+
 	// 自动迁移
 	err = DB.AutoMigrate(
 		&models.RecordRoom{},
@@ -114,4 +121,98 @@ func WithRetry(fn func() error, maxRetries int) error {
 		return err
 	}
 	return err
+}
+
+// migrateLiveMsgsTable 处理 live_msgs 表的历史结构兼容迁移。
+// 旧版本将主键列命名为 "uint"（匿名嵌入 uint），新版本改为 "id"（具名字段 ID）。
+// SQLite 不支持直接 ALTER TABLE ADD PRIMARY KEY，因此采用"重建"策略：
+//   1. 检查旧表是否存在且包含 "uint" 列
+//   2. 如果是旧表：重命名 → 建新表 → 复制数据 → 删旧表
+func migrateLiveMsgsTable() error {
+	// 检查 live_msgs 表是否存在
+	var tableCount int
+	DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='live_msgs'").Scan(&tableCount)
+	if tableCount == 0 {
+		// 表不存在，无需迁移，AutoMigrate 会自动创建
+		return nil
+	}
+
+	// 检查是否存在旧版 "uint" 列（匿名嵌入主键）
+	type ColInfo struct {
+		Name string `gorm:"column:name"`
+	}
+	var cols []ColInfo
+	DB.Raw("PRAGMA table_info(live_msgs)").Scan(&cols)
+
+	hasUintCol := false
+	hasIDCol := false
+	for _, c := range cols {
+		if c.Name == "uint" {
+			hasUintCol = true
+		}
+		if c.Name == "id" {
+			hasIDCol = true
+		}
+	}
+
+	if !hasUintCol || hasIDCol {
+		// 已经是新结构，无需迁移
+		return nil
+	}
+
+	// 旧表：重建流程
+	// Step 1: 将旧表重命名为备份表
+	if err := DB.Exec("ALTER TABLE live_msgs RENAME TO live_msgs_old").Error; err != nil {
+		return fmt.Errorf("重命名旧表失败: %w", err)
+	}
+
+	// Step 2: 用新结构创建 live_msgs 表（AutoMigrate 前手动建表）
+	createSQL := `CREATE TABLE live_msgs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		created_at DATETIME,
+		deleted_at DATETIME,
+		bv_id TEXT,
+		room_id TEXT,
+		session_id TEXT,
+		timestamp INTEGER,
+		type INTEGER,
+		message TEXT,
+		user_name TEXT,
+		uid INTEGER,
+		u_level INTEGER DEFAULT 0,
+		medal_name TEXT,
+		medal_level INTEGER DEFAULT 0,
+		medal_room_id TEXT,
+		sent INTEGER DEFAULT 0,
+		c_id INTEGER,
+		progress INTEGER,
+		mode INTEGER DEFAULT 1,
+		font_size INTEGER DEFAULT 25,
+		color INTEGER DEFAULT 16777215
+	)`
+	if err := DB.Exec(createSQL).Error; err != nil {
+		// 建表失败，回滚重命名
+		DB.Exec("ALTER TABLE live_msgs_old RENAME TO live_msgs")
+		return fmt.Errorf("创建新表失败: %w", err)
+	}
+
+	// Step 3: 将旧数据复制到新表（旧 "uint" 列映射到新 "id"）
+	copySQL := `INSERT INTO live_msgs (id, created_at, deleted_at, bv_id, room_id, session_id,
+		timestamp, type, message, user_name, uid, u_level, medal_name, medal_level,
+		medal_room_id, sent, c_id, progress, mode, font_size, color)
+	SELECT "uint", created_at, deleted_at, bv_id, room_id, session_id,
+		timestamp, type, message, user_name, uid, u_level, medal_name, medal_level,
+		medal_room_id, sent, c_id, progress, mode, font_size, color
+	FROM live_msgs_old`
+	if err := DB.Exec(copySQL).Error; err != nil {
+		// 复制失败，回滚：删除新表，恢复旧表名
+		DB.Exec("DROP TABLE IF EXISTS live_msgs")
+		DB.Exec("ALTER TABLE live_msgs_old RENAME TO live_msgs")
+		return fmt.Errorf("迁移数据失败: %w", err)
+	}
+
+	// Step 4: 删除旧备份表
+	DB.Exec("DROP TABLE live_msgs_old")
+
+	return nil
 }
