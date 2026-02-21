@@ -443,20 +443,21 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.RecordRoom) {
 	db := database.GetDB()
 
-	// 查询分P数统计
-	// totalCount 排除“已标记删除且未上传”的孤尤录制：
-	//   - file_delete=true 且 upload=false ：孤尤临时分P（烧录失败后清理标记），不能阻塞投稿
+	// 查询分P数统计（仅统计原始非临时分P）
+	// totalCount 只统计非临时文件（is_temp_file=false），并排除"已标记删除且未上传"的孤立记录：
+	//   - 烧录/切分产生的临时分P（is_temp_file=true）不应阻塞投稿条件
+	//   - file_delete=true 且 upload=false ：孤立临时分P（烧录失败后清理标记），不能阻塞投稿
 	//   - file_delete=true 且 upload=true  ：正常已上传并补删（应计入 uploadedCount）
 	var totalCount int64
 	var uploadedCount int64
 	var recordingCount int64
 
 	db.Model(&models.RecordHistoryPart{}).Where(
-		"history_id = ? AND NOT (file_delete = true AND upload = false)",
-		history.ID).Count(&totalCount)
+		"history_id = ? AND is_temp_file = ? AND NOT (file_delete = true AND upload = false)",
+		history.ID, false).Count(&totalCount)
 	db.Model(&models.RecordHistoryPart{}).Where(
-		"history_id = ? AND upload = ?",
-		history.ID, true).Count(&uploadedCount)
+		"history_id = ? AND upload = ? AND is_temp_file = ?",
+		history.ID, true, false).Count(&uploadedCount)
 	db.Model(&models.RecordHistoryPart{}).Where(
 		"history_id = ? AND recording = ?",
 		history.ID, true).Count(&recordingCount)

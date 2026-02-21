@@ -48,6 +48,25 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 		return "", fmt.Errorf("未找到弹幕XML文件")
 	}
 
+	// 去重检查：若已存在该源分P的烧录记录且文件完好，直接返回，避免重复烧录
+	var existingBurnedPart models.RecordHistoryPart
+	if err := db.Where(
+		"source_part_id = ? AND is_temp_file = ? AND temp_file_type = ? AND file_delete = ?",
+		part.ID, true, "danmaku_burn", false,
+	).First(&existingBurnedPart).Error; err == nil {
+		if existingBurnedPart.Upload {
+			log.Printf("[弹幕烧录] 烧录版已上传，跳过重复烧录: source_part_id=%d, burned_part_id=%d", part.ID, existingBurnedPart.ID)
+			return existingBurnedPart.FilePath, nil
+		}
+		if _, statErr := os.Stat(existingBurnedPart.FilePath); statErr == nil {
+			log.Printf("[弹幕烧录] 烧录版文件已存在，跳过重复烧录: source_part_id=%d, file=%s", part.ID, existingBurnedPart.FilePath)
+			return existingBurnedPart.FilePath, nil
+		}
+		// 文件已不存在，清理孤立DB记录，继续重新烧录
+		log.Printf("[弹幕烧录] 烧录版文件缺失，删除孤立记录后重新烧录: burned_part_id=%d", existingBurnedPart.ID)
+		db.Delete(&existingBurnedPart)
+	}
+
 	log.Printf("[弹幕烧录] 开始为视频烧录弹幕: %s", part.FilePath)
 	log.Printf("[弹幕烧录] 弹幕文件: %s", xmlPath)
 

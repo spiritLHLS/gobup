@@ -94,10 +94,10 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("用户Cookie已失效，请重新登录")
 	}
 
-	// 获取所有已上传的分P（必须按start_time ASC排序，确保投稿时分P顺序正确）
-	// 排除已删除文件的Parts（例如被切分的原始文件）
+	// 获取所有已上传的原始分P（必须按start_time ASC排序，确保投稿时分P顺序正确）
+	// 排除已删除文件、临时烧录/切分文件（is_temp_file=true），避免原始+烧录版重复出现在B站视频中
 	var parts []models.RecordHistoryPart
-	if err := db.Where("history_id = ? AND upload = ? AND file_delete = ?", historyID, true, false).
+	if err := db.Where("history_id = ? AND upload = ? AND file_delete = ? AND is_temp_file = ?", historyID, true, false, false).
 		Order("start_time ASC").
 		Find(&parts).Error; err != nil {
 		return fmt.Errorf("查询分P失败: %w", err)
@@ -517,20 +517,22 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 		return fmt.Errorf("用户Cookie已失效，请重新登录")
 	}
 
-	// 获取已存在投稿的所有分P（按SessionID查询所有相关历史记录的分P）
+	// 获取已存在投稿的所有原始分P（仅包含 publish=true 且非临时文件的分P）
+	// - record_histories.publish=true：只统计已成功投稿/追加的历史记录分P，与B站视频当前状态保持一致
+	// - is_temp_file=false：排除弹幕烧录/切分等临时文件，避免B站视频出现重复分P
 	var existingParts []models.RecordHistoryPart
 	if err := db.Joins("JOIN record_histories ON record_history_parts.history_id = record_histories.id").
-		Where("record_histories.session_id = ? AND record_history_parts.upload = ? AND record_history_parts.file_delete = ?",
-			existingHistory.SessionID, true, false).
+		Where("record_histories.session_id = ? AND record_histories.publish = ? AND record_history_parts.upload = ? AND record_history_parts.file_delete = ? AND record_history_parts.is_temp_file = ?",
+			existingHistory.SessionID, true, true, false, false).
 		Order("record_history_parts.start_time ASC").
 		Find(&existingParts).Error; err != nil {
 		return fmt.Errorf("查询已存在分P失败: %w", err)
 	}
 
-	// 获取新历史记录的已上传分P
+	// 获取新历史记录的已上传原始分P（排除临时烧录/切分文件）
 	var newParts []models.RecordHistoryPart
-	if err := db.Where("history_id = ? AND upload = ? AND file_delete = ?",
-		newHistoryID, true, false).
+	if err := db.Where("history_id = ? AND upload = ? AND file_delete = ? AND is_temp_file = ?",
+		newHistoryID, true, false, false).
 		Order("start_time ASC").
 		Find(&newParts).Error; err != nil {
 		return fmt.Errorf("查询新分P失败: %w", err)
@@ -749,83 +751,7 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 	log.Printf("[回补弹幕版] 开始处理: history_id=%d, aid=%s, burned_part_id=%d",
 		history.ID, history.AvID, burnedPartID)
 
-	// 获取已投稿的所有分P（SessionID合并的情况）
-	var existingParts []models.RecordHistoryPart
-	if room.MergeBySession && history.SessionID != "" {
-		// 如果启用了SessionID合并，查询同SessionID的所有已上传分P
-		err := db.Joins("JOIN record_histories ON record_history_parts.history_id = record_histories.id").
-			Where("record_histories.session_id = ? AND record_history_parts.upload = ? AND record_history_parts.file_delete = ?",
-				history.SessionID, true, false).
-			Order("record_history_parts.start_time ASC").
-			Find(&existingParts).Error
-		if err != nil {
-			return fmt.Errorf("查询已投稿分P失败: %w", err)
-		}
-	} else {
-		// 否则只查询当前历史记录的分P
-		if err := db.Where("history_id = ? AND upload = ? AND file_delete = ?",
-			history.ID, true, false).
-			Order("start_time ASC").
-			Find(&existingParts).Error; err != nil {
-			return fmt.Errorf("查询已投稿分P失败: %w", err)
-		}
-	}
-
-	// 检查是否已经包含弹幕版分P
-	for _, part := range existingParts {
-		if part.ID == burnedPartID {
-			log.Printf("[回补弹幕版] 跳过：弹幕版已在投稿中 (part_id=%d)", burnedPartID)
-			return nil
-		}
-	}
-
-	// 构建更新后的分P列表（追加弹幕版）
-	var allVideoParts []bili.PublishVideoPartRequest
-
-	// 1. 添加已存在的分P
-	for i, part := range existingParts {
-		partTemplateData := map[string]interface{}{
-			"index":     i + 1,
-			"startTime": part.StartTime,
-			"areaName":  part.AreaName,
-			"uname":     history.Uname,
-			"title":     history.Title,
-			"roomId":    history.RoomID,
-			"fileName":  part.FileName,
-		}
-		partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
-
-		allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
-			Title:    partTitle,
-			Desc:     "",
-			Filename: part.FileName,
-			Cid:      int64(part.CID),
-		})
-	}
-
-	// 2. 追加弹幕版分P
-	partTemplateData := map[string]interface{}{
-		"index":     len(existingParts) + 1,
-		"startTime": burnedPart.StartTime,
-		"areaName":  burnedPart.AreaName,
-		"uname":     history.Uname,
-		"title":     history.Title,
-		"roomId":    history.RoomID,
-		"fileName":  burnedPart.FileName,
-	}
-	partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
-
-	allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
-		Title:    partTitle,
-		Desc:     "",
-		Filename: burnedPart.FileName,
-		Cid:      int64(burnedPart.CID),
-	})
-
-	log.Printf("[回补弹幕版] 更新后总分P数: %d (原%d + 弹幕版%d)",
-		len(allVideoParts), len(existingParts), 1)
-
-	// 获取原视频信息
+	// 先从B站API获取视频当前状态，以准确判断弹幕版是否已追加过
 	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
 	aidInt, err := strconv.ParseInt(history.AvID, 10, 64)
 	if err != nil {
@@ -836,6 +762,65 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 	if err != nil {
 		return fmt.Errorf("获取原视频信息失败: %w", err)
 	}
+
+	// 使用B站API返回的实际分P列表判断弹幕版CID是否已在视频中
+	// 不能依赖DB中 upload=true 的记录来判断，因为 upload=true 只表示文件已上传到CDN，不代表已提交到视频
+	for _, v := range archiveDetail.Videos {
+		if v.CID == burnedPart.CID {
+			log.Printf("[回补弹幕版] 跳过：弹幕版CID=%d 已在B站视频中 (part_id=%d)", burnedPart.CID, burnedPartID)
+			return nil
+		}
+	}
+
+	// 构建更新后的分P列表：以B站API返回的当前分P列表为基础，追加弹幕版
+	// 这样可以确保与B站实际状态严格一致，避免遗漏或重复
+	var allVideoParts []bili.PublishVideoPartRequest
+	for i, v := range archiveDetail.Videos {
+		// 尝试从DB查找对应记录以获取 PartTitle 模板所需元数据，找不到则使用B站返回的 part 名
+		partTitle := v.Part
+		if room.PartTitleTemplate != "" {
+			var dbPart models.RecordHistoryPart
+			if dbErr := db.Where("c_id = ? AND file_delete = ?", v.CID, false).First(&dbPart).Error; dbErr == nil {
+				partTemplateData := map[string]interface{}{
+					"index":     i + 1,
+					"startTime": dbPart.StartTime,
+					"areaName":  dbPart.AreaName,
+					"uname":     history.Uname,
+					"title":     history.Title,
+					"roomId":    history.RoomID,
+					"fileName":  dbPart.FileName,
+				}
+				partTitle = s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
+			}
+		}
+		allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
+			Title:    partTitle,
+			Desc:     "",
+			Filename: v.Filename,
+			Cid:      v.CID,
+		})
+	}
+
+	// 追加弹幕版分P
+	partTemplateData := map[string]interface{}{
+		"index":     len(allVideoParts) + 1,
+		"startTime": burnedPart.StartTime,
+		"areaName":  burnedPart.AreaName,
+		"uname":     history.Uname,
+		"title":     history.Title,
+		"roomId":    history.RoomID,
+		"fileName":  burnedPart.FileName,
+	}
+	partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
+	allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
+		Title:    partTitle,
+		Desc:     "",
+		Filename: burnedPart.FileName,
+		Cid:      int64(burnedPart.CID),
+	})
+
+	log.Printf("[回补弹幕版] 更新后总分P数: %d (B站现有%d + 弹幕版1)",
+		len(allVideoParts), len(archiveDetail.Videos))
 
 	// 使用原视频的信息进行编辑
 	title := archiveDetail.Archive.Title

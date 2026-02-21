@@ -22,7 +22,6 @@ func BasicAuth() gin.HandlerFunc {
 		// 每次请求都必须提供Basic Auth
 		username, password, ok := c.Request.BasicAuth()
 		if !ok {
-			log.Printf("[INFO] Basic认证失败 - 未提供认证信息, IP: %s, Path: %s", c.ClientIP(), c.Request.URL.Path)
 			c.Header("WWW-Authenticate", `Basic realm="Restricted"`)
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
@@ -30,7 +29,7 @@ func BasicAuth() gin.HandlerFunc {
 
 		// 验证用户名密码
 		if username != config.AppConfig.InitUsername || password != config.AppConfig.InitPassword {
-			log.Printf("[INFO] Basic认证失败 - 用户名或密码错误, IP: %s, Path: %s", c.ClientIP(), c.Request.URL.Path)
+			log.Printf("[WARN] Basic认证失败 - 密码错误, IP: %s, Path: %s", c.ClientIP(), c.Request.URL.Path)
 			c.Header("WWW-Authenticate", `Basic realm="Restricted"`)
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return

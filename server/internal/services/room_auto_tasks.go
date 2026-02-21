@@ -138,16 +138,16 @@ func (s *RoomAutoTaskService) processRoomTasks(room *models.RecordRoom) {
 						history.SessionID, false, room.RoomID, history.ID).Find(&pendingHistories).Error; err == nil {
 						
 						for _, pendingHistory := range pendingHistories {
-							// 检查是否有已上传的分P
-							var uploadedCount int64
-							var totalCount int64
-							var recordingCount int64
-							
-							db.Model(&models.RecordHistoryPart{}).Where(
-								"history_id = ? AND upload = ? AND file_delete = ?", 
-								pendingHistory.ID, true, false).Count(&uploadedCount)
-							db.Model(&models.RecordHistoryPart{}).Where(
-								"history_id = ?", pendingHistory.ID).Count(&totalCount)
+						// 检查是否有已上传的分P（仅统计原始非临时分P，与checkAndPublish保持一致）
+						var uploadedCount int64
+						var totalCount int64
+						var recordingCount int64
+						
+						db.Model(&models.RecordHistoryPart{}).Where(
+							"history_id = ? AND upload = ? AND file_delete = ? AND is_temp_file = ?", 
+							pendingHistory.ID, true, false, false).Count(&uploadedCount)
+						db.Model(&models.RecordHistoryPart{}).Where(
+							"history_id = ? AND is_temp_file = ?", pendingHistory.ID, false).Count(&totalCount)
 							db.Model(&models.RecordHistoryPart{}).Where(
 								"history_id = ? AND recording = ?", pendingHistory.ID, true).Count(&recordingCount)
 							

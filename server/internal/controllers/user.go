@@ -16,6 +16,7 @@ import (
 	"github.com/imroc/req/v3"
 	"github.com/yeqown/go-qrcode/v2"
 	"github.com/yeqown/go-qrcode/writer/standard"
+	"gorm.io/gorm/clause"
 )
 
 // nopCloser 包装 io.Writer 为 io.WriteCloser
@@ -242,44 +243,32 @@ func LoginCheck(c *gin.Context) {
 			return
 		}
 
-		// 保存用户到数据库
+		// 保存用户到数据库（使用 Upsert，防止两次扫码同时成功时 UNIQUE 冲突）
 		db := database.GetDB()
-		var user models.BiliBiliUser
 
 		now := time.Now()
 		expireTime := now.Add(30 * 24 * time.Hour)
 
-		result := db.Where("uid = ?", userInfo.Data.Mid).First(&user)
-		if result.Error != nil {
-			// 新用户
-			user = models.BiliBiliUser{
-				UID:          userInfo.Data.Mid,
-				Uname:        userInfo.Data.Uname,
-				Face:         userInfo.Data.Face,
-				Cookies:      cookieStr,
-				RefreshToken: pollResp.Data.RefreshToken,
-				Login:        true,
-				Level:        userInfo.Data.Level,
-				VipType:      userInfo.Data.VipType,
-				VipStatus:    userInfo.Data.VipStatus,
-				LoginTime:    &now,
-				ExpireTime:   &expireTime,
-			}
-		} else {
-			// 更新现有用户
-			user.Uname = userInfo.Data.Uname
-			user.Face = userInfo.Data.Face
-			user.Cookies = cookieStr
-			user.RefreshToken = pollResp.Data.RefreshToken
-			user.Login = true
-			user.Level = userInfo.Data.Level
-			user.VipType = userInfo.Data.VipType
-			user.VipStatus = userInfo.Data.VipStatus
-			user.LoginTime = &now
-			user.ExpireTime = &expireTime
+		user := models.BiliBiliUser{
+			UID:          userInfo.Data.Mid,
+			Uname:        userInfo.Data.Uname,
+			Face:         userInfo.Data.Face,
+			Cookies:      cookieStr,
+			RefreshToken: pollResp.Data.RefreshToken,
+			Login:        true,
+			Level:        userInfo.Data.Level,
+			VipType:      userInfo.Data.VipType,
+			VipStatus:    userInfo.Data.VipStatus,
+			LoginTime:    &now,
+			ExpireTime:   &expireTime,
 		}
 
-		if err := db.Save(&user).Error; err != nil {
+		upsertCols := []string{"uname", "face", "cookies", "refresh_token", "login",
+			"level", "vip_type", "vip_status", "login_time", "expire_time", "updated_at"}
+		if err := db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "uid"}},
+			DoUpdates: clause.AssignmentColumns(upsertCols),
+		}).Create(&user).Error; err != nil {
 			log.Printf("保存用户失败: %v", err)
 			c.JSON(http.StatusOK, gin.H{
 				"status":  "failed",
@@ -520,42 +509,32 @@ func LoginByCookie(c *gin.Context) {
 		return
 	}
 
-	// 保存用户到数据库
+	// 保存用户到数据库（使用 Upsert，防止并发登录时 UNIQUE 冲突）
 	db := database.GetDB()
-	var user models.BiliBiliUser
 
 	now := time.Now()
 	expireTime := now.Add(30 * 24 * time.Hour) // 30天过期
 
-	result := db.Where("uid = ?", userInfo.Data.Mid).First(&user)
-	if result.Error != nil {
-		// 新用户
-		user = models.BiliBiliUser{
-			UID:        userInfo.Data.Mid,
-			Uname:      userInfo.Data.Uname,
-			Face:       userInfo.Data.Face,
-			Cookies:    cookieStr,
-			Login:      true,
-			Level:      userInfo.Data.Level,
-			VipType:    userInfo.Data.VipType,
-			VipStatus:  userInfo.Data.VipStatus,
-			LoginTime:  &now,
-			ExpireTime: &expireTime,
-		}
-	} else {
-		// 更新现有用户
-		user.Uname = userInfo.Data.Uname
-		user.Face = userInfo.Data.Face
-		user.Cookies = cookieStr
-		user.Login = true
-		user.Level = userInfo.Data.Level
-		user.VipType = userInfo.Data.VipType
-		user.VipStatus = userInfo.Data.VipStatus
-		user.LoginTime = &now
-		user.ExpireTime = &expireTime
+	user := models.BiliBiliUser{
+		UID:        userInfo.Data.Mid,
+		Uname:      userInfo.Data.Uname,
+		Face:       userInfo.Data.Face,
+		Cookies:    cookieStr,
+		Login:      true,
+		Level:      userInfo.Data.Level,
+		VipType:    userInfo.Data.VipType,
+		VipStatus:  userInfo.Data.VipStatus,
+		LoginTime:  &now,
+		ExpireTime: &expireTime,
 	}
 
-	if err := db.Save(&user).Error; err != nil {
+	// 使用 Upsert，防止并发登录时 UNIQUE 冲突
+	upsertCols := []string{"uname", "face", "cookies", "login",
+		"level", "vip_type", "vip_status", "login_time", "expire_time", "updated_at"}
+	if err := db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "uid"}},
+		DoUpdates: clause.AssignmentColumns(upsertCols),
+	}).Create(&user).Error; err != nil {
 		log.Printf("保存用户失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "保存用户失败"})
 		return
