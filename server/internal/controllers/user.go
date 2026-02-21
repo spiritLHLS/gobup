@@ -174,11 +174,8 @@ func LoginCheck(c *gin.Context) {
 		return
 	}
 
-	// 如果已有状态，直接返回
+	// 如果已有状态，直接返回（success 状态不立即删除，让会话自然过期，避免并发请求误返回"会话不存在"）
 	if session.Status != "pending" {
-		if session.Status == "success" {
-			delete(loginSessions, sessionKey)
-		}
 		c.JSON(http.StatusOK, gin.H{
 			"status":  session.Status,
 			"message": session.Message,
@@ -264,7 +261,7 @@ func LoginCheck(c *gin.Context) {
 		}
 
 		upsertCols := []string{"uname", "face", "cookies", "refresh_token", "login",
-			"level", "vip_type", "vip_status", "login_time", "expire_time", "updated_at"}
+			"level", "vip_type", "vip_status", "login_time", "expire_time", "updated_at", "deleted_at"}
 		if err := db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "uid"}},
 			DoUpdates: clause.AssignmentColumns(upsertCols),
@@ -530,7 +527,7 @@ func LoginByCookie(c *gin.Context) {
 
 	// 使用 Upsert，防止并发登录时 UNIQUE 冲突
 	upsertCols := []string{"uname", "face", "cookies", "login",
-		"level", "vip_type", "vip_status", "login_time", "expire_time", "updated_at"}
+		"level", "vip_type", "vip_status", "login_time", "expire_time", "updated_at", "deleted_at"}
 	if err := db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "uid"}},
 		DoUpdates: clause.AssignmentColumns(upsertCols),

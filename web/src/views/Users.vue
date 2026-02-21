@@ -90,12 +90,10 @@
         <!-- 扫码登录 -->
         <el-tab-pane label="扫码登录" name="qrcode">
           <QrcodeLogin
-            :visible="loginMethod === 'qrcode' && loginDialogVisible"
             :qrcode-url="qrcodeUrl"
             :qrcode-loading="qrcodeLoading"
             :login-status="loginStatus"
             :qrcode-type="qrcodeType"
-            @cancel="cancelLogin"
             @regenerate="generateQRCode"
             @type-change="handleQRTypeChange"
           />
@@ -170,8 +168,16 @@ const {
   qrcodeType,
   generateQRCode,
   stopPolling,
-  cleanup
+  cleanup,
+  setOnSuccess
 } = useQrcodeLogin()
+
+// 扫码登录成功后自动关闭弹窗并刷新用户列表
+setOnSuccess(() => {
+  loginDialogVisible.value = false
+  cleanup()
+  fetchUsers()
+})
 
 const {
   cookieInput,

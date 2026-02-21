@@ -1,77 +1,58 @@
 <template>
-  <el-dialog
-    :model-value="visible"
-    title="添加B站用户"
-    width="500px"
-    :close-on-click-modal="false"
-    @update:model-value="$emit('update:visible', $event)"
-  >
-    <div class="qrcode-container-vertical">
-      <!-- 登录方式选择 -->
-      <div class="login-type-selector">
-        <el-radio-group v-model="localQrcodeType" @change="handleTypeChange" size="default">
-          <el-radio-button label="tv">TV端扫码</el-radio-button>
-          <el-radio-button label="web">Web端扫码</el-radio-button>
-        </el-radio-group>
-        <div class="type-description">
-          <template v-if="localQrcodeType === 'tv'">
-            <el-icon><Star /></el-icon>
-            <span>推荐：稳定性更好，适合长期使用</span>
-          </template>
-          <template v-else>
-            <el-icon><InfoFilled /></el-icon>
-            <span>兼容性更好，与网页端登录一致</span>
-          </template>
-        </div>
+  <div class="qrcode-container-vertical">
+    <!-- 登录方式选择 -->
+    <div class="login-type-selector">
+      <el-radio-group v-model="localQrcodeType" @change="handleTypeChange" size="default">
+        <el-radio-button label="tv">TV端扫码</el-radio-button>
+        <el-radio-button label="web">Web端扫码</el-radio-button>
+      </el-radio-group>
+      <div class="type-description">
+        <template v-if="localQrcodeType === 'tv'">
+          <el-icon><Star /></el-icon>
+          <span>推荐：稳定性更好，适合长期使用</span>
+        </template>
+        <template v-else>
+          <el-icon><InfoFilled /></el-icon>
+          <span>兼容性更好，与网页端登录一致</span>
+        </template>
       </div>
-      
-      <!-- 二维码显示区域 -->
-      <div class="qrcode-display-area">
-        <div v-if="qrcodeLoading" class="qrcode-loading">
-          <el-icon class="is-loading" :size="40"><Loading /></el-icon>
-          <p>生成二维码中...</p>
+    </div>
+    
+    <!-- 二维码显示区域 -->
+    <div class="qrcode-display-area">
+      <div v-if="qrcodeLoading" class="qrcode-loading">
+        <el-icon class="is-loading" :size="40"><Loading /></el-icon>
+        <p>生成二维码中...</p>
+      </div>
+      <div v-else class="qrcode-wrapper">
+        <div class="qrcode-image">
+          <img v-if="qrcodeUrl" 
+               :src="'data:image/png;base64,' + qrcodeUrl" 
+               alt="登录二维码"
+               @error="handleImageError"
+               @load="handleImageLoad" />
+          <div v-else class="qrcode-placeholder">
+            <el-icon :size="60"><Picture /></el-icon>
+            <span>等待二维码...</span>
+          </div>
         </div>
-        <div v-else class="qrcode-wrapper">
-          <div class="qrcode-image">
-            <img v-if="qrcodeUrl" 
-                 :src="'data:image/png;base64,' + qrcodeUrl" 
-                 alt="登录二维码"
-                 @error="handleImageError"
-                 @load="handleImageLoad" />
-            <div v-else class="qrcode-placeholder">
-              <el-icon :size="60"><Picture /></el-icon>
-              <span>等待二维码...</span>
-            </div>
-          </div>
-          <div class="qrcode-info">
-            <p class="scan-tip">
-              <el-icon><Iphone /></el-icon>
-              请使用哔哩哔哩APP扫描二维码登录
-            </p>
-            <el-divider />
-            <p class="login-status" :class="getStatusClass()">
-              <el-icon v-if="loginStatus.includes('成功')"><CircleCheck /></el-icon>
-              <el-icon v-else-if="loginStatus.includes('失败') || loginStatus.includes('过期')"><CircleClose /></el-icon>
-              <el-icon v-else-if="loginStatus.includes('已扫码')"><Loading class="is-loading" /></el-icon>
-              <el-icon v-else><Clock /></el-icon>
-              <span>{{ loginStatus }}</span>
-            </p>
-          </div>
+        <div class="qrcode-info">
+          <p class="scan-tip">
+            <el-icon><Iphone /></el-icon>
+            请使用哔哩哔哩APP扫描二维码登录
+          </p>
+          <el-divider />
+          <p class="login-status" :class="getStatusClass()">
+            <el-icon v-if="loginStatus.includes('成功')"><CircleCheck /></el-icon>
+            <el-icon v-else-if="loginStatus.includes('失败') || loginStatus.includes('过期')"><CircleClose /></el-icon>
+            <el-icon v-else-if="loginStatus.includes('已扫码')"><Loading class="is-loading" /></el-icon>
+            <el-icon v-else><Clock /></el-icon>
+            <span>{{ loginStatus }}</span>
+          </p>
         </div>
       </div>
     </div>
-
-    <template #footer>
-      <el-button @click="$emit('cancel')">取消</el-button>
-      <el-button 
-        v-if="qrcodeUrl" 
-        type="primary" 
-        @click="$emit('regenerate')"
-      >
-        重新生成
-      </el-button>
-    </template>
-  </el-dialog>
+  </div>
 </template>
 
 <script setup>
@@ -89,10 +70,6 @@ import {
 } from '@element-plus/icons-vue'
 
 const props = defineProps({
-  visible: {
-    type: Boolean,
-    required: true
-  },
   qrcodeUrl: {
     type: String,
     default: ''
@@ -111,7 +88,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:visible', 'cancel', 'regenerate', 'type-change'])
+const emit = defineEmits(['regenerate', 'type-change'])
 
 const localQrcodeType = ref(props.qrcodeType)
 
