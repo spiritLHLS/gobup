@@ -11,8 +11,15 @@ export function useQrcodeLogin() {
   let pollingTimer = null
   let stopped = false
   let onSuccessCallback = null
+  // 每次生成新二维码时递增，防止旧的 in-flight 响应干扰新一轮轮询
+  let pollGeneration = 0
 
   const generateQRCode = async () => {
+    // 先停止旧轮询，再开始新的生命周期
+    stopPolling()
+    pollGeneration++
+    const myGeneration = pollGeneration
+
     qrcodeLoading.value = true
     loginStatus.value = '等待扫码...'
     qrcodeUrl.value = ''
@@ -20,6 +27,9 @@ export function useQrcodeLogin() {
 
     try {
       const data = await userAPI.login(qrcodeType.value)
+
+      // 若本次请求已被更新的一代取代，直接丢弃结果
+      if (myGeneration !== pollGeneration) return
 
       if (data.error) {
         ElMessage.error(data.error)
@@ -54,10 +64,14 @@ export function useQrcodeLogin() {
 
   const doPoll = async () => {
     if (stopped) return
+    // 记录本次轮询归属的二维码代数，防止旧响应污染新轮询
+    const myGeneration = pollGeneration
+    const myKey = authKey
     try {
-      const data = await userAPI.loginCheck(authKey)
+      const data = await userAPI.loginCheck(myKey)
 
-      if (stopped) return // 请求在途中已经停止
+      // 若本次响应已过时（用户已重新生成二维码），直接丢弃
+      if (stopped || myGeneration !== pollGeneration) return
 
       if (data.status === 'success') {
         loginStatus.value = '登录成功！'
@@ -80,12 +94,17 @@ export function useQrcodeLogin() {
       }
     } catch (error) {
       console.error('查询登录状态失败:', error)
-      if (!stopped) scheduleNextPoll()
+      if (!stopped && myGeneration === pollGeneration) scheduleNextPoll()
     }
   }
 
   const startPolling = () => {
-    stopPolling()
+    // 先清除已有定时器，但不设置 stopped=true，否则 scheduleNextPoll 会立即 return
+    if (pollingTimer) {
+      clearTimeout(pollingTimer)
+      pollingTimer = null
+    }
+    stopped = false
     scheduleNextPoll()
   }
 

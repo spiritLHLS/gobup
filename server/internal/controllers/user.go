@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +35,14 @@ func min(a, b int) int {
 	return b
 }
 
+// max 辅助函数
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // LoginSession 登录会话
 type LoginSession struct {
 	AuthCode   string
@@ -44,9 +53,12 @@ type LoginSession struct {
 	LoginType  string // web or tv
 }
 
-var loginSessions = make(map[string]*LoginSession)
+var (
+	loginSessions   = make(map[string]*LoginSession)
+	loginSessionsMu sync.RWMutex
+)
 
-const sessionExpireTime = 3 * 60 // 3分钟过期（参考Python项目的180秒轮询时长）
+const sessionExpireTime = 3 * 60 // 3分钟过期
 
 // ListBiliUsers 获取B站用户列表（不包括管理员）
 func ListBiliUsers(c *gin.Context) {
@@ -120,8 +132,9 @@ func LoginUser(c *gin.Context) {
 	log.Printf("[INFO] Base64编码长度: %d", len(imageBase64))
 	log.Printf("[DEBUG] Base64前缀: %s", imageBase64[:min(50, len(imageBase64))])
 
-	// 使用图片的最后100个字符作为session key
-	sessionKey := imageBase64[len(imageBase64)-100:]
+	// 使用图片的最后100个字符作为session key，并转为URL安全格式（替换掉+/=避免URL编码问题）
+	rawKey := imageBase64[len(imageBase64)-100:]
+	sessionKey := strings.NewReplacer("+", "-", "/", "_", "=", "").Replace(rawKey)
 
 	// 创建登录会话
 	session := &LoginSession{
@@ -132,7 +145,9 @@ func LoginUser(c *gin.Context) {
 		Message:    "等待扫码",
 		LoginType:  loginType, // 正确保存登录类型
 	}
+	loginSessionsMu.Lock()
 	loginSessions[sessionKey] = session
+	loginSessionsMu.Unlock()
 	log.Printf("[SUCCESS] 登录会话已创建 - sessionKey: %s, type: %s, authCode: %s", sessionKey, loginType, qrResp.Data.AuthCode)
 
 	response := gin.H{
@@ -147,7 +162,9 @@ func LoginUser(c *gin.Context) {
 // LoginCheck 检查登录状态（轮询）
 func LoginCheck(c *gin.Context) {
 	sessionKey := c.Query("key")
+	log.Printf("[CHECK] 收到登录检查请求 - keyLength: %d, key后缀: %s", len(sessionKey), sessionKey[max(0, len(sessionKey)-20):])
 	if sessionKey == "" {
+		log.Printf("[CHECK] 缺少key参数")
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "failed",
 			"message": "缺少key参数",
@@ -155,8 +172,13 @@ func LoginCheck(c *gin.Context) {
 		return
 	}
 
+	loginSessionsMu.RLock()
 	session, exists := loginSessions[sessionKey]
+	sessionCount := len(loginSessions)
+	loginSessionsMu.RUnlock()
+
 	if !exists {
+		log.Printf("[CHECK] 会话不存在 - key后缀: %s, 当前会话数: %d", sessionKey[max(0, len(sessionKey)-20):], sessionCount)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "failed",
 			"message": "会话不存在或已过期",
@@ -166,7 +188,10 @@ func LoginCheck(c *gin.Context) {
 
 	// 检查会话是否过期
 	if time.Now().Unix()-session.CreateTime > sessionExpireTime {
+		log.Printf("[CHECK] 会话已过期 - type: %s, authCode: %s", session.LoginType, session.AuthCode)
+		loginSessionsMu.Lock()
 		delete(loginSessions, sessionKey)
+		loginSessionsMu.Unlock()
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "expired",
 			"message": "二维码已过期，请刷新",
@@ -176,6 +201,7 @@ func LoginCheck(c *gin.Context) {
 
 	// 如果已有状态，直接返回（success 状态不立即删除，让会话自然过期，避免并发请求误返回"会话不存在"）
 	if session.Status != "pending" {
+		log.Printf("[CHECK] 返回已有状态 - status: %s, type: %s", session.Status, session.LoginType)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  session.Status,
 			"message": session.Message,
@@ -315,7 +341,9 @@ func LoginCheck(c *gin.Context) {
 func LoginCancel(c *gin.Context) {
 	sessionKey := c.Query("key")
 	if sessionKey != "" {
+		loginSessionsMu.Lock()
 		delete(loginSessions, sessionKey)
+		loginSessionsMu.Unlock()
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "cancelled",
