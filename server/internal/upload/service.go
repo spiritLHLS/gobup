@@ -148,6 +148,169 @@ func (s *Service) ResetStuckUploadingParts() {
 	}
 }
 
+// RequeueInterruptedBurns 启动恢复：检测 flv 已上传但弹幕烧录被中断（容器重启导致 ffmpeg 被 kill）
+// 场景：flv upload=true，但没有对应的 danmaku_burn 临时分P 记录 → ffmpeg 从未完成
+// 对每个这样的分P重新异步触发烧录并将烧录版入队
+func (s *Service) RequeueInterruptedBurns() {
+	db := database.GetDB()
+
+	// 只处理启用了弹幕烧录的房间
+	var rooms []models.RecordRoom
+	if err := db.Where("enable_danmaku_burn = ? AND upload = ?", true, true).Find(&rooms).Error; err != nil {
+		log.Printf("[启动恢复-烧录] 查询房间失败: %v", err)
+		return
+	}
+
+	for _, room := range rooms {
+		if room.UploadUserID == 0 {
+			continue
+		}
+
+		// 找到该房间所有已上传的原始分P（非临时文件）
+		var uploadedParts []models.RecordHistoryPart
+		if err := db.Where(
+			"room_id = ? AND upload = ? AND is_temp_file = ? AND recording = ?",
+			room.RoomID, true, false, false,
+		).Find(&uploadedParts).Error; err != nil {
+			log.Printf("[启动恢复-烧录] 查询房间 %s 的上传分P失败: %v", room.RoomID, err)
+			continue
+		}
+
+		for _, part := range uploadedParts {
+			// 检查是否已存在对应的烧录 Part 记录（任意状态均算，包括上传失败待重试）
+			var burnedCount int64
+			db.Model(&models.RecordHistoryPart{}).Where(
+				"source_part_id = ? AND is_temp_file = ? AND temp_file_type = ?",
+				part.ID, true, "danmaku_burn",
+			).Count(&burnedCount)
+			if burnedCount > 0 {
+				continue // 烧录记录已存在，由 RequeueStuckTempParts 负责重传
+			}
+
+			// 检查对应历史记录是否已投稿（已投稿则通过 UpdatePublishedVideoWithBurnedParts 回补）
+			var history models.RecordHistory
+			if err := db.First(&history, part.HistoryID).Error; err != nil {
+				continue
+			}
+
+			log.Printf("[启动恢复-烧录] 发现未烧录的已上传分P，重新触发烧录: part_id=%d, file=%s", part.ID, part.FilePath)
+
+			// 异步烧录，避免阻塞启动流程
+			go func(p models.RecordHistoryPart, h models.RecordHistory, r models.RecordRoom) {
+				// 在重新运行 ffmpeg 之前，先检查磁盘上是否已有符合命名规则的弹幕烧录文件
+				// 场景: ffmpeg 写完了文件，但 db.Create(burnedPart) 还没来得及执行容器就被重启
+				baseNoExt := strings.TrimSuffix(filepath.Base(p.FilePath), filepath.Ext(p.FilePath))
+				globPattern := filepath.Join(filepath.Dir(p.FilePath), baseNoExt+"_danmaku_*.mp4")
+				if matches, _ := filepath.Glob(globPattern); len(matches) > 0 {
+					existingPath := matches[0] // 取第一个匹配
+					fInfo, statErr := os.Stat(existingPath)
+					if statErr == nil {
+						log.Printf("[启动恢复-烧录] 磁盘上已有弹幕烧录文件，重新入库代替重新编码: part_id=%d, file=%s", p.ID, existingPath)
+						burnedPart := &models.RecordHistoryPart{
+							HistoryID:    p.HistoryID,
+							RoomID:       p.RoomID,
+							SessionID:    p.SessionID,
+							Title:        p.Title + " (弹幕版)",
+							LiveTitle:    p.LiveTitle,
+							AreaName:     p.AreaName,
+							FilePath:     existingPath,
+							FileName:     filepath.Base(existingPath),
+							FileSize:     fInfo.Size(),
+							Duration:     p.Duration,
+							StartTime:    p.StartTime,
+							EndTime:      p.EndTime,
+							Recording:    false,
+							Upload:       false,
+							Uploading:    false,
+							IsTempFile:   true,
+							SourcePartID: p.ID,
+							TempFileType: "danmaku_burn",
+						}
+						if err := database.GetDB().Create(burnedPart).Error; err != nil {
+							log.Printf("[启动恢复-烧录] 入库孤儿烧录文件失败: %v", err)
+						} else if err := s.UploadPart(burnedPart, &h, &r); err != nil {
+							log.Printf("[启动恢复-烧录] 孤儿烧录版入队失败: part_id=%d, err=%v", burnedPart.ID, err)
+						}
+						return // 不重新运行 ffmpeg
+					}
+				}
+
+				// 磁盘上没有现成的弹幕烧录文件，重新运行 ffmpeg
+				burnService := services.NewDanmakuBurnService()
+				burnedPath, err := burnService.BurnDanmakuToVideo(&p, &h, &r)
+				if err != nil {
+					log.Printf("[启动恢复-烧录] 烧录失败: part_id=%d, err=%v", p.ID, err)
+					return
+				}
+				log.Printf("[启动恢复-烧录] 烧录完成，准备入队: part_id=%d, burned=%s", p.ID, burnedPath)
+
+				// 查询新生成的烧录版 Part 并入队
+				var burnedPart models.RecordHistoryPart
+				if err := database.GetDB().Where("file_path = ?", burnedPath).First(&burnedPart).Error; err != nil {
+					log.Printf("[启动恢复-烧录] 查询烧录版 Part 失败: %v", err)
+					return
+				}
+				if err := s.UploadPart(&burnedPart, &h, &r); err != nil {
+					log.Printf("[启动恢复-烧录] 烧录版入队失败: part_id=%d, err=%v", burnedPart.ID, err)
+				}
+			}(part, history, room)
+		}
+	}
+}
+
+// RecoverUnpublishedHistories 启动恢复：检测所有分P已上传完毕但历史记录尚未投稿的情况
+// 场景：checkAndPublish 被容器重启打断，或烧录版上传完成后 checkAndPublish 从未触发
+func (s *Service) RecoverUnpublishedHistories() {
+	db := database.GetDB()
+
+	// 只处理启用了自动投稿的房间
+	var rooms []models.RecordRoom
+	if err := db.Where("upload = ? AND auto_publish = ?", true, true).Find(&rooms).Error; err != nil {
+		log.Printf("[启动恢复-投稿] 查询房间失败: %v", err)
+		return
+	}
+
+	for _, room := range rooms {
+		if room.UploadUserID == 0 {
+			continue
+		}
+
+		// 查找该房间未投稿、未录制/直播的历史记录
+		var histories []models.RecordHistory
+		if err := db.Where(
+			"room_id = ? AND publish = ? AND recording = ? AND streaming = ?",
+			room.RoomID, false, false, false,
+		).Find(&histories).Error; err != nil {
+			log.Printf("[启动恢复-投稿] 查询房间 %s 的历史记录失败: %v", room.RoomID, err)
+			continue
+		}
+
+		for _, hist := range histories {
+			// 检查是否有已上传的原始分P
+			var uploadedCount, totalCount int64
+			db.Model(&models.RecordHistoryPart{}).Where(
+				"history_id = ? AND is_temp_file = ? AND NOT (file_delete = true AND upload = false)",
+				hist.ID, false,
+			).Count(&totalCount)
+			db.Model(&models.RecordHistoryPart{}).Where(
+				"history_id = ? AND upload = ? AND is_temp_file = ?",
+				hist.ID, true, false,
+			).Count(&uploadedCount)
+
+			if totalCount == 0 || uploadedCount < totalCount {
+				continue // 还有未上传的原始分P，不尝试恢复投稿
+			}
+
+			log.Printf("[启动恢复-投稿] 发现已全部上传但未投稿的历史记录，重新检查: history_id=%d, 总分P=%d, 已上传=%d",
+				hist.ID, totalCount, uploadedCount)
+			// 复用 checkAndPublish 逻辑（含10分钟冷却检查），在单独 goroutine 中执行
+			go func(h models.RecordHistory, r models.RecordRoom) {
+				s.checkAndPublish(&h, &r)
+			}(hist, room)
+		}
+	}
+}
+
 // uploadPartInternal 实际执行上传分P（内部方法，由队列调用）
 func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) error {
 	db := database.GetDB()
@@ -436,8 +599,10 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		s.wxPusher.NotifyUploadSuccess(room.UploadUserID, room.Wxuid, history.Uname, part.FileName)
 	}
 
-	// 回补检测：如果是弹幕版分P上传完成且房间启用了自动更新投稿，检查是否需要更新已投稿的视频
-	if part.IsTempFile && part.TempFileType == "danmaku_burn" && part.Upload && room.AutoUpdatePublished {
+	// 回补检测：如果是弹幕版分P上传完成，检查是否需要更新已投稿的视频
+	// EnableDanmakuBurn=true 时始终尝试回补（弹幕版是该功能的标准产物）
+	// AutoUpdatePublished 作为兜底开关保留，任一为真即触发
+	if part.IsTempFile && part.TempFileType == "danmaku_burn" && part.Upload && (room.EnableDanmakuBurn || room.AutoUpdatePublished) {
 		log.Printf("[回补检测] 弹幕版上传完成，检查是否需要更新投稿: part_id=%d", part.ID)
 		if err := s.UpdatePublishedVideoWithBurnedParts(part.ID); err != nil {
 			log.Printf("[回补检测] 回补更新失败: %v", err)
@@ -489,6 +654,20 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 	// 4. 历史记录未投稿（!history.Publish）
 	// 5. 历史记录未标记为正在录制/直播（!history.Recording && !history.Streaming）
 	// 6. 房间启用了自动投稿（room.AutoPublish）
+
+	// 如果启用了弹幕烧录，需等待烧录版分P也上传完才一起投稿，确保弹幕版也包含在提交中
+	if room.EnableDanmakuBurn {
+		var pendingBurnedParts int64
+		db.Model(&models.RecordHistoryPart{}).Where(
+			"history_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ? AND file_delete = ?",
+			history.ID, true, "danmaku_burn", false, false,
+		).Count(&pendingBurnedParts)
+		if pendingBurnedParts > 0 {
+			log.Printf("[自动投稿] 等待 %d 个弹幕烧录版分P上传完成后再投稿: history_id=%d", pendingBurnedParts, history.ID)
+			return
+		}
+	}
+
 	if totalCount > 0 && totalCount == uploadedCount && recordingCount == 0 &&
 		!history.Publish && !history.Recording && !history.Streaming &&
 		room.AutoPublish {

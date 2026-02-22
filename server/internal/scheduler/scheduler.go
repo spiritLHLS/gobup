@@ -33,9 +33,15 @@ func InitScheduler() {
 		// 1. 先重置上次崩溃时卡在 uploading=true 的分P，避免永远不被重试
 		log.Println("[启动恢复] 重置崩溃时卡在 uploading 状态的分P")
 		uploadService.ResetStuckUploadingParts()
-		// 2. 重新入队滞留但文件仍存在的临时分P
+		// 2. 重新入队滞留但文件仍存在的临时分P（Stage D/E：烧录完成但未入队）
 		log.Println("[启动恢复] 检查并重新入队滞留的临时分P")
 		uploadService.RequeueStuckTempParts()
+		// 3. 对 flv 已上传但烧录被中断的分P重新触发烧录（Stage C：ffmpeg 被 kill）
+		log.Println("[启动恢复] 检查并重新触发被中断的弹幕烧录")
+		uploadService.RequeueInterruptedBurns()
+		// 4. 对全部分P已上传但投稿被中断的历史记录重新触发 checkAndPublish（Stage F）
+		log.Println("[启动恢复] 检查并恢复被中断的自动投稿")
+		uploadService.RecoverUnpublishedHistories()
 	}()
 
 	// 视频同步任务 - 每10分钟执行一次

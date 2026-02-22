@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -17,6 +18,15 @@ import (
 
 // ErrFileAlreadyExists 文件已存在错误
 var ErrFileAlreadyExists = errors.New("文件已存在于数据库中")
+
+// danmakuBurnOutputRe 匹配弹幕烧录输出文件的正则: *_danmaku_YYYYMMDD_HHMMSS.mp4
+// 这类文件是由 DanmakuBurnService.generateOutputPath 生成的临时文件，不应被当作新录制导入
+var danmakuBurnOutputRe = regexp.MustCompile(`_danmaku_\d{8}_\d{6}\.mp4$`)
+
+// isDanmakuBurnOutput 判断文件是否为弹幕烧录的临时输出文件
+func isDanmakuBurnOutput(filename string) bool {
+	return danmakuBurnOutputRe.MatchString(filename)
+}
 
 // ErrScanAlreadyRunning 扫描已在运行错误
 var ErrScanAlreadyRunning = errors.New("文件扫描任务已在运行中，请稍后再试")
@@ -229,6 +239,12 @@ func (s *FileScanService) scanDirectory(dirPath string, config *ScanConfig, resu
 			return nil
 		}
 
+		// 跳过弹幕烧录产生的临时文件（*_danmaku_YYYYMMDD_HHMMSS.mp4）
+		// 这类文件已直接以 is_temp_file=true 入库，不应被当作独立录制重新导入
+		if isDanmakuBurnOutput(filepath.Base(path)) {
+			return nil
+		}
+
 		result.TotalFiles++
 
 		// 检查文件大小
@@ -380,6 +396,10 @@ func (s *FileScanService) PreviewFiles(config *ScanConfig) ([]*FilePreviewInfo, 
 
 			ext := strings.ToLower(filepath.Ext(path))
 			if !s.isVideoFile(ext, config.VideoExtensions) {
+				return nil
+			}
+			// 跳过弹幕烧录产生的临时文件（*_danmaku_YYYYMMDD_HHMMSS.mp4）
+			if isDanmakuBurnOutput(filepath.Base(path)) {
 				return nil
 			}
 			if info.Size() < config.MinFileSize {

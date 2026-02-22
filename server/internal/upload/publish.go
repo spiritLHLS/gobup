@@ -101,14 +101,23 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("用户Cookie已失效，请重新登录")
 	}
 
-	// 获取所有已上传的原始分P（必须按start_time ASC排序，确保投稿时分P顺序正确）
-	// 排除临时烧录/切分文件（is_temp_file=true），避免原始+烧录版重复出现在B站视频中
+	// 获取所有已上传的分P（必须按start_time ASC排序，确保投稿时分P顺序正确）
+	// 如果启用了弹幕烧录，同时包含弹幕版（temp_file_type='danmaku_burn'）作为独立分P一并投稿
+	// 其他临时文件类型（切分等）仍然排除
 	// 注意：本地文件被删除（file_delete=true）不影响投稿，CID/FileName 仍保存在DB中
 	var parts []models.RecordHistoryPart
-	if err := db.Where("history_id = ? AND upload = ? AND is_temp_file = ?", historyID, true, false).
-		Order("start_time ASC").
-		Find(&parts).Error; err != nil {
-		return fmt.Errorf("查询分P失败: %w", err)
+	var partsErr error
+	if room.EnableDanmakuBurn {
+		partsErr = db.Where(
+			"history_id = ? AND upload = ? AND (is_temp_file = ? OR temp_file_type = ?)",
+			historyID, true, false, "danmaku_burn",
+		).Order("start_time ASC").Find(&parts).Error
+	} else {
+		partsErr = db.Where("history_id = ? AND upload = ? AND is_temp_file = ?", historyID, true, false).
+			Order("start_time ASC").Find(&parts).Error
+	}
+	if partsErr != nil {
+		return fmt.Errorf("查询分P失败: %w", partsErr)
 	}
 
 	if len(parts) == 0 {
