@@ -69,7 +69,11 @@ func InitScheduler() {
 
 		result, err := scanService.ScanAndImport(config)
 		if err != nil {
-			log.Printf("文件扫描任务失败: %v", err)
+			if err == services.ErrScanAlreadyRunning {
+				log.Println("[文件扫描] 上次扫描尚未完成，本次跳过")
+			} else {
+				log.Printf("文件扫描任务失败: %v", err)
+			}
 			return
 		}
 

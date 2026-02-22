@@ -71,14 +71,10 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 	log.Printf("[弹幕烧录] 弹幕文件: %s", xmlPath)
 
 	// 1. 将XML转换为ASS字幕文件
-	// 优先使用 DanmakuFactory，如果不可用则使用内置转换
+	// 严格只使用 DanmakuFactory 二进制，不使用任何自实现的转换逻辑
 	assPath, err := s.convertXMLToASSWithFactory(xmlPath, history, room)
 	if err != nil {
-		log.Printf("[弹幕烧录] DanmakuFactory 转换失败，尝试使用内置转换: %v", err)
-		assPath, err = s.convertXMLToASS(xmlPath, history, room)
-		if err != nil {
-			return "", fmt.Errorf("转换弹幕为ASS失败: %w", err)
-		}
+		return "", fmt.Errorf("DanmakuFactory 转换弹幕为ASS失败（仅支持DanmakuFactory，不启用内置转换）: %w", err)
 	}
 	defer os.Remove(assPath) // 临时文件，用完删除
 
@@ -165,8 +161,8 @@ func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history 
 	args := []string{
 		"-i", xmlPath,
 		"-o", assPath,
-		"-r", "1920x1080",      // 分辨率
-		"-d", "-1",             // 弹幕密度：-1=不重叠
+		"-r", "1920x1080", // 分辨率
+		"-d", "-1", // 弹幕密度：-1=不重叠
 		"--scrollarea", "0.75", // 滚动弹幕显示区域：75%
 		"--displayarea", "0.8", // 全部弹幕显示区域：80%
 	}
@@ -197,206 +193,6 @@ func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history 
 
 	log.Printf("[弹幕烧录] DanmakuFactory 转换成功: %s", assPath)
 	return assPath, nil
-}
-
-// convertXMLToASS 将XML弹幕转换为ASS字幕格式（内置实现，作为后备方案）
-func (s *DanmakuBurnService) convertXMLToASS(xmlPath string, history *models.RecordHistory, room *models.RecordRoom) (string, error) {
-	db := database.GetDB()
-
-	// 从数据库读取弹幕（已去重和过滤）
-	var danmakus []models.LiveMsg
-	if err := db.Where("session_id = ?", history.SessionID).
-		Order("timestamp ASC").
-		Find(&danmakus).Error; err != nil {
-		return "", fmt.Errorf("查询弹幕失败: %w", err)
-	}
-
-	if len(danmakus) == 0 {
-		log.Printf("[弹幕烧录] 数据库中没有弹幕数据（session_id=%s），尝试先解析XML文件", history.SessionID)
-		
-		// 如果数据库中没有弹幕，尝试解析XML文件
-		parser := NewDanmakuXMLParser()
-		var roomPtr *models.RecordRoom
-		if room.ID > 0 {
-			roomPtr = room
-		}
-		
-		// 解析XML文件到数据库
-		count, err := parser.ParseDanmakuFile(xmlPath, history.SessionID, roomPtr)
-		if err != nil {
-			return "", fmt.Errorf("解析弹幕失败: %w", err)
-		}
-		
-		log.Printf("[弹幕烧录] XML解析完成，导入了 %d 条弹幕", count)
-		
-		// 重新查询弹幕
-		if err := db.Where("session_id = ?", history.SessionID).
-			Order("timestamp ASC").
-			Find(&danmakus).Error; err != nil {
-			return "", fmt.Errorf("重新查询弹幕失败: %w", err)
-		}
-		
-		if len(danmakus) == 0 {
-			return "", fmt.Errorf("没有弹幕数据可供烧录")
-		}
-	}
-
-	log.Printf("[弹幕烧录] 读取到 %d 条弹幕", len(danmakus))
-
-	// 生成ASS文件路径
-	assPath := strings.TrimSuffix(xmlPath, filepath.Ext(xmlPath)) + "_temp.ass"
-
-	// 创建ASS文件
-	f, err := os.Create(assPath)
-	if err != nil {
-		return "", fmt.Errorf("创建ASS文件失败: %w", err)
-	}
-	defer f.Close()
-
-	// 写入ASS头部
-	style := s.getASSStyle(room.DanmakuBurnStyle)
-	f.WriteString(s.getASSHeader(style))
-
-	// 写入弹幕事件
-	for _, dm := range danmakus {
-		event := s.convertDanmakuToASSEvent(dm)
-		f.WriteString(event)
-	}
-
-	return assPath, nil
-}
-
-// getASSHeader 生成ASS文件头部
-func (s *DanmakuBurnService) getASSHeader(style string) string {
-	return fmt.Sprintf(`[Script Info]
-Title: Bilibili Danmaku
-ScriptType: v4.00+
-WrapStyle: 2
-PlayResX: 1920
-PlayResY: 1080
-ScaledBorderAndShadow: yes
-YCbCr Matrix: TV.709
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-%s
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-`, style)
-}
-
-// getASSStyle 根据配置获取ASS样式
-// 固定参数（按图片设置）：不透明度79%、字号100%（38px）、显示区域50%
-func (s *DanmakuBurnService) getASSStyle(styleName string) string {
-	// 不透明度79% = 0.79 * 255 = 201 = C9（十六进制）
-	// BackColour的alpha部分设置为79%的不透明度
-	// 注意：字体使用容器内安装的 WenQuanYi Zen Hei（通过 font-wqy-zenhei 安装）
-	// 若通过环境变量 DANMAKU_FONT_NAME 自定义字体，仍以 burnWithFFmpeg 中的 force_style 为准
-	switch styleName {
-	case "compact":
-		// 紧凑样式：小字号（字号100%=32px）
-		return "Style: Danmaku,WenQuanYi Zen Hei,32,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,1.5,0,2,10,10,10,1"
-	case "large":
-		// 大字号样式（字号100%=48px）
-		return "Style: Danmaku,WenQuanYi Zen Hei,48,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1"
-	default:
-		// 默认样式（字号100%=38px，不透明度79%）
-		return "Style: Danmaku,WenQuanYi Zen Hei,38,&HC9FFFFFF,&HC9FFFFFF,&H00000000,&HC9000000,0,0,0,0,100,100,0,0,1,1.8,0,2,10,10,10,1"
-	}
-}
-
-// convertDanmakuToASSEvent 将弹幕转换为ASS事件
-// 按图片设置：显示区域50%、速度适中、启用滚动/固定/彩色，不启用高级弹幕
-func (s *DanmakuBurnService) convertDanmakuToASSEvent(dm models.LiveMsg) string {
-	// 过滤高级弹幕（mode 7, 8, 9等特殊弹幕）
-	if dm.Mode >= 7 {
-		return "" // 不启用高级弹幕
-	}
-
-	// 时间戳转换为ASS时间格式 (时:分:秒.毫秒)
-	startTime := s.formatASSTime(dm.Timestamp)
-	// 速度适中：滚动弹幕显示10秒，固定弹幕显示5秒
-	duration := int64(5000)
-	if dm.Mode == 1 || dm.Mode == 6 {
-		duration = 10000 // 滚动弹幕10秒（适中速度）
-	}
-	endTime := s.formatASSTime(dm.Timestamp + duration)
-
-	// 转义特殊字符
-	text := s.escapeASSText(dm.Message)
-
-	// 显示区域：50%，即只在屏幕上半部分显示（540px以内）
-	// 1080p分辨率，50%显示区域 = 0~540px
-	maxY := 540 // 显示区域50%
-	minY := 50  // 上边距
-
-	// 根据弹幕模式设置效果
-	effect := ""
-	alignment := "2" // 底部居中
-	yPos := minY + (maxY-minY)/2
-
-	switch dm.Mode {
-	case 1, 6: // 滚动弹幕（1=普通滚动，6=彩色滚动）
-		// 从右向左滚动，速度适中（10秒横跨屏幕）
-		yPos = minY + int(dm.Timestamp%int64(maxY-minY))
-		effect = fmt.Sprintf("\\move(2000,%d,-200,%d)", yPos, yPos)
-		alignment = "7" // 左上
-	case 4: // 底部固定弹幕
-		yPos = maxY - 50 // 底部位置但在显示区域内
-		alignment = "2" // 底部居中
-	case 5: // 顶部固定弹幕
-		yPos = minY + 30
-		alignment = "8" // 顶部居中
-	default:
-		// 其他模式当作滚动处理
-		yPos = minY + int(dm.Timestamp%int64(maxY-minY))
-		effect = fmt.Sprintf("\\move(2000,%d,-200,%d)", yPos, yPos)
-		alignment = "7"
-	}
-
-	// 颜色转换（支持彩色弹幕）
-	color := s.convertColorToASS(dm.Color)
-
-	// 构建ASS事件行
-	// 注意：这里手动设置Y坐标以实现显示区域限制
-	if effect != "" {
-		return fmt.Sprintf("Dialogue: 0,%s,%s,Danmaku,,0,0,0,%s,{\\c%s}%s\n",
-			startTime, endTime, effect, color, text)
-	} else {
-		return fmt.Sprintf("Dialogue: 0,%s,%s,Danmaku,,0,0,0,,{\\c%s\\pos(960,%d)\\an%s}%s\n",
-			startTime, endTime, color, yPos, alignment, text)
-	}
-}
-
-// formatASSTime 格式化ASS时间格式
-func (s *DanmakuBurnService) formatASSTime(timestampMs int64) string {
-	totalSeconds := timestampMs / 1000
-	hours := totalSeconds / 3600
-	minutes := (totalSeconds % 3600) / 60
-	seconds := totalSeconds % 60
-	centiseconds := (timestampMs % 1000) / 10
-
-	return fmt.Sprintf("%d:%02d:%02d.%02d", hours, minutes, seconds, centiseconds)
-}
-
-// escapeASSText 转义ASS文本中的特殊字符
-func (s *DanmakuBurnService) escapeASSText(text string) string {
-	text = strings.ReplaceAll(text, "\\", "\\\\")
-	text = strings.ReplaceAll(text, "{", "\\{")
-	text = strings.ReplaceAll(text, "}", "\\}")
-	text = strings.ReplaceAll(text, "\n", "\\N")
-	return text
-}
-
-// convertColorToASS 将十进制颜色转换为ASS颜色格式
-func (s *DanmakuBurnService) convertColorToASS(color int) string {
-	// B站颜色是RGB格式，ASS需要BGR格式
-	r := (color >> 16) & 0xFF
-	g := (color >> 8) & 0xFF
-	b := color & 0xFF
-
-	return fmt.Sprintf("&H%02X%02X%02X&", b, g, r)
 }
 
 // burnWithFFmpeg 使用ffmpeg烧录字幕

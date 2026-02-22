@@ -21,11 +21,12 @@ const (
 )
 
 type Service struct {
-	uploadingParts  sync.Map
-	wxPusher        *services.WxPusherService
-	templateSvc     *services.TemplateService
-	progressTracker *ProgressTracker
-	queueManager    *QueueManager
+	uploadingParts      sync.Map // partID -> true，防止同一分P并发上传
+	publishingHistories sync.Map // historyID -> true，防止同一历史记录并发投稿
+	wxPusher            *services.WxPusherService
+	templateSvc         *services.TemplateService
+	progressTracker     *ProgressTracker
+	queueManager        *QueueManager
 }
 
 func NewService() *Service {
@@ -185,16 +186,27 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		db.Save(part)
 	}
 
-	// 防止重复上传
+	// 防止重复上传（内存级锁，防止同一进程内并发）
 	if _, loaded := s.uploadingParts.LoadOrStore(part.ID, true); loaded {
 		return fmt.Errorf("分P %d 正在上传中", part.ID)
 	}
 	defer s.uploadingParts.Delete(part.ID)
 
-	// 检查是否已经上传过（防止重复上传）
-	if part.Upload && part.CID > 0 {
-		log.Printf("[Upload] 分P %d 已经上传过，跳过: CID=%d, FileName=%s", part.ID, part.CID, part.FileName)
-		return nil
+	// 从数据库重新读取最新状态，防止使用调度器传入的过期结构体导致重复上传
+	var freshPart models.RecordHistoryPart
+	if err := db.First(&freshPart, part.ID).Error; err == nil {
+		if freshPart.Upload && freshPart.CID > 0 {
+			log.Printf("[Upload] 分P %d 已经上传过（DB最新状态），跳过: CID=%d, FileName=%s", part.ID, freshPart.CID, freshPart.FileName)
+			return nil
+		}
+		// 注意：不在此处因 freshPart.Uploading==true 而跳过。
+		// RequeueStuckTempParts 会在入队前将 Uploading 置为 true 作为防重入队标记，
+		// 但入队后由此处（已持有 uploadingParts 内存锁）负责实际上传。
+		// 跳过逻辑由 uploadingParts.LoadOrStore 唯一保证——持有锁则继续，否则返回 "正在上传中"。
+		// 用DB最新数据更新内存中的part，确保后续逻辑基于最新状态
+		*part = freshPart
+	} else {
+		log.Printf("[Upload] 无法从DB读取分P %d 的最新状态，使用传入数据继续: %v", part.ID, err)
 	}
 
 	// 标记为上传中
@@ -389,14 +401,14 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	if room.EnableDanmakuBurn && !part.IsTempFile {
 		log.Printf("[弹幕烧录] 检测到启用弹幕烧录功能，开始处理 part_id=%d", part.ID)
 		burnService := services.NewDanmakuBurnService()
-		
+
 		// 生成带弹幕的视频文件
 		burnedVideoPath, err := burnService.BurnDanmakuToVideo(part, history, room)
 		if err != nil {
 			log.Printf("[弹幕烧录] 烧录失败（将继续后续流程）: %v", err)
 		} else {
 			log.Printf("[弹幕烧录] 烧录成功，开始上传弹幕版: %s", burnedVideoPath)
-			
+
 			// 查询生成的弹幕版Part
 			var burnedPart models.RecordHistoryPart
 			if err := db.Where("file_path = ?", burnedVideoPath).First(&burnedPart).Error; err == nil {
@@ -443,7 +455,15 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.RecordRoom) {
 	db := database.GetDB()
 
-	// 查询分P数统计（仅统计原始非临时分P）
+	// 从DB重新读取最新的历史记录状态，避免使用upload开始时传入的过期结构体
+	// 关键：history.Publish 可能在多个goroutine并发场景下已被另一路径更新为true
+	var freshHistory models.RecordHistory
+	if err := db.First(&freshHistory, history.ID).Error; err != nil {
+		log.Printf("[自动投稿] 无法读取最新历史记录状态，终止自动投稿: history_id=%d, err=%v", history.ID, err)
+		return
+	}
+	// 使用freshHistory进行后续判断（替代stale的传入指针）
+	history = &freshHistory
 	// totalCount 只统计非临时文件（is_temp_file=false），并排除"已标记删除且未上传"的孤立记录：
 	//   - 烧录/切分产生的临时分P（is_temp_file=true）不应阻塞投稿条件
 	//   - file_delete=true 且 upload=false ：孤立临时分P（烧录失败后清理标记），不能阻塞投稿
@@ -497,7 +517,7 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 				log.Printf("[自动投稿] 投稿失败: %v", err)
 			} else {
 				log.Printf("[自动投稿] 投稿成功: history_id=%d", history.ID)
-				
+
 				// 投稿成功后，检查同SessionID是否还有其他已上传完成但未投稿的历史记录
 				// 如果有，应该将它们追加到刚才投稿的视频上
 				if room.MergeBySession && history.SessionID != "" {
@@ -521,52 +541,52 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 func (s *Service) checkAndAppendPendingHistories(publishedHistory *models.RecordHistory, room *models.RecordRoom) {
 	// 延迟30秒，等待视频状态稳定
 	time.Sleep(30 * time.Second)
-	
+
 	db := database.GetDB()
-	
+
 	log.Printf("[投稿后检查] 开始检查同SessionID待追加记录: session_id=%s", publishedHistory.SessionID)
-	
+
 	// 查询同SessionID的其他历史记录（未投稿但有已上传分P的）
 	var pendingHistories []models.RecordHistory
-	if err := db.Where("session_id = ? AND publish = ? AND room_id = ? AND id != ?", 
+	if err := db.Where("session_id = ? AND publish = ? AND room_id = ? AND id != ?",
 		publishedHistory.SessionID, false, room.RoomID, publishedHistory.ID).Find(&pendingHistories).Error; err != nil {
 		log.Printf("[投稿后检查] 查询失败: %v", err)
 		return
 	}
-	
+
 	if len(pendingHistories) == 0 {
 		log.Printf("[投稿后检查] 未发现待追加记录")
 		return
 	}
-	
+
 	log.Printf("[投稿后检查] 发现 %d 个可能需要追加的历史记录", len(pendingHistories))
-	
+
 	for _, pendingHistory := range pendingHistories {
 		// 检查是否有已上传的分P
 		var uploadedCount int64
 		var totalCount int64
 		var recordingCount int64
-		
+
 		db.Model(&models.RecordHistoryPart{}).Where(
-			"history_id = ? AND upload = ? AND file_delete = ?", 
+			"history_id = ? AND upload = ? AND file_delete = ?",
 			pendingHistory.ID, true, false).Count(&uploadedCount)
 		db.Model(&models.RecordHistoryPart{}).Where(
 			"history_id = ?", pendingHistory.ID).Count(&totalCount)
 		db.Model(&models.RecordHistoryPart{}).Where(
 			"history_id = ? AND recording = ?", pendingHistory.ID, true).Count(&recordingCount)
-		
+
 		// 只追加已全部上传完成且没有正在录制的历史记录
 		if uploadedCount > 0 && totalCount == uploadedCount && recordingCount == 0 {
-			log.Printf("[投稿后检查] 发现可追加记录: history_id=%d, 已上传分P=%d, 将触发追加", 
+			log.Printf("[投稿后检查] 发现可追加记录: history_id=%d, 已上传分P=%d, 将触发追加",
 				pendingHistory.ID, uploadedCount)
-			
+
 			// 触发投稿（会自动检测到同SessionID已有投稿并追加）
 			if err := s.PublishHistory(pendingHistory.ID, room.UploadUserID); err != nil {
 				log.Printf("[投稿后检查] 追加投稿失败: history_id=%d, error=%v", pendingHistory.ID, err)
 			} else {
 				log.Printf("[投稿后检查] 追加投稿成功: history_id=%d", pendingHistory.ID)
 			}
-			
+
 			// 避免请求过快，间隔5秒
 			time.Sleep(5 * time.Second)
 		}
@@ -674,26 +694,26 @@ func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history
 
 		// 创建新的Part记录
 		newPart := &models.RecordHistoryPart{
-			HistoryID:  originalPart.HistoryID,
-			RoomID:     originalPart.RoomID,
-			SessionID:  originalPart.SessionID,
-			Title:      originalPart.Title,
-			LiveTitle:  originalPart.LiveTitle,
-			AreaName:   originalPart.AreaName,
-			FilePath:   outputPath,
-			FileName:   outputFileName,
-			FileSize:   splitFileInfo.Size(),
-			Duration:   duration,
-			StartTime:  originalPart.StartTime.Add(time.Duration(startTime) * time.Second),
-			EndTime:    originalPart.StartTime.Add(time.Duration(startTime+duration) * time.Second),
-			Recording:  false,
-			Upload:     false,
-			Uploading:  false,
-			Page:       0,
-			XcodeState: 0,
-			IsTempFile:   true,                 // 标记为临时文件
-			SourcePartID: originalPart.ID,      // 记录源Part ID
-			TempFileType: "split",              // 切分文件类型
+			HistoryID:    originalPart.HistoryID,
+			RoomID:       originalPart.RoomID,
+			SessionID:    originalPart.SessionID,
+			Title:        originalPart.Title,
+			LiveTitle:    originalPart.LiveTitle,
+			AreaName:     originalPart.AreaName,
+			FilePath:     outputPath,
+			FileName:     outputFileName,
+			FileSize:     splitFileInfo.Size(),
+			Duration:     duration,
+			StartTime:    originalPart.StartTime.Add(time.Duration(startTime) * time.Second),
+			EndTime:      originalPart.StartTime.Add(time.Duration(startTime+duration) * time.Second),
+			Recording:    false,
+			Upload:       false,
+			Uploading:    false,
+			Page:         0,
+			XcodeState:   0,
+			IsTempFile:   true,            // 标记为临时文件
+			SourcePartID: originalPart.ID, // 记录源Part ID
+			TempFileType: "split",         // 切分文件类型
 		}
 
 		if err := db.Create(newPart).Error; err != nil {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gobup/server/internal/database"
@@ -16,6 +17,13 @@ import (
 
 // ErrFileAlreadyExists 文件已存在错误
 var ErrFileAlreadyExists = errors.New("文件已存在于数据库中")
+
+// ErrScanAlreadyRunning 扫描已在运行错误
+var ErrScanAlreadyRunning = errors.New("文件扫描任务已在运行中，请稍后再试")
+
+// scanRunning 防止同一进程内多个 ScanAndImport 调用并发执行。
+// 无论来自定时调度还是 HTTP 手动触发，均共用此标记。
+var scanRunning atomic.Bool
 
 // FileScanService 文件扫描服务，用于定期扫描录制目录，发现未入库的文件
 type FileScanService struct{}
@@ -150,6 +158,13 @@ type ScanResult struct {
 
 // ScanAndImport 扫描并导入未入库的录制文件
 func (s *FileScanService) ScanAndImport(config *ScanConfig) (*ScanResult, error) {
+	// 防止并发扫描（定时任务 + HTTP 手动触发 同时触发时，第二个直接返回）
+	if !scanRunning.CompareAndSwap(false, true) {
+		log.Println("[FileScan] 扫描任务已在运行中，跳过本次触发")
+		return nil, ErrScanAlreadyRunning
+	}
+	defer scanRunning.Store(false)
+
 	result := &ScanResult{
 		Errors: make([]string, 0),
 	}

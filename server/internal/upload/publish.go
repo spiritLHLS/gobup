@@ -16,6 +16,13 @@ import (
 )
 
 func (s *Service) PublishHistory(historyID uint, userID uint) error {
+	// 进程内防重锁：阻止同一历史记录被并发投稿（API手动触发 + 自动调度器同时触发等场景）
+	if _, loaded := s.publishingHistories.LoadOrStore(historyID, true); loaded {
+		log.Printf("[Publish] 历史记录 %d 正在投稿中（已有另一路径持有锁），拒绝并发调用", historyID)
+		return fmt.Errorf("该历史记录正在投稿中，请稍后再试")
+	}
+	defer s.publishingHistories.Delete(historyID)
+
 	db := database.GetDB()
 
 	var history models.RecordHistory
@@ -29,14 +36,14 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	}
 
 	// 核心逻辑：检查同SessionID是否已有投稿（如果启用了合并）
-	log.Printf("[投稿] 开始检查SessionID合并 (history_id=%d, room_id=%s, session_id=%s, MergeBySession=%v)", 
+	log.Printf("[投稿] 开始检查SessionID合并 (history_id=%d, room_id=%s, session_id=%s, MergeBySession=%v)",
 		historyID, history.RoomID, history.SessionID, room.MergeBySession)
-	
+
 	if room.MergeBySession && history.SessionID != "" {
 		log.Printf("[投稿] SessionID合并已启用，查询同SessionID的已投稿记录 (session_id=%s)", history.SessionID)
-		
+
 		var existingHistory models.RecordHistory
-		err := db.Where("session_id = ? AND publish = ? AND id != ?", 
+		err := db.Where("session_id = ? AND publish = ? AND id != ?",
 			history.SessionID, true, historyID).
 			First(&existingHistory).Error
 
@@ -44,7 +51,7 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 			// 找到同SessionID的已投稿记录，执行追加分P逻辑
 			log.Printf("[投稿] 检测到同SessionID已有投稿 (session_id=%s, existing_history_id=%d, bv_id=%s, aid=%s)，执行追加分P",
 				history.SessionID, existingHistory.ID, existingHistory.BvID, existingHistory.AvID)
-			
+
 			return s.AppendPartsToExisting(historyID, &existingHistory, userID)
 		}
 		// 未找到已投稿记录，继续执行新建投稿逻辑
@@ -95,9 +102,10 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	}
 
 	// 获取所有已上传的原始分P（必须按start_time ASC排序，确保投稿时分P顺序正确）
-	// 排除已删除文件、临时烧录/切分文件（is_temp_file=true），避免原始+烧录版重复出现在B站视频中
+	// 排除临时烧录/切分文件（is_temp_file=true），避免原始+烧录版重复出现在B站视频中
+	// 注意：本地文件被删除（file_delete=true）不影响投稿，CID/FileName 仍保存在DB中
 	var parts []models.RecordHistoryPart
-	if err := db.Where("history_id = ? AND upload = ? AND file_delete = ? AND is_temp_file = ?", historyID, true, false, false).
+	if err := db.Where("history_id = ? AND upload = ? AND is_temp_file = ?", historyID, true, false).
 		Order("start_time ASC").
 		Find(&parts).Error; err != nil {
 		return fmt.Errorf("查询分P失败: %w", err)
@@ -265,12 +273,12 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 
 			// 重置上传状态，让自动上传调度器在下次轮询时重新上传
 			db.Model(&part).Updates(map[string]interface{}{
-				"upload":            false,
-				"uploading":         false,
-				"file_name":         "",
-				"c_id":              0,
+				"upload":             false,
+				"uploading":          false,
+				"file_name":          "",
+				"c_id":               0,
 				"upload_retry_count": 0,
-				"upload_error_msg":  "CID为0，数据异常，已重置等待自动重传",
+				"upload_error_msg":   "CID为0，数据异常，已重置等待自动重传",
 			})
 			return fmt.Errorf("分P[%d](part_id=%d)的CID为0，已重置上传状态，自动上传调度器将在10分钟内重传，请稍后重试投稿", i, part.ID)
 		}
@@ -520,19 +528,21 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 	// 获取已存在投稿的所有原始分P（仅包含 publish=true 且非临时文件的分P）
 	// - record_histories.publish=true：只统计已成功投稿/追加的历史记录分P，与B站视频当前状态保持一致
 	// - is_temp_file=false：排除弹幕烧录/切分等临时文件，避免B站视频出现重复分P
+	// - file_delete 不过滤：本地文件删除不影响CID/FileName，已上传记录仍有效
 	var existingParts []models.RecordHistoryPart
 	if err := db.Joins("JOIN record_histories ON record_history_parts.history_id = record_histories.id").
-		Where("record_histories.session_id = ? AND record_histories.publish = ? AND record_history_parts.upload = ? AND record_history_parts.file_delete = ? AND record_history_parts.is_temp_file = ?",
-			existingHistory.SessionID, true, true, false, false).
+		Where("record_histories.session_id = ? AND record_histories.publish = ? AND record_history_parts.upload = ? AND record_history_parts.is_temp_file = ?",
+			existingHistory.SessionID, true, true, false).
 		Order("record_history_parts.start_time ASC").
 		Find(&existingParts).Error; err != nil {
 		return fmt.Errorf("查询已存在分P失败: %w", err)
 	}
 
 	// 获取新历史记录的已上传原始分P（排除临时烧录/切分文件）
+	// file_delete 不过滤：本地文件删除后CID/FileName仍有效，投稿时使用DB中保存的服务端文件名
 	var newParts []models.RecordHistoryPart
-	if err := db.Where("history_id = ? AND upload = ? AND file_delete = ? AND is_temp_file = ?",
-		newHistoryID, true, false, false).
+	if err := db.Where("history_id = ? AND upload = ? AND is_temp_file = ?",
+		newHistoryID, true, false).
 		Order("start_time ASC").
 		Find(&newParts).Error; err != nil {
 		return fmt.Errorf("查询新分P失败: %w", err)
@@ -556,7 +566,7 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 
 	// 获取原投稿信息
 	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
-	
+
 	// 从已存在的History获取AID
 	aidInt, err := strconv.ParseInt(existingHistory.AvID, 10, 64)
 	if err != nil {
@@ -669,7 +679,7 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 	if room.AutoParseDanmaku {
 		log.Printf("[追加分P] 房间启用了自动解析弹幕，开始解析新分P的弹幕: %d个分P", len(newParts))
 		danmakuParser := services.NewDanmakuXMLParser()
-		
+
 		for _, part := range newParts {
 			// 检查是否有对应的XML文件
 			xmlPath := strings.TrimSuffix(part.FilePath, filepath.Ext(part.FilePath)) + ".xml"
@@ -679,11 +689,11 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 					log.Printf("[追加分P] 弹幕解析失败: %v", err)
 				} else {
 					log.Printf("[追加分P] 弹幕解析成功: part_id=%d, 解析到%d条弹幕", part.ID, count)
-					
+
 					// 更新历史记录的弹幕数量
 					var totalDanmakuCount int64
 					db.Model(&models.LiveMsg{}).Where("session_id = ?", newHistory.SessionID).Count(&totalDanmakuCount)
-					
+
 					// 更新所有同SessionID的历史记录的弹幕数
 					db.Model(&models.RecordHistory{}).Where("session_id = ?", newHistory.SessionID).Update("danmaku_count", totalDanmakuCount)
 					log.Printf("[追加分P] 已更新SessionID %s 的弹幕总数: %d", newHistory.SessionID, totalDanmakuCount)
@@ -811,7 +821,7 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 		"roomId":    history.RoomID,
 		"fileName":  burnedPart.FileName,
 	}
-	partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
+	partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData) + "（弹幕版）"
 	allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
 		Title:    partTitle,
 		Desc:     "",

@@ -29,6 +29,14 @@ func TriggerFileScan(c *gin.Context) {
 	result, err := scanService.ScanAndImport(config)
 
 	if err != nil {
+		if err == services.ErrScanAlreadyRunning {
+			log.Printf("[FileScan] 扫描任务已在运行中，忽略本次手动触发")
+			c.JSON(http.StatusOK, gin.H{
+				"type": "warning",
+				"msg":  "扫描任务正在运行中，请稍后再试",
+			})
+			return
+		}
 		log.Printf("[FileScan] 扫描失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{
 			"type": "error",

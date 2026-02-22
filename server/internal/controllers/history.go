@@ -306,9 +306,10 @@ func UploadHistory(c *gin.Context) {
 		return
 	}
 
-	// 获取所有未上传的分P
+	// 获取所有未上传且未正在上传中的分P
+	// 加上 uploading=false 过滤，防止用户重复手动触发导致同一分P入队两次
 	var parts []models.RecordHistoryPart
-	if err := db.Where("history_id = ? AND upload = ? AND recording = ?", historyID, false, false).
+	if err := db.Where("history_id = ? AND upload = ? AND recording = ? AND uploading = ?", historyID, false, false, false).
 		Order("start_time ASC").
 		Find(&parts).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "查询分P失败"})
@@ -390,9 +391,10 @@ func BatchUploadHistory(c *gin.Context) {
 			continue
 		}
 
-		// 获取所有未上传的分P
+		// 获取所有未上传且未正在上传中的分P
+		// 加上 uploading=false 过滤，防止批量操作导致重复入队
 		var parts []models.RecordHistoryPart
-		if err := db.Where("history_id = ? AND upload = ? AND recording = ?", historyID, false, false).
+		if err := db.Where("history_id = ? AND upload = ? AND recording = ? AND uploading = ?", historyID, false, false, false).
 			Order("start_time ASC").
 			Find(&parts).Error; err != nil {
 			log.Printf("[批量上传] 查询分P失败 history_id=%d", historyID)

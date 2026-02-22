@@ -188,6 +188,65 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 		}
 	}
 
+	// 额外：补充扫描所有上传失败的弹幕烧录临时分P（is_temp_file=true, temp_file_type=danmaku_burn）
+	// uploadPartInternal 内部只做一次入队，若上传失败后服务未重启则永远不会重试。
+	// 此处每10分钟周期调度时主动发现并重新入队，对烧录成功但上传失败的文件进行自动重试。
+	var failedBurnedParts []models.RecordHistoryPart
+	if err := db.Where(
+		"is_temp_file = ? AND temp_file_type = ? AND upload = ? AND uploading = ? AND file_delete = ?",
+		true, "danmaku_burn", false, false, false,
+	).Find(&failedBurnedParts).Error; err != nil {
+		log.Printf("[自动上传] 查询失败的弹幕烧录分P失败: %v", err)
+	} else {
+		for _, part := range failedBurnedParts {
+			if part.FilePath == "" {
+				continue
+			}
+
+			// 检查物理文件是否仍然存在（如果不存在则跳过，由 CleanOrphanedTempParts 处理）
+			if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
+				continue
+			}
+
+			// 跳过速率限制冷却期中的分P
+			if part.RateLimitCooldownAt != nil && time.Now().Before(*part.RateLimitCooldownAt) {
+				continue
+			}
+
+			// 获取对应的历史记录
+			var history models.RecordHistory
+			if err := db.First(&history, part.HistoryID).Error; err != nil {
+				log.Printf("[自动上传] 获取弹幕烧录分P历史记录失败: part_id=%d, history_id=%d, error=%v",
+					part.ID, part.HistoryID, err)
+				continue
+			}
+
+			// 权限检查：历史记录是否允许上传
+			if !history.Upload {
+				continue
+			}
+
+			// 获取对应的房间配置
+			var room models.RecordRoom
+			if err := db.Where("room_id = ?", part.RoomID).First(&room).Error; err != nil {
+				log.Printf("[自动上传] 获取弹幕烧录分P房间配置失败: part_id=%d, room_id=%s, error=%v",
+					part.ID, part.RoomID, err)
+				continue
+			}
+
+			if room.UploadUserID == 0 || !room.Upload {
+				continue
+			}
+
+			log.Printf("[自动上传] 发现上传失败的弹幕烧录分P，重新入队: part_id=%d, file=%s", part.ID, part.FilePath)
+			tasks = append(tasks, PendingUploadTask{
+				Part:    part,
+				History: history,
+				Room:    room,
+			})
+		}
+	}
+
 	return tasks, nil
 }
 
