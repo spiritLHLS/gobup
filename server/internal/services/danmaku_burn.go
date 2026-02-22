@@ -228,7 +228,7 @@ func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history 
 		"-i", xmlPath,
 		"-o", assPath,
 		"-r", resolution,
-		"-d", "0",
+		"-d", "-1",
 		"-S", fontSize,
 		"--scrollarea", "0.75",
 		"--displayarea", "0.8",
