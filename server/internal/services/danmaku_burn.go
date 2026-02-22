@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -70,9 +71,9 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 	log.Printf("[弹幕烧录] 开始为视频烧录弹幕: %s", part.FilePath)
 	log.Printf("[弹幕烧录] 弹幕文件: %s", xmlPath)
 
-	// 1. 将XML转换为ASS字幕文件
+	// 1. 将XML转换为ASS字幕文件（输出到临时目录，避免中文路径问题）
 	// 严格只使用 DanmakuFactory 二进制，不使用任何自实现的转换逻辑
-	assPath, err := s.convertXMLToASSWithFactory(xmlPath, history, room)
+	assPath, err := s.convertXMLToASSWithFactory(xmlPath, history, room, part.FilePath)
 	if err != nil {
 		return "", fmt.Errorf("DanmakuFactory 转换弹幕为ASS失败（仅支持DanmakuFactory，不启用内置转换）: %w", err)
 	}
@@ -138,8 +139,55 @@ func (s *DanmakuBurnService) findDanmakuXML(videoPath string) string {
 	return ""
 }
 
-// convertXMLToASSWithFactory 使用 DanmakuFactory 将XML转换为ASS
-func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history *models.RecordHistory, room *models.RecordRoom) (string, error) {
+// probeVideoResolution 使用 ffprobe 探测视频分辨率，返回 "WxH" 字符串。
+// 失败时返回默认值 "1920x1080"。
+func (s *DanmakuBurnService) probeVideoResolution(videoPath string) string {
+	ffprobePath, err := exec.LookPath("ffprobe")
+	if err != nil {
+		log.Printf("[弹幕烧录] ffprobe 不可用，使用默认分辨率 1920x1080: %v", err)
+		return "1920x1080"
+	}
+
+	args := []string{
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_streams",
+		"-select_streams", "v:0",
+		videoPath,
+	}
+
+	out, err := exec.Command(ffprobePath, args...).Output()
+	if err != nil {
+		log.Printf("[弹幕烧录] ffprobe 执行失败，使用默认分辨率 1920x1080: %v", err)
+		return "1920x1080"
+	}
+
+	var result struct {
+		Streams []struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil || len(result.Streams) == 0 {
+		log.Printf("[弹幕烧录] ffprobe 解析失败，使用默认分辨率 1920x1080: %v", err)
+		return "1920x1080"
+	}
+
+	w := result.Streams[0].Width
+	h := result.Streams[0].Height
+	if w <= 0 || h <= 0 {
+		log.Printf("[弹幕烧录] ffprobe 返回无效分辨率 (%dx%d)，使用默认 1920x1080", w, h)
+		return "1920x1080"
+	}
+
+	res := fmt.Sprintf("%dx%d", w, h)
+	log.Printf("[弹幕烧录] 探测视频分辨率: %s", res)
+	return res
+}
+
+// convertXMLToASSWithFactory 使用 DanmakuFactory 将XML转换为ASS。
+// 输出文件写到系统临时目录（ASCII路径），避免 libavfilter subtitles filter 因中文路径解析失败。
+func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history *models.RecordHistory, room *models.RecordRoom, videoPath string) (string, error) {
 	// 获取 DanmakuFactory 路径
 	factoryPath := os.Getenv("DANMAKU_FACTORY_PATH")
 	if factoryPath == "" {
@@ -151,101 +199,146 @@ func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history 
 		return "", fmt.Errorf("DanmakuFactory 未安装: %s", factoryPath)
 	}
 
-	// 生成输出ASS文件路径
-	assPath := strings.TrimSuffix(xmlPath, filepath.Ext(xmlPath)) + "_danmaku.ass"
+	// 将ASS写到系统临时目录（ASCII-only路径），避免含中文/特殊字符的路径传入ffmpeg subtitles滤镜时失败
+	tmpFile, err := os.CreateTemp("", "gobup_danmaku_*.ass")
+	if err != nil {
+		return "", fmt.Errorf("创建临时ASS文件失败: %w", err)
+	}
+	assPath := tmpFile.Name()
+	tmpFile.Close()
 
-	log.Printf("[弹幕烧录] 使用 DanmakuFactory 转换: %s -> %s", xmlPath, assPath)
+	log.Printf("[弹幕烧录] 使用 DanmakuFactory 转换: %s -> %s (临时路径)", xmlPath, assPath)
+
+	// 探测源视频分辨率，为弹幕定位提供正确的画布尺寸
+	resolution := s.probeVideoResolution(videoPath)
+
+	// 确定字号
+	fontSize := "38"
+	switch room.DanmakuBurnStyle {
+	case "compact":
+		fontSize = "32"
+	case "large":
+		fontSize = "48"
+	}
 
 	// 构建命令参数
-	// DanmakuFactory -i input.xml -o output.ass -r 1920x1080 -d -1 -S 38 --scrollarea 0.75 --displayarea 0.8
+	// -d 0  ：弹幕密度0（不过滤重叠），保留所有弹幕；-d N(>0) 会丢弃重叠弹幕
+	// 参考: https://github.com/hihkm/DanmakuFactory
 	args := []string{
 		"-i", xmlPath,
 		"-o", assPath,
-		"-r", "1920x1080", // 分辨率
-		"-d", "-1", // 弹幕密度：-1=不重叠
-		"--scrollarea", "0.75", // 滚动弹幕显示区域：75%
-		"--displayarea", "0.8", // 全部弹幕显示区域：80%
+		"-r", resolution,
+		"-d", "0",
+		"-S", fontSize,
+		"--scrollarea", "0.75",
+		"--displayarea", "0.8",
 	}
 
-	// 根据房间配置调整弹幕样式
-	switch room.DanmakuBurnStyle {
-	case "compact":
-		args = append(args, "-S", "32") // 字号32px
-	case "large":
-		args = append(args, "-S", "48") // 字号48px
-	default:
-		args = append(args, "-S", "38") // 默认字号38px
-	}
+	log.Printf("[弹幕烧录] DanmakuFactory 命令: %s %s", factoryPath, strings.Join(args, " "))
 
-	// 执行 DanmakuFactory
 	cmd := exec.Command(factoryPath, args...)
 	output, err := cmd.CombinedOutput()
+	outStr := strings.TrimSpace(string(output))
 
 	if err != nil {
-		log.Printf("[弹幕烧录] DanmakuFactory 执行失败: %s", string(output))
+		os.Remove(assPath) // 清理失败的临时文件
+		log.Printf("[弹幕烧录] DanmakuFactory 输出: %s", outStr)
 		return "", fmt.Errorf("DanmakuFactory 执行失败: %w", err)
 	}
 
-	// 检查输出文件是否生成
-	if _, err := os.Stat(assPath); os.IsNotExist(err) {
-		return "", fmt.Errorf("ASS文件未生成: %s", assPath)
+	if outStr != "" {
+		log.Printf("[弹幕烧录] DanmakuFactory 输出: %s", outStr)
 	}
 
-	log.Printf("[弹幕烧录] DanmakuFactory 转换成功: %s", assPath)
+	// 检查输出文件是否生成且非空
+	fi, err := os.Stat(assPath)
+	if err != nil || fi.Size() == 0 {
+		os.Remove(assPath)
+		return "", fmt.Errorf("ASS文件未生成或为空: %s", assPath)
+	}
+
+	log.Printf("[弹幕烧录] DanmakuFactory 转换成功: %s (大小: %d bytes)", assPath, fi.Size())
 	return assPath, nil
 }
 
-// burnWithFFmpeg 使用ffmpeg烧录字幕
+// burnWithFFmpeg 使用ffmpeg将ASS字幕烧录进视频
 func (s *DanmakuBurnService) burnWithFFmpeg(videoPath, assPath, outputPath string) error {
 	// 检查ffmpeg是否可用
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return fmt.Errorf("ffmpeg未安装或不在PATH中: %w", err)
 	}
 
-	// 转义ASS路径：统一为正斜杠，并转义冒号（Windows盘符路径需要）
+	// assPath 已是 ASCII 临时路径，但仍需符合 ffmpeg subtitles 滤镜的转义规则：
+	//   - 反斜杠 → 正斜杠（Windows路径兼容）
+	//   - 冒号   → \:  （Windows盘符 C: 等）
 	assPathEscaped := strings.ReplaceAll(assPath, "\\", "/")
 	assPathEscaped = strings.ReplaceAll(assPathEscaped, ":", "\\:")
 
-	// 确定字体目录和字体名（支持环境变量覆盖）
+	// 确定字体目录（供 libass 查找字体）
 	fontsDir := os.Getenv("DANMAKU_FONTS_DIR")
 	if fontsDir == "" {
 		fontsDir = DanmakuFontsDir
 	}
+
+	// 字体名（支持环境变量覆盖）
 	fontName := os.Getenv("DANMAKU_FONT_NAME")
 	if fontName == "" {
 		fontName = DanmakuFontName
 	}
 
-	// subtitles 滤镜参数：
-	// - fontsdir: 告知 libass 到哪里找字体（容器内需安装 font-wqy-zenhei）
-	// - force_style: 强制覆盖 ASS 文件中的字体名，防止 Microsoft YaHei 等字体找不到
-	vfFilter := fmt.Sprintf("subtitles='%s':fontsdir=%s:force_style='Fontname=%s'",
-		assPathEscaped, fontsDir, fontName)
+	// subtitles 滤镜：
+	//   - 不再使用 force_style 覆盖字体（DanmakuFactory 已在ASS中写好样式）
+	//   - fontsdir 路径用单引号包裹，防止路径含空格时截断
+	vfFilter := fmt.Sprintf("subtitles='%s':fontsdir='%s'", assPathEscaped, fontsDir)
 
-	// ffmpeg命令：烧录字幕
-	// -c:v libx264: 显式指定H.264编码避免FLV等容器用错编码器
-	// -crf 18:      视觉无损质量（0最好，51最差，18接近无损）
-	// -preset fast: 编码速度（ultrafast/superfast/fast/medium/slow）
-	// -c:a copy:    音频直接复制，不重新编码
-	args := []string{
+	// 判断源文件是否为FLV，FLV时间戳可能不规则，需要加 -fflags +genpts 重新生成时间戳
+	isFLV := strings.ToLower(filepath.Ext(videoPath)) == ".flv"
+
+	// ffmpeg命令：
+	//   -fflags +genpts : 对 FLV 等时间戳不规则来源重新生成 PTS，避免字幕轨不同步
+	//   -c:v libx264   : 显式H.264编码
+	//   -crf 18        : 视觉无损画质
+	//   -preset fast   : 编码速度
+	//   -c:a copy      : 音频直接复制
+	var args []string
+	if isFLV {
+		args = append(args, "-fflags", "+genpts")
+	}
+	args = append(args,
 		"-i", videoPath,
 		"-vf", vfFilter,
 		"-c:v", "libx264",
 		"-crf", "18",
 		"-preset", "fast",
 		"-c:a", "copy",
-		"-y", // 覆盖已存在的文件
+		"-movflags", "+faststart",
+		"-y",
 		outputPath,
-	}
+	)
 
-	log.Printf("[弹幕烧录] 执行ffmpeg命令...")
+	log.Printf("[弹幕烧录] 执行ffmpeg命令: ffmpeg %s", strings.Join(args, " "))
 
 	cmd := exec.Command("ffmpeg", args...)
 	output, err := cmd.CombinedOutput()
 
+	// 无论成功失败都输出 ffmpeg 末尾日志（截取最后2000字节避免过长）
+	outStr := string(output)
+	if len(outStr) > 2000 {
+		outStr = "...(省略前段)...\n" + outStr[len(outStr)-2000:]
+	}
 	if err != nil {
-		log.Printf("[弹幕烧录] ffmpeg输出: %s", string(output))
+		log.Printf("[弹幕烧录] ffmpeg 执行失败:\n%s", outStr)
 		return fmt.Errorf("ffmpeg执行失败: %w", err)
+	}
+	log.Printf("[弹幕烧录] ffmpeg 执行成功（末尾日志）:\n%s", outStr)
+
+	// 验证输出文件存在且大小合理
+	fi, err := os.Stat(outputPath)
+	if err != nil {
+		return fmt.Errorf("输出文件不存在: %w", err)
+	}
+	if fi.Size() < 1024 {
+		return fmt.Errorf("输出文件异常小 (%d bytes)，烧录可能失败", fi.Size())
 	}
 
 	return nil

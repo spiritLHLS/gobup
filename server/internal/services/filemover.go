@@ -46,8 +46,8 @@ func (s *FileMoverService) ProcessFilesByStrategy(historyID uint, strategy int) 
 		return s.MoveFilesForHistory(historyID)
 	case 11: // 审核通过后复制
 		return s.copyFiles(historyID)
-	case 12: // 审核通过后删除
-		return s.deleteFiles(historyID)
+	case 12: // 审核通过后3天延迟删除（避免弹幕烧录未完成时立即删除原始文件）
+		return s.scheduleDelayedDelete(historyID)
 	default:
 		return fmt.Errorf("未知的文件处理策略: %d", strategy)
 	}
@@ -335,6 +335,7 @@ func (s *FileMoverService) copyFiles(historyID uint) error {
 }
 
 // scheduleDelayedDelete 计划延迟删除
+// 将在 room.DeleteDay 天后删除文件（默认3天）。定时任务 ProcessScheduledDeletes 会检查并执行实际删除。
 func (s *FileMoverService) scheduleDelayedDelete(historyID uint) error {
 	db := database.GetDB()
 
@@ -343,17 +344,62 @@ func (s *FileMoverService) scheduleDelayedDelete(historyID uint) error {
 		return fmt.Errorf("历史记录不存在: %w", err)
 	}
 
+	// 如果已经设置了计划删除时间，不重复设置
+	if history.ScheduledDeleteAt != nil {
+		log.Printf("历史记录 %d 已有计划删除时间: %s，跳过", historyID, history.ScheduledDeleteAt.Format("2006-01-02 15:04:05"))
+		return nil
+	}
+
 	var room models.RecordRoom
 	if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
 		return fmt.Errorf("房间配置不存在: %w", err)
 	}
 
-	if room.DeleteDay <= 0 {
-		return fmt.Errorf("未配置删除天数")
+	days := room.DeleteDay
+	if days <= 0 {
+		days = 3 // 默认3天
 	}
 
-	log.Printf("历史记录 %d 将在 %d 天后删除文件", historyID, room.DeleteDay)
-	// 这里应该创建定时任务，简化实现
+	deleteAt := time.Now().Add(time.Duration(days) * 24 * time.Hour)
+	history.ScheduledDeleteAt = &deleteAt
+	if err := db.Save(&history).Error; err != nil {
+		return fmt.Errorf("保存计划删除时间失败: %w", err)
+	}
+
+	log.Printf("历史记录 %d 已计划在 %d 天后（%s）删除文件", historyID, days, deleteAt.Format("2006-01-02 15:04:05"))
+	return nil
+}
+
+// ProcessScheduledDeletes 处理到期的计划删除任务（由定时任务调用）
+func (s *FileMoverService) ProcessScheduledDeletes() error {
+	db := database.GetDB()
+
+	var histories []models.RecordHistory
+	now := time.Now()
+	if err := db.Where("scheduled_delete_at IS NOT NULL AND scheduled_delete_at <= ?", now).
+		Find(&histories).Error; err != nil {
+		return fmt.Errorf("查询计划删除记录失败: %w", err)
+	}
+
+	if len(histories) == 0 {
+		return nil
+	}
+
+	log.Printf("[计划删除] 发现 %d 个到期的计划删除任务", len(histories))
+
+	for _, history := range histories {
+		log.Printf("[计划删除] 开始执行计划删除: history_id=%d, bv_id=%s", history.ID, history.BvID)
+		if err := s.deleteFiles(history.ID); err != nil {
+			log.Printf("[计划删除] 删除文件失败: history_id=%d, error=%v", history.ID, err)
+			continue
+		}
+		// 清除计划删除时间标记
+		scheduledAt := (*time.Time)(nil)
+		db.Model(&history).Update("scheduled_delete_at", scheduledAt)
+		log.Printf("[计划删除] ✓ 计划删除执行完成: history_id=%d", history.ID)
+		time.Sleep(500 * time.Millisecond) // 避免IO过载
+	}
+
 	return nil
 }
 
@@ -388,7 +434,7 @@ func (s *FileMoverService) DeleteRelatedFiles(filePath string) {
 	for _, ext := range extensions {
 		// 构造精确的相关文件路径（同目录 + 同基础名 + 特定扩展名）
 		relatedFile := filepath.Join(dir, baseName+ext)
-		
+
 		// 二次验证：确保构造的路径与原文件在同一目录
 		if filepath.Dir(relatedFile) != dir {
 			log.Printf("[DeleteRelatedFiles] 安全检查失败: 路径不匹配 %s", relatedFile)
@@ -400,7 +446,7 @@ func (s *FileMoverService) DeleteRelatedFiles(filePath string) {
 			// 最后确认：文件名前缀必须完全匹配
 			relatedBaseName := strings.TrimSuffix(filepath.Base(relatedFile), filepath.Ext(relatedFile))
 			if relatedBaseName != baseName {
-				log.Printf("[DeleteRelatedFiles] 安全检查失败: 文件名不匹配 %s (期望: %s, 实际: %s)", 
+				log.Printf("[DeleteRelatedFiles] 安全检查失败: 文件名不匹配 %s (期望: %s, 实际: %s)",
 					relatedFile, baseName, relatedBaseName)
 				continue
 			}

@@ -193,7 +193,7 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 	// videoState=1 表示已通过
 	if oldVideoState != 1 && history.VideoState == 1 {
 		log.Printf("视频 %s 审核通过，开始执行审核通过后的自动化流程", history.BvID)
-		
+
 		// 1. 处理文件（删除/移动/复制）
 		if room.DeleteType == 11 || room.DeleteType == 12 {
 			fileMoverSvc := NewFileMoverService()
@@ -203,8 +203,9 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 				log.Printf("审核通过后文件处理成功: history_id=%d, strategy=%d", historyID, room.DeleteType)
 			}
 		}
-		
+
 		// 1.5. 清理临时文件（切分文件、弹幕烧录文件等）
+		// 注意：只清理已经上传成功的临时分P，尚未上传的弹幕烧录临时文件不删除
 		if history.SessionID != "" {
 			burnService := NewDanmakuBurnService()
 			if err := burnService.CleanTempFilesBySessionID(history.SessionID); err != nil {
@@ -213,33 +214,33 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 				log.Printf("[审核通过后] 临时文件清理成功: session_id=%s", history.SessionID)
 			}
 		}
-		
+
 		// 2. 如果启用了SessionID合并，检查是否有待上传的同SessionID分P需要追加
 		if room.MergeBySession && history.SessionID != "" && history.Publish {
 			log.Printf("[审核通过] 检查同SessionID是否有待上传分P需要追加: session_id=%s", history.SessionID)
-			
+
 			// 查询同SessionID的其他历史记录（未投稿的）
 			var pendingHistories []models.RecordHistory
-			if err := db.Where("session_id = ? AND publish = ? AND id != ?", 
+			if err := db.Where("session_id = ? AND publish = ? AND id != ?",
 				history.SessionID, false, historyID).Find(&pendingHistories).Error; err == nil && len(pendingHistories) > 0 {
-				
+
 				log.Printf("[审核通过] 发现 %d 个同SessionID的未投稿记录，检查是否有已上传分P", len(pendingHistories))
-				
+
 				// 检查这些历史记录是否有已上传的分P（需要追加）
 				for _, pendingHistory := range pendingHistories {
 					var uploadedPartsCount int64
 					db.Model(&models.RecordHistoryPart{}).Where(
-						"history_id = ? AND upload = ? AND file_delete = ?", 
+						"history_id = ? AND upload = ? AND file_delete = ?",
 						pendingHistory.ID, true, false).Count(&uploadedPartsCount)
-					
+
 					if uploadedPartsCount > 0 {
-						log.Printf("[审核通过] 发现待追加的历史记录: history_id=%d, 已上传分P数=%d, 将触发自动追加", 
+						log.Printf("[审核通过] 发现待追加的历史记录: history_id=%d, 已上传分P数=%d, 将触发自动追加",
 							pendingHistory.ID, uploadedPartsCount)
-						
+
 						// 导入upload包并触发追加（通过延迟执行避免阻塞同步流程）
 						go func(hid uint) {
 							time.Sleep(5 * time.Second) // 延迟5秒，确保视频状态已稳定
-							log.Printf("[审核通过] 开始异步执行追加分P: pending_history_id=%d -> existing_history_id=%d", 
+							log.Printf("[审核通过] 开始异步执行追加分P: pending_history_id=%d -> existing_history_id=%d",
 								hid, historyID)
 							// 注意：这里需要在main.go或scheduler中注册一个全局的upload service引用
 							// 暂时记录日志，实际追加需要手动触发或通过定时任务检测

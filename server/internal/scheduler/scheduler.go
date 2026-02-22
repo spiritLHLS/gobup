@@ -62,6 +62,15 @@ func InitScheduler() {
 		}
 	})
 
+	// 计划删除任务 - 每小时执行一次（处理 strategy 8/12 的延迟删除）
+	cronJob.AddFunc("15 * * * *", func() {
+		log.Println("执行定时任务: 计划删除检查")
+		moverService := services.NewFileMoverService()
+		if err := moverService.ProcessScheduledDeletes(); err != nil {
+			log.Printf("计划删除任务失败: %v", err)
+		}
+	})
+
 	// 文件扫描任务 - 每小时执行一次，扫描未入库的录制文件
 	cronJob.AddFunc("30 * * * *", func() {
 		// 检查是否启用自动扫盘

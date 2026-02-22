@@ -252,6 +252,10 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 			"fileName":  part.FileName,  // 文件名
 		}
 		partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
+		// 弹幕烧录版分P：在标题末尾附加「弹幕版」标识，明确区分 P1(原始) / P2(弹幕)
+		if part.IsTempFile && part.TempFileType == "danmaku_burn" {
+			partTitle = partTitle + "（弹幕版）"
+		}
 
 		// 获取文件名：优先使用数据库中的 FileName（从上传响应获取），如果为空则从 FilePath 提取
 		filename := part.FileName

@@ -114,10 +114,10 @@
           <el-option :value="9" label="9 - 投稿成功后删除（推荐）" />
           <el-option :value="10" label="10 - 投稿成功后移动" />
           <el-option :value="11" label="11 - 审核通过后复制" />
-          <el-option :value="12" label="12 - 审核通过后删除" />
+          <el-option :value="12" label="12 - 审核通过后N天延迟删除（默认3天）" />
         </el-select>
         <div class="help-text">
-          推荐使用"9-投稿成功后删除"，只删除视频文件，保留弹幕和封面
+          推荐使用“9-投稿成功后删除”，只删除视频文件，保留弹幕和封面。如开启弹幕烧录功能，建议选“12-审核通过后N天延迟删除”，避免弹幕烧录尚未完成就删除了原始文件
         </div>
       </el-form-item>
       

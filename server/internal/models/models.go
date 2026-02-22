@@ -8,105 +8,106 @@ import (
 
 // RecordRoom 直播间配置
 type RecordRoom struct {
-	ID                 uint           `gorm:"primarykey" json:"id"`
-	CreatedAt          time.Time      `json:"createdAt"`
-	UpdatedAt          time.Time      `json:"updatedAt"`
-	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
-	RoomID             string         `gorm:"uniqueIndex:idx_room_id;not null" json:"roomId"`
-	Uname              string         `gorm:"index" json:"uname"`
-	Title              string         `json:"title"`
-	AreaName           string         `json:"areaName"`
-	AreaNameParent     string         `json:"areaNameParent"`
-	AreaNameChild      string         `json:"areaNameChild"`
-	HistoryID          uint           `json:"historyId"`
-	UploadUserID       uint           `gorm:"index" json:"uploadUserId"`
-	Upload             bool           `gorm:"default:true;index" json:"upload"`      // 启用上传功能（总开关）
-	AutoUpload         bool           `gorm:"default:true" json:"autoUpload"`        // 录制完成后自动上传分P
-	AutoPublish        bool           `gorm:"default:false" json:"autoPublish"`      // 所有分P上传完成后自动投稿
-	AutoParseDanmaku   bool           `gorm:"default:false" json:"autoParseDanmaku"` // 自动解析弹幕
-	AutoSyncInfo       bool           `gorm:"default:false" json:"autoSyncInfo"`     // 定时同步视频信息（每30分钟）
-	LastSyncTime       *time.Time     `json:"lastSyncTime"`                          // 最后同步时间
-	TitleTemplate      string         `gorm:"type:text" json:"titleTemplate"`
-	PartTitleTemplate  string         `gorm:"type:text" json:"partTitleTemplate"`
-	DescTemplate       string         `gorm:"type:text" json:"descTemplate"`
-	DynamicTemplate    string         `gorm:"type:text" json:"dynamicTemplate"`
-	FileSizeLimit      int64          `gorm:"default:0" json:"fileSizeLimit"`
-	DurationLimit      int            `gorm:"default:60" json:"durationLimit"`
-	Tags               string         `json:"tags"`
-	TID                int            `gorm:"default:171" json:"tid"`
-	Copyright          int            `gorm:"default:1" json:"copyright"`
-	SourceTemplate     string         `gorm:"type:text;default:'直播间: https://live.bilibili.com/${roomId}  稿件直播源'" json:"sourceTemplate"` // 转载来源模板，支持变量替换
-	PercentileRank     float64        `gorm:"default:0.95" json:"percentileRank"`
-	HighEnergyCut      bool           `gorm:"default:false" json:"highEnergyCut"`
-	WindowSize         int            `gorm:"default:60" json:"windowSize"`         // 高能剪辑窗口大小(秒)
-	MinSegmentDuration int            `gorm:"default:10" json:"minSegmentDuration"` // 最小片段时长(秒)
-	IsOnlySelf         bool           `gorm:"default:false" json:"isOnlySelf"`
-	NoDisturbance      bool           `gorm:"default:false" json:"noDisturbance"`
-	Line               string         `gorm:"default:cs_bda2" json:"line"`
-	AvailableLines     string         `gorm:"type:text" json:"availableLines"` // 可用线路列表，逗号分隔，用于自动切换
-	CoverURL           string         `json:"coverUrl"`
-	CoverType          string         `gorm:"default:default" json:"coverType"` // default, live, diy
-	Wxuid              string         `json:"wxuid"`
-	PushMsgTags        string         `json:"pushMsgTags"`
-	DeleteType         int            `gorm:"default:9" json:"deleteType"` // 0-不处理 1-上传前删除 2-上传前移动 3-上传后删除 4-上传后移动 5-上传前复制 6-上传后复制 7-上传完成后立即删除 8-N天后删除移动 9-投稿成功后删除 10-投稿成功后移动 11-审核通过后复制 12-审核通过后删除
-	DeleteDay          int            `gorm:"default:5" json:"deleteDay"`
-	MoveDir            string         `json:"moveDir"`
-	SendDm             bool           `gorm:"default:false" json:"sendDm"`
-	DmDistinct         bool           `gorm:"default:false" json:"dmDistinct"`     // 弹幕去重
-	DmUlLevel          int            `gorm:"default:0" json:"dmUlLevel"`          // 用户等级过滤
-	DmMedalLevel       int            `gorm:"default:0" json:"dmMedalLevel"`       // 粉丝勋章过滤 0-不过滤 1-佩戴粉丝勋章 2-佩戴主播粉丝勋章
-	DmKeywordBlacklist string         `gorm:"type:text" json:"dmKeywordBlacklist"` // 关键词屏蔽，一行一个
-	EnableDanmakuBurn  bool           `gorm:"default:false" json:"enableDanmakuBurn"` // 启用弹幕烧录（生成带弹幕版本）
-	AutoUpdatePublished bool          `gorm:"default:false" json:"autoUpdatePublished"` // 弹幕版上传后自动更新已投稿视频
-	DanmakuBurnStyle   string         `gorm:"default:default" json:"danmakuBurnStyle"` // 弹幕样式：default, compact, large
-	Recording          bool           `gorm:"default:false;index" json:"recording"`
-	Streaming          bool           `gorm:"default:false;index" json:"streaming"`
-	SessionID          string         `gorm:"index" json:"sessionId"`
-	SeasonID           int64          `json:"seasonId"`
-	MergeBySession     bool           `gorm:"default:true" json:"mergeBySession"` // 同SessionID合并到一个投稿
-	LiveStatus         int            `gorm:"default:0;index" json:"liveStatus"` // 直播状态: 0未开播 1正在直播 2轮播中
-	LastCheckTime      *time.Time     `json:"lastCheckTime"`                     // 最后检查时间
+	ID                  uint           `gorm:"primarykey" json:"id"`
+	CreatedAt           time.Time      `json:"createdAt"`
+	UpdatedAt           time.Time      `json:"updatedAt"`
+	DeletedAt           gorm.DeletedAt `gorm:"index" json:"-"`
+	RoomID              string         `gorm:"uniqueIndex:idx_room_id;not null" json:"roomId"`
+	Uname               string         `gorm:"index" json:"uname"`
+	Title               string         `json:"title"`
+	AreaName            string         `json:"areaName"`
+	AreaNameParent      string         `json:"areaNameParent"`
+	AreaNameChild       string         `json:"areaNameChild"`
+	HistoryID           uint           `json:"historyId"`
+	UploadUserID        uint           `gorm:"index" json:"uploadUserId"`
+	Upload              bool           `gorm:"default:true;index" json:"upload"`      // 启用上传功能（总开关）
+	AutoUpload          bool           `gorm:"default:true" json:"autoUpload"`        // 录制完成后自动上传分P
+	AutoPublish         bool           `gorm:"default:false" json:"autoPublish"`      // 所有分P上传完成后自动投稿
+	AutoParseDanmaku    bool           `gorm:"default:false" json:"autoParseDanmaku"` // 自动解析弹幕
+	AutoSyncInfo        bool           `gorm:"default:false" json:"autoSyncInfo"`     // 定时同步视频信息（每30分钟）
+	LastSyncTime        *time.Time     `json:"lastSyncTime"`                          // 最后同步时间
+	TitleTemplate       string         `gorm:"type:text" json:"titleTemplate"`
+	PartTitleTemplate   string         `gorm:"type:text" json:"partTitleTemplate"`
+	DescTemplate        string         `gorm:"type:text" json:"descTemplate"`
+	DynamicTemplate     string         `gorm:"type:text" json:"dynamicTemplate"`
+	FileSizeLimit       int64          `gorm:"default:0" json:"fileSizeLimit"`
+	DurationLimit       int            `gorm:"default:60" json:"durationLimit"`
+	Tags                string         `json:"tags"`
+	TID                 int            `gorm:"default:171" json:"tid"`
+	Copyright           int            `gorm:"default:1" json:"copyright"`
+	SourceTemplate      string         `gorm:"type:text;default:'直播间: https://live.bilibili.com/${roomId}  稿件直播源'" json:"sourceTemplate"` // 转载来源模板，支持变量替换
+	PercentileRank      float64        `gorm:"default:0.95" json:"percentileRank"`
+	HighEnergyCut       bool           `gorm:"default:false" json:"highEnergyCut"`
+	WindowSize          int            `gorm:"default:60" json:"windowSize"`         // 高能剪辑窗口大小(秒)
+	MinSegmentDuration  int            `gorm:"default:10" json:"minSegmentDuration"` // 最小片段时长(秒)
+	IsOnlySelf          bool           `gorm:"default:false" json:"isOnlySelf"`
+	NoDisturbance       bool           `gorm:"default:false" json:"noDisturbance"`
+	Line                string         `gorm:"default:cs_bda2" json:"line"`
+	AvailableLines      string         `gorm:"type:text" json:"availableLines"` // 可用线路列表，逗号分隔，用于自动切换
+	CoverURL            string         `json:"coverUrl"`
+	CoverType           string         `gorm:"default:default" json:"coverType"` // default, live, diy
+	Wxuid               string         `json:"wxuid"`
+	PushMsgTags         string         `json:"pushMsgTags"`
+	DeleteType          int            `gorm:"default:9" json:"deleteType"` // 0-不处理 1-上传前删除 2-上传前移动 3-上传后删除 4-上传后移动 5-上传前复制 6-上传后复制 7-上传完成后立即删除 8-N天后删除移动 9-投稿成功后删除 10-投稿成功后移动 11-审核通过后复制 12-审核通过后删除
+	DeleteDay           int            `gorm:"default:5" json:"deleteDay"`
+	MoveDir             string         `json:"moveDir"`
+	SendDm              bool           `gorm:"default:false" json:"sendDm"`
+	DmDistinct          bool           `gorm:"default:false" json:"dmDistinct"`          // 弹幕去重
+	DmUlLevel           int            `gorm:"default:0" json:"dmUlLevel"`               // 用户等级过滤
+	DmMedalLevel        int            `gorm:"default:0" json:"dmMedalLevel"`            // 粉丝勋章过滤 0-不过滤 1-佩戴粉丝勋章 2-佩戴主播粉丝勋章
+	DmKeywordBlacklist  string         `gorm:"type:text" json:"dmKeywordBlacklist"`      // 关键词屏蔽，一行一个
+	EnableDanmakuBurn   bool           `gorm:"default:false" json:"enableDanmakuBurn"`   // 启用弹幕烧录（生成带弹幕版本）
+	AutoUpdatePublished bool           `gorm:"default:false" json:"autoUpdatePublished"` // 弹幕版上传后自动更新已投稿视频
+	DanmakuBurnStyle    string         `gorm:"default:default" json:"danmakuBurnStyle"`  // 弹幕样式：default, compact, large
+	Recording           bool           `gorm:"default:false;index" json:"recording"`
+	Streaming           bool           `gorm:"default:false;index" json:"streaming"`
+	SessionID           string         `gorm:"index" json:"sessionId"`
+	SeasonID            int64          `json:"seasonId"`
+	MergeBySession      bool           `gorm:"default:true" json:"mergeBySession"` // 同SessionID合并到一个投稿
+	LiveStatus          int            `gorm:"default:0;index" json:"liveStatus"`  // 直播状态: 0未开播 1正在直播 2轮播中
+	LastCheckTime       *time.Time     `json:"lastCheckTime"`                      // 最后检查时间
 }
 
 // RecordHistory 录制历史
 type RecordHistory struct {
-	ID               uint           `gorm:"primarykey" json:"id"`
-	CreatedAt        time.Time      `json:"createdAt"`
-	UpdatedAt        time.Time      `json:"updatedAt"`
-	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`
-	EventID          string         `gorm:"index" json:"eventId"`
-	RoomID           string         `gorm:"index;not null" json:"roomId"`
-	SessionID        string         `gorm:"uniqueIndex:idx_session" json:"sessionId"`
-	Uname            string         `json:"uname"`
-	Title            string         `json:"title"`
-	AreaName         string         `json:"areaName"`
-	StartTime        time.Time      `gorm:"index" json:"startTime"`
-	EndTime          time.Time      `gorm:"index" json:"endTime"`
-	Recording        bool           `gorm:"default:false;index" json:"recording"`
-	Streaming        bool           `gorm:"default:false" json:"streaming"`
-	Upload           bool           `gorm:"default:true;index" json:"upload"`
-	Publish          bool           `gorm:"default:false;index" json:"publish"`
-	BvID             string         `gorm:"index" json:"bvId"`
-	AvID             string         `gorm:"index" json:"avId"`
-	Code             int            `gorm:"default:-1" json:"code"`
-	Message          string         `json:"message"`
-	FilePath         string         `json:"filePath"`
-	FileSize         int64          `gorm:"default:0" json:"fileSize"`
-	UploadRetryCount int            `gorm:"default:0" json:"uploadRetryCount"`
-	UploadStatus     int            `gorm:"default:0;index" json:"uploadStatus"`    // 上传状态: 0未上传, 1上传中, 2已上传
-	VideoState       int            `gorm:"default:-1;index" json:"videoState"`     // 视频状态: -1未知, 0审核中, 1已通过, -2未通过, 2已下架, 3仅自己可见
-	VideoStateDesc   string         `json:"videoStateDesc"`                         // 视频状态描述
-	DanmakuSent      bool           `gorm:"default:false;index" json:"danmakuSent"` // 弹幕是否已发送
-	DanmakuCount     int            `gorm:"default:0" json:"danmakuCount"`          // 弹幕总数
-	FilesMoved       bool           `gorm:"default:false;index" json:"filesMoved"`  // 文件是否已移动
-	SyncedAt         *time.Time     `json:"syncedAt"`                               // 最后同步时间
-	CoverURL         string         `json:"coverUrl"`                               // 封面URL
-	RoomName         string         `gorm:"-" json:"roomName"`
-	PartCount        int            `gorm:"-" json:"partCount"`
-	PartDuration     float64        `gorm:"-" json:"partDuration"`
-	UploadPartCount  int            `gorm:"-" json:"uploadPartCount"`
-	RecordPartCount  int            `gorm:"-" json:"recordPartCount"`
-	MsgCount         int            `gorm:"-" json:"msgCount"`
+	ID                uint           `gorm:"primarykey" json:"id"`
+	CreatedAt         time.Time      `json:"createdAt"`
+	UpdatedAt         time.Time      `json:"updatedAt"`
+	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
+	EventID           string         `gorm:"index" json:"eventId"`
+	RoomID            string         `gorm:"index;not null" json:"roomId"`
+	SessionID         string         `gorm:"uniqueIndex:idx_session" json:"sessionId"`
+	Uname             string         `json:"uname"`
+	Title             string         `json:"title"`
+	AreaName          string         `json:"areaName"`
+	StartTime         time.Time      `gorm:"index" json:"startTime"`
+	EndTime           time.Time      `gorm:"index" json:"endTime"`
+	Recording         bool           `gorm:"default:false;index" json:"recording"`
+	Streaming         bool           `gorm:"default:false" json:"streaming"`
+	Upload            bool           `gorm:"default:true;index" json:"upload"`
+	Publish           bool           `gorm:"default:false;index" json:"publish"`
+	BvID              string         `gorm:"index" json:"bvId"`
+	AvID              string         `gorm:"index" json:"avId"`
+	Code              int            `gorm:"default:-1" json:"code"`
+	Message           string         `json:"message"`
+	FilePath          string         `json:"filePath"`
+	FileSize          int64          `gorm:"default:0" json:"fileSize"`
+	UploadRetryCount  int            `gorm:"default:0" json:"uploadRetryCount"`
+	UploadStatus      int            `gorm:"default:0;index" json:"uploadStatus"`    // 上传状态: 0未上传, 1上传中, 2已上传
+	VideoState        int            `gorm:"default:-1;index" json:"videoState"`     // 视频状态: -1未知, 0审核中, 1已通过, -2未通过, 2已下架, 3仅自己可见
+	VideoStateDesc    string         `json:"videoStateDesc"`                         // 视频状态描述
+	DanmakuSent       bool           `gorm:"default:false;index" json:"danmakuSent"` // 弹幕是否已发送
+	DanmakuCount      int            `gorm:"default:0" json:"danmakuCount"`          // 弹幕总数
+	FilesMoved        bool           `gorm:"default:false;index" json:"filesMoved"`  // 文件是否已移动
+	SyncedAt          *time.Time     `json:"syncedAt"`                               // 最后同步时间
+	CoverURL          string         `json:"coverUrl"`                               // 封面URL
+	ScheduledDeleteAt *time.Time     `gorm:"index" json:"scheduledDeleteAt"`         // 计划删除时间（用于延迟删除策略）
+	RoomName          string         `gorm:"-" json:"roomName"`
+	PartCount         int            `gorm:"-" json:"partCount"`
+	PartDuration      float64        `gorm:"-" json:"partDuration"`
+	UploadPartCount   int            `gorm:"-" json:"uploadPartCount"`
+	RecordPartCount   int            `gorm:"-" json:"recordPartCount"`
+	MsgCount          int            `gorm:"-" json:"msgCount"`
 }
 
 // RecordHistoryPart 录制分P
@@ -131,16 +132,16 @@ type RecordHistoryPart struct {
 	CID                 int64      `gorm:"column:c_id" json:"cid"`
 	FileDelete          bool       `gorm:"default:false" json:"fileDelete"`
 	FileMoved           bool       `gorm:"default:false" json:"fileMoved"`
-	Page                int        `gorm:"default:0" json:"page"`                // 分P序号
-	XcodeState          int        `gorm:"default:0" json:"xcodeState"`          // 转码状态
-	UploadRetryCount    int        `gorm:"default:0" json:"uploadRetryCount"`    // 上传重试次数
-	UploadErrorMsg      string     `gorm:"type:text" json:"uploadErrorMsg"`      // 上传错误信息
-	UploadLine          string     `json:"uploadLine"`                           // 实际上传使用的线路
-	RateLimitCooldownAt *time.Time `gorm:"index" json:"rateLimitCooldownAt"`     // 速率限制冷却时间（24小时后恢复）
-	RateLimitRetryCount int        `gorm:"default:0" json:"rateLimitRetryCount"` // 406速率限制失败次数
+	Page                int        `gorm:"default:0" json:"page"`                 // 分P序号
+	XcodeState          int        `gorm:"default:0" json:"xcodeState"`           // 转码状态
+	UploadRetryCount    int        `gorm:"default:0" json:"uploadRetryCount"`     // 上传重试次数
+	UploadErrorMsg      string     `gorm:"type:text" json:"uploadErrorMsg"`       // 上传错误信息
+	UploadLine          string     `json:"uploadLine"`                            // 实际上传使用的线路
+	RateLimitCooldownAt *time.Time `gorm:"index" json:"rateLimitCooldownAt"`      // 速率限制冷却时间（24小时后恢复）
+	RateLimitRetryCount int        `gorm:"default:0" json:"rateLimitRetryCount"`  // 406速率限制失败次数
 	IsTempFile          bool       `gorm:"default:false;index" json:"isTempFile"` // 是否为临时文件（自动切分、弹幕烧录等生成）
-	SourcePartID        uint       `gorm:"index" json:"sourcePartId"`              // 源Part ID（如果是从其他Part派生）
-	TempFileType        string     `json:"tempFileType"`                           // 临时文件类型：split（切分）, danmaku_burn（弹幕烧录）
+	SourcePartID        uint       `gorm:"index" json:"sourcePartId"`             // 源Part ID（如果是从其他Part派生）
+	TempFileType        string     `json:"tempFileType"`                          // 临时文件类型：split（切分）, danmaku_burn（弹幕烧录）
 }
 
 // BiliBiliUser B站用户
