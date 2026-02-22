@@ -356,79 +356,93 @@ type FilePreviewInfo struct {
 }
 
 // PreviewFiles 预览待导入的文件（不实际导入）
+// 扫描顺序与 ScanAndImport 一致：先自定义路径，再工作目录
 func (s *FileScanService) PreviewFiles(config *ScanConfig) ([]*FilePreviewInfo, error) {
 	db := database.GetDB()
 	var previews []*FilePreviewInfo
+	// 用于去重，防止同一文件被多个路径扫到
+	seen := make(map[string]struct{})
 
-	if config.WorkPath == "" {
-		return previews, fmt.Errorf("工作目录未配置")
-	}
-
-	if _, err := os.Stat(config.WorkPath); os.IsNotExist(err) {
-		return previews, fmt.Errorf("工作目录不存在: %s", config.WorkPath)
-	}
-
-	log.Printf("[FileScan] 预览扫描目录: %s", config.WorkPath)
-
-	// 遍历工作目录
-	err := filepath.Walk(config.WorkPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-
-		// 跳过目录
-		if info.IsDir() {
-			return nil
-		}
-
-		// 检查文件扩展名
-		ext := strings.ToLower(filepath.Ext(path))
-		if !s.isVideoFile(ext, config.VideoExtensions) {
-			return nil
-		}
-
-		// 检查文件大小
-		if info.Size() < config.MinFileSize {
-			return nil
-		}
-
-		// 额外安全检查：最近1分钟内修改过的文件不扫描
-		if time.Since(info.ModTime()) < time.Minute {
-			return nil
-		}
-
-		// 检查文件是否已在数据库
-		var existingPart models.RecordHistoryPart
-		inDatabase := db.Where("file_path = ?", path).First(&existingPart).Error == nil
-
-		// 解析文件元数据
-		metadata := s.parseFileMetadata(path, info)
-		if metadata == nil {
-			metadata = &FileMetadata{
-				RoomID: "unknown",
-				Uname:  "未知主播",
-				Title:  filepath.Base(path),
+	// walkDir 是内部辅助函数，遍历单个目录并追加结果
+	walkDir := func(dirPath string) error {
+		return filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
 			}
+			if info.IsDir() {
+				return nil
+			}
+			// 去重
+			if _, already := seen[path]; already {
+				return nil
+			}
+			seen[path] = struct{}{}
+
+			ext := strings.ToLower(filepath.Ext(path))
+			if !s.isVideoFile(ext, config.VideoExtensions) {
+				return nil
+			}
+			if info.Size() < config.MinFileSize {
+				return nil
+			}
+			// 最近1分钟内修改过的文件不扫描
+			if time.Since(info.ModTime()) < time.Minute {
+				return nil
+			}
+
+			// 检查文件是否已在数据库
+			var existingPart models.RecordHistoryPart
+			inDatabase := db.Where("file_path = ?", path).First(&existingPart).Error == nil
+
+			// 解析文件元数据
+			metadata := s.parseFileMetadata(path, info)
+			if metadata == nil {
+				metadata = &FileMetadata{
+					RoomID: "unknown",
+					Uname:  "未知主播",
+					Title:  filepath.Base(path),
+				}
+			}
+
+			previews = append(previews, &FilePreviewInfo{
+				FilePath:   path,
+				FileName:   filepath.Base(path),
+				FileSize:   info.Size(),
+				ModTime:    info.ModTime(),
+				RoomID:     metadata.RoomID,
+				Uname:      metadata.Uname,
+				Title:      metadata.Title,
+				InDatabase: inDatabase,
+			})
+			return nil
+		})
+	}
+
+	// 1. 先扫描自定义路径（与 ScanAndImport 行为一致）
+	customPaths := getCustomScanPaths()
+	for _, cp := range customPaths {
+		log.Printf("[FileScan] 预览扫描自定义目录: %s", cp)
+		if err := walkDir(cp); err != nil {
+			log.Printf("[FileScan] 预览扫描自定义目录失败: %s, error: %v", cp, err)
 		}
+	}
 
-		preview := &FilePreviewInfo{
-			FilePath:   path,
-			FileName:   filepath.Base(path),
-			FileSize:   info.Size(),
-			ModTime:    info.ModTime(),
-			RoomID:     metadata.RoomID,
-			Uname:      metadata.Uname,
-			Title:      metadata.Title,
-			InDatabase: inDatabase,
+	// 2. 扫描工作目录（WorkPath 不存在时仅警告，不中断——自定义路径的结果仍可返回）
+	if config.WorkPath == "" {
+		if len(customPaths) == 0 {
+			return previews, fmt.Errorf("工作目录未配置，且没有有效的自定义扫描路径")
 		}
-
-		previews = append(previews, preview)
-
-		return nil
-	})
-
-	if err != nil {
-		return previews, fmt.Errorf("预览扫描失败: %w", err)
+		log.Printf("[FileScan] 预览：工作目录未配置，仅扫描自定义路径")
+	} else if _, err := os.Stat(config.WorkPath); os.IsNotExist(err) {
+		if len(customPaths) == 0 {
+			return previews, fmt.Errorf("工作目录不存在: %s (提示: Docker部署请检查是否挂载了录播目录到/rec，裸机部署请确保./data/recordings存在)", config.WorkPath)
+		}
+		log.Printf("[FileScan] 预览：工作目录不存在 (%s)，仅扫描自定义路径", config.WorkPath)
+	} else {
+		log.Printf("[FileScan] 预览扫描工作目录: %s", config.WorkPath)
+		if err := walkDir(config.WorkPath); err != nil {
+			log.Printf("[FileScan] 预览扫描工作目录失败: %v", err)
+		}
 	}
 
 	log.Printf("[FileScan] 预览完成: 发现 %d 个文件", len(previews))
@@ -757,19 +771,27 @@ func (s *FileScanService) parseFileMetadata(filePath string, info os.FileInfo) *
 			// 尝试解析日期时间
 			if len(fields) >= 4 {
 				dateTimeStr := fields[2] + fields[3]
-				if t, err := time.Parse("20060102150405", dateTimeStr[:14]); err == nil {
-					metadata.StartTime = t
-					metadata.EndTime = t.Add(time.Hour) // 默认1小时
+				if len(dateTimeStr) >= 14 {
+					if t, err := time.Parse("20060102150405", dateTimeStr[:14]); err == nil {
+						metadata.StartTime = t
+						metadata.EndTime = t.Add(time.Hour) // 默认1小时
+					}
 				}
 			}
 
-			// 提取标题 - 取最后一个 - 之后的内容
-			// 格式: 录制-5050-20260101-183709-843-新年第一天直播 紧张.flv
-			if len(fields) >= 5 && metadata.Title == strings.TrimSuffix(fileName, filepath.Ext(fileName)) {
-				// 标题是最后一个字段，去除扩展名
-				newTitle := fields[len(fields)-1]
-				newTitle = strings.TrimSuffix(newTitle, filepath.Ext(newTitle))
-				if newTitle != "" {
+			// 提取标题
+			// 格式: 录制-{roomId}-{YYYYMMDD}-{HHMMSS}-{序号}-{标题...}.flv
+			// fields: [录制(0), roomId(1), date(2), time(3), seq(4), title_part(5), ...]
+			// len==5 时 fields[4] 是序号，没有标题字段，不能误用序号作标题
+			// len>=6 时 fields[5:] 才是标题（标题本身可包含连字符）
+			if len(fields) >= 6 && metadata.Title == strings.TrimSuffix(fileName, filepath.Ext(fileName)) {
+				titleParts := append([]string(nil), fields[5:]...)
+				// 去掉最后一段的文件扩展名（如 .flv）
+				titleParts[len(titleParts)-1] = strings.TrimSuffix(
+					titleParts[len(titleParts)-1],
+					filepath.Ext(titleParts[len(titleParts)-1]),
+				)
+				if newTitle := strings.Join(titleParts, "-"); newTitle != "" {
 					metadata.Title = newTitle
 				}
 			}
