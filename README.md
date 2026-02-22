@@ -7,51 +7,9 @@
 
 ## 快速部署
 
-1. **安装脚本部署**：使用环境变量 `GOBUP_USERNAME` 和 `GOBUP_PASSWORD`
-2. **Docker 部署**：使用环境变量 `USERNAME` 和 `PASSWORD`
-3. **手动部署**：使用命令行参数 `-username` 和 `-password`
+- **Docker 部署**：使用环境变量 `USERNAME` 和 `PASSWORD`
 
-### 方式一：一键安装脚本
-
-使用一键安装脚本，自动下载并安装最新版本的服务器和Web文件：
-
-**带认证部署：**
-
-```bash
-# 下载脚本
-curl -fsSL https://cdn.spiritlhl.net/https://raw.githubusercontent.com/spiritlhls/gobup/main/install.sh -o install.sh && chmod +x install.sh
-
-# 设置用户名密码安装
-GOBUP_USERNAME=admin GOBUP_PASSWORD=your_secure_password bash install.sh
-```
-
-**支持的选项：**
-- `install` - 完整安装（默认）
-- `upgrade` - 升级到最新版本
-- `help` - 显示帮助信息
-
-**环境变量：**
-- `INSTALL_VERSION=vYYYYMMDD-HHMMSS` - 指定安装版本
-- `GOBUP_USERNAME=admin` - 管理员用户名（推荐设置）
-- `GOBUP_PASSWORD=password` - 管理员密码（推荐设置）
-
-**示例：**
-
-```bash
-# 完整安装并设置认证（推荐）
-GOBUP_USERNAME=admin GOBUP_PASSWORD=123456 bash install.sh
-
-# 升级到最新版本
-bash install.sh upgrade
-```
-
-**安装后访问：**
-- Web界面: http://localhost:12380
-- 如果设置了认证，使用设置的用户名密码登录
-- 如果未设置认证，首次访问会要求输入用户名密码
-- 服务管理: `systemctl status gobup`
-
-### 方式二：使用预构建 Docker 镜像
+### 方式一：使用预构建 Docker 镜像
 
 所有镜像均支持 `linux/amd64` 和 `linux/arm64` 架构，**已内置 DanmakuFactory 专业弹幕转换工具**。
 
@@ -75,7 +33,7 @@ docker run -d \
 > - USERNAME 和 PASSWORD 仅用于首次启动时创建管理员账户，后续修改环境变量不会更新已存在的账户
 > - 镜像已内置 DanmakuFactory，启用弹幕烧录功能可获得专业弹幕效果
 
-### 方式三：使用 Docker Compose
+### 方式二：使用 Docker Compose
 
 创建 `docker-compose.yml`：
 
@@ -104,7 +62,7 @@ services:
 docker-compose up -d
 ```
 
-### 方式四：从源码构建 Docker 镜像
+### 方式三：从源码构建 Docker 镜像
 
 ```bash
 # 克隆仓库
@@ -128,153 +86,6 @@ docker run -d \
   --restart unless-stopped \
   gobup
 ```
-
-### 方式五：下载发布版本手动部署
-
-从 [Releases](https://github.com/spiritlhls/gobup/releases) 页面下载对应平台的二进制文件：
-
-**单二进制部署版本（前端已嵌入）：**
-- `gobup-server-linux-amd64.tar.gz` - Linux AMD64 版本
-- `gobup-server-linux-arm64.tar.gz` - Linux ARM64 版本
-- `gobup-server-darwin-amd64.tar.gz` - macOS Intel 版本
-- `gobup-server-darwin-arm64.tar.gz` - macOS Apple Silicon 版本
-- `gobup-server-windows-amd64.zip` - Windows AMD64 版本
-
-> 所有二进制文件已包含嵌入的前端页面，直接运行即可，无需额外部署前端文件。
-
-解压后运行：
-
-```bash
-# Linux/macOS（无认证）
-tar -xzf gobup-server-linux-amd64.tar.gz
-./gobup-server-linux-amd64 -port 12380 -work-path /path/to/bilirecord
-
-# Linux/macOS（带认证，推荐）
-./gobup-server-linux-amd64 -port 12380 -work-path /path/to/bilirecord \
-  -username admin -password your_password
-```
-
-```powershell
-# Windows（无认证）
-# 解压 gobup-server-windows-amd64.zip
-gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\bilirecord
-
-# Windows（带认证，推荐）
-gobup-server-windows-amd64.exe -port 12380 -work-path C:\path\to\bilirecord ^
-  -username admin -password your_password
-```
-
-**命令行参数说明：**
-- `-port`: Web 服务端口（默认 12380）
-- `-work-path`: 录播文件工作目录
-- `-username`: 管理员用户名（可选，首次启动时创建）
-- `-password`: 管理员密码（可选，首次启动时创建）
-- `-data-path`: 数据目录（默认 ./data）
-
-**访问 Web 界面：**
-- 所有部署方式统一访问：`http://localhost:12380` 或 `http://localhost:22380`（Docker映射端口）
-- 或使用服务器IP：`http://你的IP:12380` 或 `http://你的IP:22380`
-- 如果设置了认证，使用设置的用户名密码登录
-- 如果未设置认证，首次访问会要求输入用户名密码
-
-## 配置说明
-
-### 配置Docker网络（Docker部署）
-
-为了让录播姬和本项目能够相互通信，需要配置同一网络：
-
-```bash
-# 创建网络
-docker network create bili-net
-
-# 连接容器到网络
-docker network connect bili-net brec  # 或 blrec
-docker network connect bili-net gobup
-```
-
-### 配置扫盘目录
-
-GoBup会自动扫描录制文件并入库，无需配置Webhook：
-
-1. 访问Web界面 -> 控制面板
-2. 在"工作目录"中配置录播软件的录制目录（如 `/rec`）
-3. （可选）在"自定义扫描目录"中添加额外的扫描路径，用逗号分隔
-4. 系统会自动按设置的扫盘间隔扫描这些目录
-5. 也可以手动点击"扫描录入"按钮立即扫描
-
-> **智能文件扫描机制**：
-> - 系统会**自动检测直播状态**，通过B站API实时判断直播是否已结束
-> - 只有当直播结束且文件稳定后（5分钟缓冲时间），才会处理录播文件
-> - **保底机制**：如果API调用失败，自动回退到1小时时间判断，确保不会误扫描正在写入的文件
-> - 系统每5分钟自动更新所有房间的直播状态
-> - Docker部署时，确保已将录播目录挂载到容器（如 `-v /path/to/recordings:/rec`）
-> - 系统会优先扫描自定义目录，然后扫描工作目录
-> - 配置的"最小文件年龄"（默认12小时）作为无房间信息时的兜底策略
-
-### 添加B站账号
-
-访问Web界面 -> 用户管理 -> 添加用户：
-
-1. 点击"生成登录二维码"
-2. 使用哔哩哔哩App扫码登录
-3. 登录成功后，Cookie会自动保存
-
-### 配置直播间
-
-访问Web界面 -> 房间管理 -> 添加房间：
-
-- **房间ID**: 直播间房间号
-- **上传用户**: 选择已登录的B站账号
-- **分区**: 视频投稿分区（如游戏、娱乐等）
-- **标题模板**: 视频标题（支持变量）
-- **简介模板**: 视频简介（支持变量）
-- **标签**: 视频标签，用逗号分隔
-- **上传线路**: upos/app，建议upos（支持多条UPOS线路选择）
-- **合集ID**: 自动添加到指定合集（可选）
-- **分P设置**: 
-  - 是否分P
-  - 单个视频最大大小
-  - 分P标题模板
-
-### 配置弹幕烧录（可选）
-
-GoBup 支持将弹幕烧录到视频中。**预构建的 Docker 镜像已内置 DanmakuFactory 专业弹幕转换工具**，无需额外配置即可使用。
-
-#### 启用弹幕烧录
-
-1. 在房间配置 -> 视频处理 -> 启用"弹幕烧录"
-2. 选择弹幕样式（默认/紧凑/大字号）
-3. 系统会自动将弹幕烧录到视频中并作为额外分P上传
-
-**转换方式**：
-- ✅ **DanmakuFactory（推荐）**：预构建镜像已内置，专业 C 实现，性能优异
-  - 自动使用 DanmakuFactory 进行转换
-  - 更好的弹幕效果和自定义选项
-  - 原生性能，转换速度快
-- ✅ **内置转换（备用）**：如果 DanmakuFactory 不可用时自动回退
-  - 无额外依赖，保证功能可用
-  - 基础弹幕效果
-
-#### 从源码构建（高级用户）
-
-如果需要从源码构建镜像：
-
-**标准版（仅内置转换）**：
-```bash
-# 构建标准镜像（不含 DanmakuFactory）
-docker build -f Dockerfile -t gobup:standard .
-```
-
-**DanmakuFactory 版（推荐）**：
-```bash
-# 构建带 DanmakuFactory 的镜像
-docker build -f Dockerfile.danmaku -t gobup:danmaku .
-
-# 或使用 docker-compose
-docker-compose -f docker-compose.danmaku.yml up -d
-```
-
-详细说明请参考 [DANMAKU_FACTORY.md](DANMAKU_FACTORY.md)
 
 ### 配置WxPusher消息推送（可选）
 
