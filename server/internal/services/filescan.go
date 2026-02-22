@@ -390,9 +390,17 @@ func (s *FileScanService) PreviewFiles(config *ScanConfig) ([]*FilePreviewInfo, 
 				return nil
 			}
 
-			// 检查文件是否已在数据库
+			// 检查文件是否已在数据库（同时验证对应的历史记录存在，避免孤儿分P导致文件被误判为已入库）
 			var existingPart models.RecordHistoryPart
-			inDatabase := db.Where("file_path = ?", path).First(&existingPart).Error == nil
+			inDatabase := false
+			if db.Where("file_path = ?", path).First(&existingPart).Error == nil {
+				// 分P记录存在，再确认其历史记录也存在（未被软删除）
+				var linkedHistory models.RecordHistory
+				if db.Where("id = ?", existingPart.HistoryID).First(&linkedHistory).Error == nil {
+					inDatabase = true
+				}
+				// 若历史记录不存在则视为孤儿分P，inDatabase 保持 false，让用户可以重新导入
+			}
 
 			// 解析文件元数据
 			metadata := s.parseFileMetadata(path, info)
@@ -586,8 +594,9 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 		if createErr == nil {
 			break
 		}
-		// 如果是SessionID冲突，修改SessionID后重试
-		if strings.Contains(createErr.Error(), "Duplicate") || strings.Contains(createErr.Error(), "unique") {
+		// 如果是SessionID冲突，修改SessionID后重试（使用小写比较兼容 SQLite 的 "UNIQUE" 和 MySQL 的 "Duplicate"）
+		errMsgLower := strings.ToLower(createErr.Error())
+		if strings.Contains(errMsgLower, "duplicate") || strings.Contains(errMsgLower, "unique") {
 			log.Printf("[FileScan] 检测到SessionID冲突，修改后重试 (第%d次)", retry+1)
 			metadata.SessionID = fmt.Sprintf("%s_%d_%d", metadata.SessionID, time.Now().Unix(), retry)
 			time.Sleep(time.Millisecond * 100) // 短暂等待
@@ -1016,6 +1025,17 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 		Streaming: false,
 		Upload:    room.Upload,
 		Publish:   false,
+	}
+
+	// 创建前清理同 session_id 的软删除记录（避免 UNIQUE 约束冲突）
+	// 用户从 UI 删除历史记录时 GORM 只做软删除（设置 deleted_at），session_id 仍占用唯一索引
+	var softDeletedHistory models.RecordHistory
+	if err := db.Unscoped().Where("session_id = ? AND deleted_at IS NOT NULL", metadata.SessionID).First(&softDeletedHistory).Error; err == nil {
+		log.Printf("[FileScan] 发现被软删除的历史记录占用了 session_id，永久删除以释放: SessionID=%s, ID=%d",
+			metadata.SessionID, softDeletedHistory.ID)
+		if err := db.Unscoped().Delete(&softDeletedHistory).Error; err != nil {
+			log.Printf("[FileScan] 永久删除软删除记录失败: %v", err)
+		}
 	}
 
 	if err := db.Create(&history).Error; err != nil {
