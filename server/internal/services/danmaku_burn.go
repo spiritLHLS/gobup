@@ -308,30 +308,31 @@ func (s *DanmakuBurnService) burnWithFFmpeg(videoPath, assPath, outputPath strin
 	//   - fontsdir 路径用单引号包裹，防止路径含空格时截断
 	vfFilter := fmt.Sprintf("subtitles='%s':fontsdir='%s'", assPathEscaped, fontsDir)
 
-	// 判断源文件是否为FLV，FLV时间戳可能不规则，需要加 -fflags +genpts 重新生成时间戳
-	isFLV := strings.ToLower(filepath.Ext(videoPath)) == ".flv"
-
-	// ffmpeg命令：
-	//   -fflags +genpts : 对 FLV 等时间戳不规则来源重新生成 PTS，避免字幕轨不同步
-	//   -c:v libx264   : 显式H.264编码
-	//   -crf 18        : 视觉无损画质
-	//   -preset fast   : 编码速度
-	//   -c:a copy      : 音频直接复制
-	var args []string
-	if isFLV {
-		args = append(args, "-fflags", "+genpts")
-	}
-	args = append(args,
+	// ffmpeg命令（针对 B 站转码兼容性优化）：
+	//   -fflags +genpts  : 对所有输入重新生成 PTS，修复 FLV/直播录制中不规则时间戳
+	//   -c:v libx264     : 显式 H.264 编码
+	//   -crf 18          : 视觉无损画质
+	//   -preset fast     : 编码速度
+	//   -pix_fmt yuv420p : 强制 4:2:0 像素格式，B 站转码器不接受 yuv422p/yuv444p
+	//   -vsync cfr       : 强制恒定帧率（CFR），VFR 视频上传 B 站后极易转码失败
+	//   -c:a aac         : 重新编码为 AAC，避免直接 copy 时携带不规则时间戳导致 B 站转码报错
+	//   -b:a 192k        : AAC 音频码率
+	//   -movflags +faststart : MP4 元信息前置，支持边下边播
+	args := []string{
+		"-fflags", "+genpts",
 		"-i", videoPath,
 		"-vf", vfFilter,
 		"-c:v", "libx264",
 		"-crf", "18",
 		"-preset", "fast",
-		"-c:a", "copy",
+		"-pix_fmt", "yuv420p",
+		"-vsync", "cfr",
+		"-c:a", "aac",
+		"-b:a", "192k",
 		"-movflags", "+faststart",
 		"-y",
 		outputPath,
-	)
+	}
 
 	log.Printf("[弹幕烧录] 执行ffmpeg命令: ffmpeg %s", strings.Join(args, " "))
 
