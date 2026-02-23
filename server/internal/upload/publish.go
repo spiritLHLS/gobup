@@ -877,6 +877,29 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 	// 调用EditVideo API追加弹幕版分P
 	log.Printf("[回补弹幕版] 调用EditVideo API: aid=%d, 总分P=%d", aidInt, len(allVideoParts))
 	if err := client.EditVideo(aidInt, title, desc, tags, tid, copyright, cover, allVideoParts, source); err != nil {
+		errStr := err.Error()
+		// code=21588: 该文件内容无法被识别（Bilibili CDN上的文件损坏/无效）
+		// code=21054: 视频文件不存在（CDN上已被清除）
+		// 这类错误不可通过重试恢复，需要删除损坏的烧录记录并重新触发一次完整的烧录+上传流程
+		if strings.Contains(errStr, "code=21588") || strings.Contains(errStr, "code=21054") {
+			log.Printf("[回补弹幕版] 检测到不可恢复的CDN文件错误 (burned_part_id=%d): %v", burnedPartID, err)
+			log.Printf("[回补弹幕版] 将删除损坏的烧录记录，下次回补检查周期将重新触发烧录 (source_part_id=%d)", burnedPart.SourcePartID)
+			// 删除本地烧录文件（如果还在磁盘上）
+			if burnedPart.FilePath != "" {
+				if removeErr := os.Remove(burnedPart.FilePath); removeErr != nil && !os.IsNotExist(removeErr) {
+					log.Printf("[回补弹幕版] 删除损坏烧录文件失败: %v", removeErr)
+				} else {
+					log.Printf("[回补弹幕版] 已删除损坏烧录文件: %s", burnedPart.FilePath)
+				}
+			}
+			// 硬删除DB记录（不用软删除，避免 anyBurnedCount 仍能查到）
+			if dbErr := db.Unscoped().Delete(&burnedPart).Error; dbErr != nil {
+				log.Printf("[回补弹幕版] 删除损坏烧录DB记录失败: burned_part_id=%d, err=%v", burnedPartID, dbErr)
+			} else {
+				log.Printf("[回补弹幕版] 已删除损坏烧录DB记录: burned_part_id=%d", burnedPartID)
+			}
+			return fmt.Errorf("追加弹幕版分P失败(CDN文件损坏，已重置等待重新烧录): %w", err)
+		}
 		return fmt.Errorf("追加弹幕版分P失败: %w", err)
 	}
 
