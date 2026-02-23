@@ -1,11 +1,45 @@
 package bili
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/imroc/req/v3"
 )
+
+// StringSlice 可同时反序列化 B 站 API 中 tag 字段的两种格式：
+//   - JSON array:  ["tag1","tag2"]
+//   - JSON string: "tag1,tag2"（逗号分隔）
+type StringSlice []string
+
+func (s *StringSlice) UnmarshalJSON(data []byte) error {
+	// 先尝试 []string
+	var arr []string
+	if err := json.Unmarshal(data, &arr); err == nil {
+		*s = arr
+		return nil
+	}
+	// 再尝试 string（逗号分隔）
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	if str == "" {
+		*s = nil
+		return nil
+	}
+	parts := strings.Split(str, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			result = append(result, t)
+		}
+	}
+	*s = result
+	return nil
+}
 
 // VideoInfo 视频基本信息
 type VideoInfo struct {
@@ -125,15 +159,15 @@ func (c *BiliClient) GetVideoInfoByAid(aid int64) (*VideoInfo, error) {
 // VideoArchiveDetail 视频稿件详细信息（member API）
 type VideoArchiveDetail struct {
 	Archive struct {
-		Aid       int64    `json:"aid"`
-		Bvid      string   `json:"bvid"`
-		Title     string   `json:"title"`
-		Desc      string   `json:"desc"`
-		Copyright int      `json:"copyright"`
-		Source    string   `json:"source"`
-		Tid       int      `json:"tid"`
-		Pic       string   `json:"cover"`
-		Tag       []string `json:"tag"`
+		Aid       int64       `json:"aid"`
+		Bvid      string      `json:"bvid"`
+		Title     string      `json:"title"`
+		Desc      string      `json:"desc"`
+		Copyright int         `json:"copyright"`
+		Source    string      `json:"source"`
+		Tid       int         `json:"tid"`
+		Pic       string      `json:"cover"`
+		Tag       StringSlice `json:"tag"`
 	} `json:"archive"`
 	Videos []struct {
 		Aid        int64  `json:"aid"`
@@ -152,9 +186,9 @@ type VideoArchiveDetail struct {
 }
 
 type VideoArchiveDetailResponse struct {
-	Code    int                 `json:"code"`
-	Message string              `json:"message"`
-	Data    VideoArchiveDetail  `json:"data"`
+	Code    int                `json:"code"`
+	Message string             `json:"message"`
+	Data    VideoArchiveDetail `json:"data"`
 }
 
 // GetArchiveDetailByAid 获取视频稿件详细信息（包含desc, tag, copyright, source等）
