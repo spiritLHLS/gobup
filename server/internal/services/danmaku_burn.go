@@ -200,12 +200,17 @@ func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history 
 	}
 
 	// 将ASS写到系统临时目录（ASCII-only路径），避免含中文/特殊字符的路径传入ffmpeg subtitles滤镜时失败
+	// 注意：用 CreateTemp 只是为了获得一个唯一的临时路径；必须在调用 DanmakuFactory 之前
+	// 删除该空文件——否则 DanmakuFactory 检测到目标文件已存在后在非交互模式下不会写入内容，
+	// 导致输出文件始终为 0 字节，进而触发"ASS文件未生成或为空"错误。
 	tmpFile, err := os.CreateTemp("", "gobup_danmaku_*.ass")
 	if err != nil {
 		return "", fmt.Errorf("创建临时ASS文件失败: %w", err)
 	}
 	assPath := tmpFile.Name()
 	tmpFile.Close()
+	// 删除空占位文件，让 DanmakuFactory 自行创建（避免"file already exists"跳过写入）
+	os.Remove(assPath)
 
 	log.Printf("[弹幕烧录] 使用 DanmakuFactory 转换: %s -> %s (临时路径)", xmlPath, assPath)
 
