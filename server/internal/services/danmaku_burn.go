@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gobup/server/internal/database"
@@ -25,6 +26,11 @@ const (
 	DanmakuFontsDir = "/usr/share/fonts"
 )
 
+// burningSourceParts 内存级防重入锁：防止同一源分P被多个 goroutine 并发烧录。
+// 键为源分P的数据库 ID（uint），值恒为 true。
+// 适用场景：Path A（上传完成实时触发）和 Path B/C（定时回补/启动恢复）同时调用 BurnDanmakuToVideo。
+var burningSourceParts sync.Map
+
 // DanmakuBurnService 弹幕烧录服务
 type DanmakuBurnService struct{}
 
@@ -35,6 +41,12 @@ func NewDanmakuBurnService() *DanmakuBurnService {
 // BurnDanmakuToVideo 将弹幕烧录到视频文件
 // 返回：生成的带弹幕视频路径，错误
 func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) (string, error) {
+	// 内存级防重入：阻止同一源分P被并发烧录（解决 Path A 与 Path B/C 的 TOCTOU 竞争）
+	if _, loaded := burningSourceParts.LoadOrStore(part.ID, true); loaded {
+		return "", fmt.Errorf("[弹幕烧录] 源分P %d 正在烧录中，本次调用跳过（已有并发任务持有锁）", part.ID)
+	}
+	defer burningSourceParts.Delete(part.ID)
+
 	db := database.GetDB()
 
 	// 检查源视频文件是否存在

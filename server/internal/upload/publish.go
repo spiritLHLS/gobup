@@ -377,6 +377,18 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	// 注意：投稿后不修改UploadStatus，保持为2（已上传）
 	db.Save(&history)
 
+	// 如果弹幕烧录功能已开启，标记此次一起投稿的弹幕版分P 为 appended_to_video=true。
+	// 防止 AppendDanmakuBurnedPartsToApprovedVideos 定时任务在审核通过后再次追加已经包含在初始投稿里的弹幕版分P。
+	if room.EnableDanmakuBurn {
+		affected := db.Model(&models.RecordHistoryPart{}).Where(
+			"history_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ?",
+			historyID, true, "danmaku_burn", true,
+		).Update("appended_to_video", true)
+		if affected.RowsAffected > 0 {
+			log.Printf("[投稿成功] 已标记 %d 个弹幕版分P 为 appended_to_video=true (history_id=%d)", affected.RowsAffected, historyID)
+		}
+	}
+
 	log.Printf("投稿成功: AV%d, BV%s", avID, bvid)
 
 	// 兜底检测机制：使用新的API验证投稿是否真的成功
@@ -723,6 +735,14 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 // UpdatePublishedVideoWithBurnedParts 回补更新已投稿视频，追加弹幕版分P
 // 当弹幕版分P上传完成后，检查对应的历史记录是否已投稿，如果已投稿且没有弹幕版，则追加弹幕版分P
 func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
+	// 内存级防重入：防止 Path A（上传完成立即调用）与 Path B/C（定时任务发现 appended_to_video=false）并发调用
+	// 导致同一弹幕版分P 在 B 站视频里出现两次
+	if _, loaded := s.appendingBurnedParts.LoadOrStore(burnedPartID, true); loaded {
+		log.Printf("[回补弹幕版] 烧录版分P %d 正在追加中，跳过并发调用", burnedPartID)
+		return nil
+	}
+	defer s.appendingBurnedParts.Delete(burnedPartID)
+
 	db := database.GetDB()
 
 	// 获取弹幕版分P

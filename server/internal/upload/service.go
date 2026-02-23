@@ -21,12 +21,13 @@ const (
 )
 
 type Service struct {
-	uploadingParts      sync.Map // partID -> true，防止同一分P并发上传
-	publishingHistories sync.Map // historyID -> true，防止同一历史记录并发投稿
-	wxPusher            *services.WxPusherService
-	templateSvc         *services.TemplateService
-	progressTracker     *ProgressTracker
-	queueManager        *QueueManager
+	uploadingParts       sync.Map // partID -> true，防止同一分P并发上传
+	publishingHistories  sync.Map // historyID -> true，防止同一历史记录并发投稿
+	appendingBurnedParts sync.Map // burnedPartID -> true，防止同一烧录版分P并发调用 EditVideo
+	wxPusher             *services.WxPusherService
+	templateSvc          *services.TemplateService
+	progressTracker      *ProgressTracker
+	queueManager         *QueueManager
 }
 
 func NewService() *Service {
