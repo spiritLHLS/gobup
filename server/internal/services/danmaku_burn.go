@@ -356,6 +356,7 @@ func (s *DanmakuBurnService) generateOutputPath(inputPath string) string {
 }
 
 // CleanTempFiles 清理临时文件（上传成功后调用）
+// 对 danmaku_burn 类型的临时文件，仅当 appended_to_video=true 时才删除物理文件。
 func (s *DanmakuBurnService) CleanTempFiles(historyID uint) error {
 	db := database.GetDB()
 
@@ -370,6 +371,12 @@ func (s *DanmakuBurnService) CleanTempFiles(historyID uint) error {
 
 	successCount := 0
 	for _, part := range tempParts {
+		// 弹幕烧录版：仅当已追加到视频（appended_to_video=true）才删除物理文件
+		if part.TempFileType == "danmaku_burn" && !part.AppendedToVideo {
+			log.Printf("[临时文件清理] 跳过未追加的弹幕烧录版: part_id=%d, file=%s", part.ID, part.FilePath)
+			continue
+		}
+
 		// 删除物理文件
 		if part.FilePath != "" {
 			if err := os.Remove(part.FilePath); err != nil && !os.IsNotExist(err) {
@@ -389,7 +396,14 @@ func (s *DanmakuBurnService) CleanTempFiles(historyID uint) error {
 	return nil
 }
 
+// FindDanmakuXML 查找对应的弹幕XML文件（供外部包调用）
+func (s *DanmakuBurnService) FindDanmakuXML(videoPath string) string {
+	return s.findDanmakuXML(videoPath)
+}
+
 // CleanTempFilesBySessionID 按SessionID清理临时文件（投稿成功后调用）
+// 对 danmaku_burn 类型的临时文件，仅当 appended_to_video=true 时才清理，
+// 防止删除尚未追加到视频中的弹幕版物理文件。
 func (s *DanmakuBurnService) CleanTempFilesBySessionID(sessionID string) error {
 	db := database.GetDB()
 
@@ -404,6 +418,13 @@ func (s *DanmakuBurnService) CleanTempFilesBySessionID(sessionID string) error {
 
 	successCount := 0
 	for _, part := range tempParts {
+		// 弹幕烧录版：仅当已追加到视频（appended_to_video=true）才删除物理文件
+		// 未追加的情况由弹幕回补定时任务处理完后再触发清理
+		if part.TempFileType == "danmaku_burn" && !part.AppendedToVideo {
+			log.Printf("[临时文件清理] 跳过未追加的弹幕烧录版: part_id=%d, file=%s", part.ID, part.FilePath)
+			continue
+		}
+
 		if part.FilePath != "" {
 			if err := os.Remove(part.FilePath); err != nil && !os.IsNotExist(err) {
 				log.Printf("[临时文件清理] 删除文件失败: %s, error: %v", part.FilePath, err)
@@ -418,5 +439,73 @@ func (s *DanmakuBurnService) CleanTempFilesBySessionID(sessionID string) error {
 	}
 
 	log.Printf("[临时文件清理] 清理完成: 成功 %d/%d", successCount, len(tempParts))
+	return nil
+}
+
+// CleanSplitTempFilesBySessionID 按SessionID清理 split（切分）类型的临时文件。
+// 只清理 temp_file_type='split' 的已上传分P，不触碰弹幕烧录版文件。
+// 由审核通过事件调用，弹幕烧录版在 AppendDanmakuBurnedPartsToApprovedVideos 追加并标记后清理。
+func (s *DanmakuBurnService) CleanSplitTempFilesBySessionID(sessionID string) error {
+	db := database.GetDB()
+
+	var tempParts []models.RecordHistoryPart
+	if err := db.Where("session_id = ? AND is_temp_file = ? AND upload = ? AND temp_file_type = ?",
+		sessionID, true, true, "split").Find(&tempParts).Error; err != nil {
+		return fmt.Errorf("查询split临时文件失败: %w", err)
+	}
+
+	log.Printf("[split清理] SessionID=%s 找到 %d 个split临时文件", sessionID, len(tempParts))
+
+	successCount := 0
+	for _, part := range tempParts {
+		if part.FilePath != "" {
+			if err := os.Remove(part.FilePath); err != nil && !os.IsNotExist(err) {
+				log.Printf("[split清理] 删除文件失败: %s, error: %v", part.FilePath, err)
+				continue
+			}
+			log.Printf("[split清理] ✓ 已删除split临时文件: %s", part.FilePath)
+		}
+		part.FileDelete = true
+		db.Save(&part)
+		successCount++
+	}
+
+	log.Printf("[split清理] 清理完成: 成功 %d/%d", successCount, len(tempParts))
+	return nil
+}
+
+// CleanAppendedBurnedPartsBySessionID 清理审核通过后、已追加到视频的弹幕烧录文件。
+// 由 AppendDanmakuBurnedPartsToApprovedVideos 在每个分P追加成功后调用。
+func (s *DanmakuBurnService) CleanAppendedBurnedPartsBySessionID(sessionID string) error {
+	db := database.GetDB()
+
+	var tempParts []models.RecordHistoryPart
+	if err := db.Where(
+		"session_id = ? AND is_temp_file = ? AND upload = ? AND temp_file_type = ? AND appended_to_video = ?",
+		sessionID, true, true, "danmaku_burn", true,
+	).Find(&tempParts).Error; err != nil {
+		return fmt.Errorf("查询已追加弹幕烧录文件失败: %w", err)
+	}
+
+	successCount := 0
+	for _, part := range tempParts {
+		if part.FileDelete {
+			continue // 已经清理过了
+		}
+		if part.FilePath != "" {
+			if err := os.Remove(part.FilePath); err != nil && !os.IsNotExist(err) {
+				log.Printf("[弹幕烧录清理] 删除文件失败: %s, error: %v", part.FilePath, err)
+				continue
+			}
+			log.Printf("[弹幕烧录清理] ✓ 已删除已追加的弹幕烧录文件: %s", part.FilePath)
+		}
+		part.FileDelete = true
+		db.Save(&part)
+		successCount++
+	}
+
+	if successCount > 0 {
+		log.Printf("[弹幕烧录清理] SessionID=%s 清理了 %d 个已追加的弹幕烧录文件", sessionID, successCount)
+	}
 	return nil
 }

@@ -66,6 +66,11 @@ func InitDB(dbPath string) error {
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_part_file_path ON record_history_parts(file_path)")
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_part_room_time ON record_history_parts(room_id, end_time)")
 
+	// 数据补填：对已存在的已审核通过记录，补填 approved_at 字段
+	// 新字段 approved_at 上线前已经通过审核的记录为 NULL，导致弹幕回补定时任务扫不到。
+	// 用 COALESCE(synced_at, updated_at) 作为近似的审核通过时间，保证历史数据立即参与回补扫描。
+	DB.Exec(`UPDATE record_histories SET approved_at = COALESCE(synced_at, updated_at) WHERE video_state = 1 AND approved_at IS NULL`)
+
 	// 初始化系统配置（如果不存在）
 	var config models.SystemConfig
 	if err := DB.First(&config).Error; err != nil {
@@ -78,7 +83,7 @@ func InitDB(dbPath string) error {
 			FileScanMaxAge:     720,     // 30天
 			CustomScanPaths:    "",      // 默认为空
 			EnableOrphanScan:   true,
-			OrphanScanInterval: 360, // 6小时
+			OrphanScanInterval: 360,  // 6小时
 			AutoDataRepair:     true, // 默认开启数据修复
 		}
 		DB.Create(&config)
@@ -126,8 +131,8 @@ func WithRetry(fn func() error, maxRetries int) error {
 // migrateLiveMsgsTable 处理 live_msgs 表的历史结构兼容迁移。
 // 旧版本将主键列命名为 "uint"（匿名嵌入 uint），新版本改为 "id"（具名字段 ID）。
 // SQLite 不支持直接 ALTER TABLE ADD PRIMARY KEY，因此采用"重建"策略：
-//   1. 检查旧表是否存在且包含 "uint" 列
-//   2. 如果是旧表：重命名 → 建新表 → 复制数据 → 删旧表
+//  1. 检查旧表是否存在且包含 "uint" 列
+//  2. 如果是旧表：重命名 → 建新表 → 复制数据 → 删旧表
 func migrateLiveMsgsTable() error {
 	// 检查 live_msgs 表是否存在
 	var tableCount int

@@ -100,6 +100,7 @@ type RecordHistory struct {
 	DanmakuCount      int            `gorm:"default:0" json:"danmakuCount"`          // 弹幕总数
 	FilesMoved        bool           `gorm:"default:false;index" json:"filesMoved"`  // 文件是否已移动
 	SyncedAt          *time.Time     `json:"syncedAt"`                               // 最后同步时间
+	ApprovedAt        *time.Time     `gorm:"index" json:"approvedAt"`                // 审核通过时间（video_state 首次变为 1 时记录）
 	CoverURL          string         `json:"coverUrl"`                               // 封面URL
 	ScheduledDeleteAt *time.Time     `gorm:"index" json:"scheduledDeleteAt"`         // 计划删除时间（用于延迟删除策略）
 	RoomName          string         `gorm:"-" json:"roomName"`
@@ -132,16 +133,17 @@ type RecordHistoryPart struct {
 	CID                 int64      `gorm:"column:c_id" json:"cid"`
 	FileDelete          bool       `gorm:"default:false" json:"fileDelete"`
 	FileMoved           bool       `gorm:"default:false" json:"fileMoved"`
-	Page                int        `gorm:"default:0" json:"page"`                 // 分P序号
-	XcodeState          int        `gorm:"default:0" json:"xcodeState"`           // 转码状态
-	UploadRetryCount    int        `gorm:"default:0" json:"uploadRetryCount"`     // 上传重试次数
-	UploadErrorMsg      string     `gorm:"type:text" json:"uploadErrorMsg"`       // 上传错误信息
-	UploadLine          string     `json:"uploadLine"`                            // 实际上传使用的线路
-	RateLimitCooldownAt *time.Time `gorm:"index" json:"rateLimitCooldownAt"`      // 速率限制冷却时间（24小时后恢复）
-	RateLimitRetryCount int        `gorm:"default:0" json:"rateLimitRetryCount"`  // 406速率限制失败次数
-	IsTempFile          bool       `gorm:"default:false;index" json:"isTempFile"` // 是否为临时文件（自动切分、弹幕烧录等生成）
-	SourcePartID        uint       `gorm:"index" json:"sourcePartId"`             // 源Part ID（如果是从其他Part派生）
-	TempFileType        string     `json:"tempFileType"`                          // 临时文件类型：split（切分）, danmaku_burn（弹幕烧录）
+	Page                int        `gorm:"default:0" json:"page"`                      // 分P序号
+	XcodeState          int        `gorm:"default:0" json:"xcodeState"`                // 转码状态
+	UploadRetryCount    int        `gorm:"default:0" json:"uploadRetryCount"`          // 上传重试次数
+	UploadErrorMsg      string     `gorm:"type:text" json:"uploadErrorMsg"`            // 上传错误信息
+	UploadLine          string     `json:"uploadLine"`                                 // 实际上传使用的线路
+	RateLimitCooldownAt *time.Time `gorm:"index" json:"rateLimitCooldownAt"`           // 速率限制冷却时间（24小时后恢复）
+	RateLimitRetryCount int        `gorm:"default:0" json:"rateLimitRetryCount"`       // 406速率限制失败次数
+	IsTempFile          bool       `gorm:"default:false;index" json:"isTempFile"`      // 是否为临时文件（自动切分、弹幕烧录等生成）
+	SourcePartID        uint       `gorm:"index" json:"sourcePartId"`                  // 源Part ID（如果是从其他Part派生）
+	TempFileType        string     `json:"tempFileType"`                               // 临时文件类型：split（切分）, danmaku_burn（弹幕烧录）
+	AppendedToVideo     bool       `gorm:"default:false;index" json:"appendedToVideo"` // 弹幕烧录版是否已通过 EditVideo 成功追加到已投稿视频
 }
 
 // BiliBiliUser B站用户

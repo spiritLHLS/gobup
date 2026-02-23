@@ -862,6 +862,17 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 
 	log.Printf("[回补弹幕版] 更新成功: aid=%d, bvid=%s, 已追加弹幕版分P", aidInt, history.BvID)
 
+	// 标记弹幕版分P为已追加到视频
+	burnedPart.AppendedToVideo = true
+	db.Save(&burnedPart)
+	log.Printf("[回补弹幕版] 已标记 AppendedToVideo=true: burned_part_id=%d", burnedPart.ID)
+
+	// 清理已追加的弹幕烧录视频文件（物理文件已无需保留）
+	if burnedPart.SessionID != "" {
+		burnService := services.NewDanmakuBurnService()
+		_ = burnService.CleanAppendedBurnedPartsBySessionID(burnedPart.SessionID)
+	}
+
 	// 更新历史记录的消息
 	history.Message = fmt.Sprintf("投稿成功（已追加弹幕版）")
 	db.Save(&history)
@@ -873,4 +884,162 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 	}
 
 	return nil
+}
+
+// AppendDanmakuBurnedPartsToApprovedVideos 定时任务入口：
+// 对所有已审核通过（video_state=1）且 approved_at 距今超过 1 小时的投稿，
+// 检查各原始分P是否还有未追加的弹幕烧录版。如果原始录制视频文件和对应的
+// XML 弹幕文件仍然存在，则触发烧录 → 上传 → 追加到 B 站视频的完整流程。
+func (s *Service) AppendDanmakuBurnedPartsToApprovedVideos() error {
+	db := database.GetDB()
+
+	// 只处理启用了弹幕烧录功能的房间
+	var rooms []models.RecordRoom
+	if err := db.Where("enable_danmaku_burn = ? AND upload = ?", true, true).Find(&rooms).Error; err != nil {
+		return fmt.Errorf("[弹幕回补] 查询房间失败: %w", err)
+	}
+
+	if len(rooms) == 0 {
+		return nil
+	}
+
+	oneHourAgo := time.Now().Add(-1 * time.Hour)
+
+	for _, room := range rooms {
+		if room.UploadUserID == 0 {
+			continue
+		}
+
+		// 查找该房间已投稿、已审核通过且 approved_at 至少 1 小时前的历史记录
+		var histories []models.RecordHistory
+		if err := db.Where(
+			"room_id = ? AND publish = ? AND video_state = ? AND approved_at IS NOT NULL AND approved_at <= ?",
+			room.RoomID, true, 1, oneHourAgo,
+		).Find(&histories).Error; err != nil {
+			log.Printf("[弹幕回补] 查询房间 %s 的历史记录失败: %v", room.RoomID, err)
+			continue
+		}
+
+		if len(histories) == 0 {
+			continue
+		}
+
+		log.Printf("[弹幕回补] 房间 %s 发现 %d 条符合弹幕回补条件的历史记录", room.RoomID, len(histories))
+
+		for _, history := range histories {
+			s.appendBurnedPartsForApprovedHistory(&history, &room)
+		}
+	}
+
+	return nil
+}
+
+// appendBurnedPartsForApprovedHistory 对单条已审核通过的历史记录执行弹幕回补逻辑。
+// 遍历该历史记录下的每个原始分P，若满足以下所有条件则异步触发烧录+上传+追加：
+//  1. 原始视频文件还在磁盘上
+//  2. 同名 .xml 弹幕文件存在
+//  3. 该分P尚未有对应的已追加弹幕版（appended_to_video=false 或无记录）
+func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHistory, room *models.RecordRoom) {
+	db := database.GetDB()
+
+	// 获取该历史记录的所有已上传原始分P（非临时文件）
+	var originalParts []models.RecordHistoryPart
+	if err := db.Where(
+		"history_id = ? AND upload = ? AND is_temp_file = ? AND recording = ?",
+		history.ID, true, false, false,
+	).Find(&originalParts).Error; err != nil {
+		log.Printf("[弹幕回补] 查询历史记录 %d 的原始分P失败: %v", history.ID, err)
+		return
+	}
+
+	if len(originalParts) == 0 {
+		return
+	}
+
+	burnService := services.NewDanmakuBurnService()
+
+	for _, part := range originalParts {
+		// 1. 检查是否已有追加成功的弹幕烧录版
+		var appendedCount int64
+		db.Model(&models.RecordHistoryPart{}).Where(
+			"source_part_id = ? AND is_temp_file = ? AND temp_file_type = ? AND appended_to_video = ?",
+			part.ID, true, "danmaku_burn", true,
+		).Count(&appendedCount)
+		if appendedCount > 0 {
+			continue // 已追加，跳过
+		}
+
+		// 2. 检查是否已有上传完成但 appended_to_video=false 的烧录版（可能 EditVideo 失败需重试）
+		var pendingAppend models.RecordHistoryPart
+		if err := db.Where(
+			"source_part_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ? AND c_id > 0 AND appended_to_video = ?",
+			part.ID, true, "danmaku_burn", true, false,
+		).First(&pendingAppend).Error; err == nil {
+			// 已上传但未成功追加，直接重新触发 UpdatePublishedVideoWithBurnedParts
+			log.Printf("[弹幕回补] 发现已上传但未追加的弹幕版，重新触发追加: burned_part_id=%d", pendingAppend.ID)
+			go func(pid uint) {
+				if err := s.UpdatePublishedVideoWithBurnedParts(pid); err != nil {
+					log.Printf("[弹幕回补] 重新追加失败: burned_part_id=%d, err=%v", pid, err)
+				}
+			}(pendingAppend.ID)
+			continue
+		}
+
+		// 3. 检查是否已有正在烧录/上传中的记录（任意状态，避免重复触发）
+		var anyBurnedCount int64
+		db.Model(&models.RecordHistoryPart{}).Where(
+			"source_part_id = ? AND is_temp_file = ? AND temp_file_type = ?",
+			part.ID, true, "danmaku_burn",
+		).Count(&anyBurnedCount)
+		if anyBurnedCount > 0 {
+			// 已有烧录记录（upload=false：正在上传中，或文件不存在待重试等），跳过避免重复
+			continue
+		}
+
+		// 4. 检查原始视频文件是否存在
+		if part.FilePath == "" {
+			continue
+		}
+		if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
+			log.Printf("[弹幕回补] 原始视频文件不存在，跳过: history_id=%d, part_id=%d, file=%s",
+				history.ID, part.ID, part.FilePath)
+			continue
+		}
+
+		// 5. 检查 XML 弹幕文件是否存在
+		xmlPath := burnService.FindDanmakuXML(part.FilePath)
+		if xmlPath == "" {
+			log.Printf("[弹幕回补] XML弹幕文件不存在，跳过: history_id=%d, part_id=%d, video=%s",
+				history.ID, part.ID, part.FilePath)
+			continue
+		}
+
+		log.Printf("[弹幕回补] 开始异步烧录并追加弹幕版: history_id=%d, part_id=%d, video=%s, xml=%s",
+			history.ID, part.ID, part.FilePath, xmlPath)
+
+		// 异步执行烧录 → 上传 → 追加（避免阻塞定时任务）
+		go func(p models.RecordHistoryPart, h models.RecordHistory, r models.RecordRoom) {
+			bs := services.NewDanmakuBurnService()
+			burnedPath, err := bs.BurnDanmakuToVideo(&p, &h, &r)
+			if err != nil {
+				log.Printf("[弹幕回补] 烧录失败: part_id=%d, err=%v", p.ID, err)
+				return
+			}
+
+			// 查询新生成的烧录版 Part 记录
+			var burnedPart models.RecordHistoryPart
+			if dbErr := database.GetDB().Where(
+				"file_path = ? AND is_temp_file = ? AND temp_file_type = ?",
+				burnedPath, true, "danmaku_burn",
+			).First(&burnedPart).Error; dbErr != nil {
+				log.Printf("[弹幕回补] 查询烧录版分P记录失败: part_id=%d, err=%v", p.ID, dbErr)
+				return
+			}
+
+			log.Printf("[弹幕回补] 烧录完成，加入上传队列: burned_part_id=%d", burnedPart.ID)
+			if uploadErr := s.UploadPart(&burnedPart, &h, &r); uploadErr != nil {
+				log.Printf("[弹幕回补] 烧录版入队失败: burned_part_id=%d, err=%v", burnedPart.ID, uploadErr)
+			}
+		}(part, *history, *room)
+	}
 }

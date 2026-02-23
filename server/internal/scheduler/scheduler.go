@@ -42,6 +42,13 @@ func InitScheduler() {
 		// 4. 对全部分P已上传但投稿被中断的历史记录重新触发 checkAndPublish（Stage F）
 		log.Println("[启动恢复] 检查并恢复被中断的自动投稿")
 		uploadService.RecoverUnpublishedHistories()
+		// 5. 检查已审核通过满1小时但缺少弹幕烧录版的历史记录，触发补录追加
+		// 等额外30秒，确保步骤1-4的入队工作稳定后再扫描，避免重复烧录竞争
+		time.Sleep(30 * time.Second)
+		log.Println("[启动恢复] 检查已审核通过视频中缺失的弹幕烧录版分P")
+		if err := uploadService.AppendDanmakuBurnedPartsToApprovedVideos(); err != nil {
+			log.Printf("[启动恢复] 弹幕回补检查失败: %v", err)
+		}
 	}()
 
 	// 视频同步任务 - 每10分钟执行一次
@@ -176,6 +183,16 @@ func InitScheduler() {
 		roomAutoTaskService := services.NewRoomAutoTaskService()
 		if err := roomAutoTaskService.ProcessRoomAutoTasks(); err != nil {
 			log.Printf("房间自动任务失败: %v", err)
+		}
+	})
+
+	// 弹幕回补任务 - 每30分钟执行一次（在整点+20/50分执行，与其他30分钟任务错开）
+	// 对已审核通过满1小时的投稿，检查是否还有缺失的弹幕烧录版分P，
+	// 若原始视频文件和XML弹幕文件均存在则自动烧录、上传并追加到B站视频。
+	cronJob.AddFunc("20,50 * * * *", func() {
+		log.Println("执行定时任务: 弹幕回补检查")
+		if err := uploadService.AppendDanmakuBurnedPartsToApprovedVideos(); err != nil {
+			log.Printf("弹幕回补任务失败: %v", err)
 		}
 	})
 

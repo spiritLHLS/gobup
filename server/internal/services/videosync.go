@@ -194,6 +194,13 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 	if oldVideoState != 1 && history.VideoState == 1 {
 		log.Printf("视频 %s 审核通过，开始执行审核通过后的自动化流程", history.BvID)
 
+		// 0. 记录审核通过时间（仅第一次审核通过时记录）
+		if history.ApprovedAt == nil {
+			approvedTime := time.Now()
+			history.ApprovedAt = &approvedTime
+			log.Printf("[ApprovedAt] 记录审核通过时间: history_id=%d, approved_at=%s", historyID, approvedTime.Format("2006-01-02 15:04:05"))
+		}
+
 		// 1. 处理文件（删除/移动/复制）
 		if room.DeleteType == 11 || room.DeleteType == 12 {
 			fileMoverSvc := NewFileMoverService()
@@ -204,14 +211,14 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 			}
 		}
 
-		// 1.5. 清理临时文件（切分文件、弹幕烧录文件等）
-		// 注意：只清理已经上传成功的临时分P，尚未上传的弹幕烧录临时文件不删除
+		// 1.5. 清理临时文件（切分文件等）
+		// 注意：只清理 split 类型的临时分P《已上传》；弹幕烧录版由定时任务在快退 AppendedToVideo=true 后单独清理，这里不删除
 		if history.SessionID != "" {
 			burnService := NewDanmakuBurnService()
-			if err := burnService.CleanTempFilesBySessionID(history.SessionID); err != nil {
-				log.Printf("[审核通过后] 临时文件清理失败: %v", err)
+			if err := burnService.CleanSplitTempFilesBySessionID(history.SessionID); err != nil {
+				log.Printf("[审核通过后] split 临时文件清理失败: %v", err)
 			} else {
-				log.Printf("[审核通过后] 临时文件清理成功: session_id=%s", history.SessionID)
+				log.Printf("[审核通过后] split 临时文件清理成功: session_id=%s", history.SessionID)
 			}
 		}
 
@@ -293,6 +300,10 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 	}
 	if history.AvID != "" {
 		updates["av_id"] = history.AvID
+	}
+	// 审核通过时间（仅在未设置时写入，不覆盖已有的记录）
+	if history.ApprovedAt != nil {
+		updates["approved_at"] = history.ApprovedAt
 	}
 	// 更新主播名字（从直播间API获取，而不是从视频owner获取）
 	liveStatusService := NewLiveStatusService()
