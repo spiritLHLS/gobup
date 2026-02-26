@@ -51,7 +51,8 @@ export const roomAPI = {
   getLines: () => request.get('/room/lines'),
   testLines: () => request.get('/room/testLines'),
   testSpeed: (line) => request.get('/room/testSpeed', { params: { line } }),
-  verifyTemplate: (data) => request.post('/room/verifyTemplate', data)
+  verifyTemplate: (data) => request.post('/room/verifyTemplate', data),
+  getSeasons: (userId) => request.get('/room/seasons', { params: { userId } })
 }
 
 // 录制历史

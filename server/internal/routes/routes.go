@@ -30,7 +30,7 @@ func SetupRoutes(router *gin.Engine) {
 				rooms.GET("/recommendedLines", controllers.GetRecommendedLines)
 				rooms.GET("/testLines", controllers.TestAllLines)
 				rooms.GET("/testSpeed", controllers.TestLineSpeed)
-				rooms.GET("/seasons/:roomId", controllers.GetSeasons)
+				rooms.GET("/seasons", controllers.GetSeasons)
 				rooms.GET("/verification", controllers.VerifyTemplate)
 			}
 

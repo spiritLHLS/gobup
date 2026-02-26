@@ -293,19 +293,28 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 	return resp.Data.Aid, resp.Data.Bvid, nil
 }
 
-// GetSeasons 获取合集列表
-func (c *BiliClient) GetSeasons(mid int64) ([]Season, error) {
-	apiURL := fmt.Sprintf("https://api.bilibili.com/x/polymer/space/seasons_series_list?mid=%d", mid)
+// GetSeasons 获取合集列表（使用创作中心 API，需要登录态）
+func (c *BiliClient) GetSeasons() ([]Season, error) {
+	apiURL := "https://member.bilibili.com/x2/creative/web/season/list?pn=1&ps=100"
 
 	var result struct {
 		Code int    `json:"code"`
 		Msg  string `json:"message"`
 		Data struct {
-			ItemsList []Season `json:"items_lists"`
+			Items []struct {
+				ID       int64  `json:"id"`
+				Name     string `json:"name"`
+				Total    int    `json:"total"`
+				Sections []struct {
+					ID    int64  `json:"id"`
+					Title string `json:"title"`
+				} `json:"sections"`
+			} `json:"items"`
 		} `json:"data"`
 	}
 
 	_, err := c.ReqClient.R().
+		SetHeader("Referer", "https://member.bilibili.com/platform/home").
 		SetSuccessResult(&result).
 		Get(apiURL)
 	if err != nil {
@@ -316,7 +325,20 @@ func (c *BiliClient) GetSeasons(mid int64) ([]Season, error) {
 		return nil, fmt.Errorf("获取合集失败: %s", result.Msg)
 	}
 
-	return result.Data.ItemsList, nil
+	var seasons []Season
+	for _, item := range result.Data.Items {
+		s := Season{
+			ID:    item.ID,
+			Name:  item.Name,
+			Count: item.Total,
+		}
+		// 取第一个节的 ID 作为 SectionID（投稿时使用）
+		if len(item.Sections) > 0 {
+			s.SectionID = item.Sections[0].ID
+		}
+		seasons = append(seasons, s)
+	}
+	return seasons, nil
 }
 
 // AddToSeason 将视频加入合集
@@ -493,9 +515,10 @@ func BuildCookieString(cookieMap map[string]string) string {
 
 // Season 合集信息
 type Season struct {
-	ID    int64  `json:"id"`
-	Name  string `json:"name"`
-	Count int    `json:"count"`
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Count     int    `json:"count"`
+	SectionID int64  `json:"sectionId"` // 用于 AddToSeason 的节ID
 }
 
 // extractTitleFromDuplicateError 从"稿件已成功投稿"错误信息中提取稿件名

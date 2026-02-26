@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/services"
@@ -131,7 +133,41 @@ func GetUploadLines(c *gin.Context) {
 }
 
 func GetSeasons(c *gin.Context) {
-	c.JSON(http.StatusOK, []interface{}{})
+	userIDStr := c.Query("userId")
+	if userIDStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 userId 参数"})
+		return
+	}
+
+	userID, err := strconv.ParseUint(userIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "userId 格式错误"})
+		return
+	}
+
+	db := database.GetDB()
+	var user models.BiliBiliUser
+	if err := db.First(&user, uint(userID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		return
+	}
+
+	if !user.Login {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户未登录"})
+		return
+	}
+
+	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+	seasons, err := client.GetSeasons()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if seasons == nil {
+		seasons = []bili.Season{}
+	}
+	c.JSON(http.StatusOK, seasons)
 }
 
 // GetRecommendedLines 获取推荐线路

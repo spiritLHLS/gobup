@@ -511,7 +511,7 @@ func (s *Service) GetSeasons(userID uint) ([]bili.Season, error) {
 	}
 
 	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
-	return client.GetSeasons(user.UID)
+	return client.GetSeasons()
 }
 
 // AppendPartsToExisting 追加分P到已有投稿（同SessionID合并）
