@@ -30,6 +30,16 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("历史记录不存在: %w", err)
 	}
 
+	// 检查当前历史记录是否已经投稿过（防止重复投稿）
+	// 关键：此检查必须在 MergeBySession 块之前，否则 MergeBySession=true 时
+	// 会绕过此检查直接进入 AppendPartsToExisting，导致已追加过的历史记录被再次追加，
+	// 产生 B 站视频分P重复的问题（SyncVideoInfo goroutine 与 room_auto_tasks 并发触发场景）。
+	if history.Publish {
+		log.Printf("[Publish] 历史记录 %d 已经投稿过，拒绝重复投稿: BvID=%s",
+			historyID, history.BvID)
+		return fmt.Errorf("该历史记录已经投稿过，不能重复投稿 (BvID: %s)", history.BvID)
+	}
+
 	var room models.RecordRoom
 	if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
 		return fmt.Errorf("房间不存在: %w", err)
@@ -63,13 +73,6 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		if history.SessionID == "" {
 			log.Printf("[投稿] SessionID为空，跳过合并检测")
 		}
-	}
-
-	// 检查当前历史记录是否已经投稿过（防止重复投稿）
-	if history.Publish {
-		log.Printf("[Publish] 历史记录 %d 已经投稿过，拒绝重复投稿: BvID=%s",
-			historyID, history.BvID)
-		return fmt.Errorf("该历史记录已经投稿过，不能重复投稿 (BvID: %s)", history.BvID)
 	}
 
 	// 权限检查1：房间是否启用上传功能（总开关）
