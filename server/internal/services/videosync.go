@@ -236,23 +236,33 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 				// 检查这些历史记录是否有已上传的分P（需要追加）
 				for _, pendingHistory := range pendingHistories {
 					var uploadedPartsCount int64
+					// file_delete 不过滤：CleanSplitTempFilesBySessionID（步骤1.5）已将同 session 内所有
+					// 已上传的 split 子分P 的 file_delete 置为 true，若继续过滤 file_delete=false，
+					// 会导致 pendingHistory 的 split 子分P 被漏检，TriggerPublish 永远不触发。
+					// CID/FileName 仍保存在 DB 中，file_delete=true 不影响 B 站侧追加投稿。
 					db.Model(&models.RecordHistoryPart{}).Where(
-						"history_id = ? AND upload = ? AND file_delete = ?",
-						pendingHistory.ID, true, false).Count(&uploadedPartsCount)
+						"history_id = ? AND upload = ?",
+						pendingHistory.ID, true).Count(&uploadedPartsCount)
 
 					if uploadedPartsCount > 0 {
 						log.Printf("[审核通过] 发现待追加的历史记录: history_id=%d, 已上传分P数=%d, 将触发自动追加",
 							pendingHistory.ID, uploadedPartsCount)
 
-						// 导入upload包并触发追加（通过延迟执行避免阻塞同步流程）
-						go func(hid uint) {
-							time.Sleep(5 * time.Second) // 延迟5秒，确保视频状态已稳定
-							log.Printf("[审核通过] 开始异步执行追加分P: pending_history_id=%d -> existing_history_id=%d",
+						// 通过注入的 TriggerPublish 回调实际触发追加投稿，延迟5秒确保视频状态已稳定
+						go func(hid uint, uploadUserID uint) {
+							time.Sleep(5 * time.Second)
+							log.Printf("[审核通过] 开始异步执行追加投稿: pending_history_id=%d -> existing_history_id=%d",
 								hid, historyID)
-							// 注意：这里需要在main.go或scheduler中注册一个全局的upload service引用
-							// 暂时记录日志，实际追加需要手动触发或通过定时任务检测
-							log.Printf("[审核通过] 提示：检测到待追加分P，请手动触发投稿或等待下次自动上传检查")
-						}(pendingHistory.ID)
+							if TriggerPublish != nil {
+								if trigErr := TriggerPublish(hid, uploadUserID); trigErr != nil {
+									log.Printf("[审核通过] 异步追加投稿失败: pending_history_id=%d, err=%v", hid, trigErr)
+								} else {
+									log.Printf("[审核通过] 异步追加投稿成功: pending_history_id=%d", hid)
+								}
+							} else {
+								log.Printf("[审核通过] TriggerPublish 未注册，无法触发追加: pending_history_id=%d", hid)
+							}
+						}(pendingHistory.ID, room.UploadUserID)
 					}
 				}
 			} else {

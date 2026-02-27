@@ -297,9 +297,18 @@ func (s *Service) RecoverUnpublishedHistories() {
 				"history_id = ? AND upload = ? AND is_temp_file = ?",
 				hist.ID, true, false,
 			).Count(&uploadedCount)
+			// 大文件切分兼容：原始分P退役后 totalCount==0，改用切分子分P统计
+			if totalCount == 0 {
+				db.Model(&models.RecordHistoryPart{}).Where(
+					"history_id = ? AND is_temp_file = ? AND temp_file_type = ?",
+					hist.ID, true, "split").Count(&totalCount)
+				db.Model(&models.RecordHistoryPart{}).Where(
+					"history_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ?",
+					hist.ID, true, "split", true).Count(&uploadedCount)
+			}
 
 			if totalCount == 0 || uploadedCount < totalCount {
-				continue // 还有未上传的原始分P，不尝试恢复投稿
+				continue // 还有未上传的原始/子分P，不尝试恢复投稿
 			}
 
 			log.Printf("[启动恢复-投稿] 发现已全部上传但未投稿的历史记录，重新检查: history_id=%d, 总分P=%d, 已上传=%d",
@@ -542,10 +551,25 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	log.Printf("上传完成: part_id=%d, cid=%d", part.ID, part.CID)
 
 	// 检查是否所有分P都已上传，更新History的UploadStatus
+	// 使用与 checkAndPublish 完全一致的计数逻辑：
+	// - 排除"已标记删除且未上传"的孤立/退役原始分P（file_delete=true AND upload=false）
+	// - 大文件切分兼容：原始分P退役后 totalCount==0，改用 split 子分P统计
 	var totalCount int64
 	var uploadedCount int64
-	db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", history.ID).Count(&totalCount)
-	db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND upload = ?", history.ID, true).Count(&uploadedCount)
+	db.Model(&models.RecordHistoryPart{}).Where(
+		"history_id = ? AND is_temp_file = ? AND NOT (file_delete = ? AND upload = ?)",
+		history.ID, false, true, false).Count(&totalCount)
+	db.Model(&models.RecordHistoryPart{}).Where(
+		"history_id = ? AND upload = ? AND is_temp_file = ?",
+		history.ID, true, false).Count(&uploadedCount)
+	if totalCount == 0 {
+		db.Model(&models.RecordHistoryPart{}).Where(
+			"history_id = ? AND is_temp_file = ? AND temp_file_type = ?",
+			history.ID, true, "split").Count(&totalCount)
+		db.Model(&models.RecordHistoryPart{}).Where(
+			"history_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ?",
+			history.ID, true, "split", true).Count(&uploadedCount)
+	}
 
 	if totalCount > 0 && uploadedCount == totalCount {
 		// 所有分P已上传完成
@@ -644,6 +668,17 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 	db.Model(&models.RecordHistoryPart{}).Where(
 		"history_id = ? AND upload = ? AND is_temp_file = ?",
 		history.ID, true, false).Count(&uploadedCount)
+	// 大文件切分兼容：原始分P被切分退役后（file_delete=true, upload=false），totalCount==0。
+	// 此时改用切分子分P（is_temp_file=true, temp_file_type='split'）的数量作为代替，
+	// 确保所有子分P上传完成后投稿条件能正常触发。
+	if totalCount == 0 {
+		db.Model(&models.RecordHistoryPart{}).Where(
+			"history_id = ? AND is_temp_file = ? AND temp_file_type = ?",
+			history.ID, true, "split").Count(&totalCount)
+		db.Model(&models.RecordHistoryPart{}).Where(
+			"history_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ?",
+			history.ID, true, "split", true).Count(&uploadedCount)
+	}
 	db.Model(&models.RecordHistoryPart{}).Where(
 		"history_id = ? AND recording = ?",
 		history.ID, true).Count(&recordingCount)
@@ -742,16 +777,26 @@ func (s *Service) checkAndAppendPendingHistories(publishedHistory *models.Record
 	log.Printf("[投稿后检查] 发现 %d 个可能需要追加的历史记录", len(pendingHistories))
 
 	for _, pendingHistory := range pendingHistories {
-		// 检查是否有已上传的分P
+		// 检查是否有已上传的分P（与 checkAndPublish 保持完全一致的计数逻辑）
 		var uploadedCount int64
 		var totalCount int64
 		var recordingCount int64
 
 		db.Model(&models.RecordHistoryPart{}).Where(
-			"history_id = ? AND upload = ? AND file_delete = ?",
+			"history_id = ? AND upload = ? AND is_temp_file = ?",
 			pendingHistory.ID, true, false).Count(&uploadedCount)
 		db.Model(&models.RecordHistoryPart{}).Where(
-			"history_id = ?", pendingHistory.ID).Count(&totalCount)
+			"history_id = ? AND is_temp_file = ? AND NOT (file_delete = true AND upload = false)",
+			pendingHistory.ID, false).Count(&totalCount)
+		// 大文件切分兼容：原始分P退役后 totalCount==0，改用切分子分P统计
+		if totalCount == 0 {
+			db.Model(&models.RecordHistoryPart{}).Where(
+				"history_id = ? AND is_temp_file = ? AND temp_file_type = ?",
+				pendingHistory.ID, true, "split").Count(&totalCount)
+			db.Model(&models.RecordHistoryPart{}).Where(
+				"history_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ?",
+				pendingHistory.ID, true, "split", true).Count(&uploadedCount)
+		}
 		db.Model(&models.RecordHistoryPart{}).Where(
 			"history_id = ? AND recording = ?", pendingHistory.ID, true).Count(&recordingCount)
 
@@ -911,10 +956,14 @@ func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history
 		log.Printf("[自动分P] 原始文件已删除: %s", originalPart.FilePath)
 	}
 
-	// 标记原始Part为已上传（实际上是被分割了），并标记文件已删除
-	originalPart.Upload = true
+	// 标记原始Part为已退役（被切分替代）：file_delete=true 标记物理文件已删除，upload 保持 false。
+	// 关键：不能将 upload 置为 true，因为 CID=0 会导致 PublishHistory 检测到异常后
+	// 将其重置为 upload=false，进而被自动上传调度器反复尝试上传不存在的文件，形成无限死循环。
+	// checkAndPublish 的 NOT(file_delete=true AND upload=false) 条件将此记录排除在 totalCount 之外，
+	// 再通过 totalCount==0 时的 split 子分P补偿逻辑来触发最终的自动投稿。
+	originalPart.Upload = false
 	originalPart.FileDelete = true
-	originalPart.UploadErrorMsg = fmt.Sprintf("文件过大(分片数%d>10000)，已自动分割成%d个Part", totalChunks, numParts)
+	originalPart.UploadErrorMsg = fmt.Sprintf("文件过大(分片数%d>10000)，已自动分割成%d个子分P", totalChunks, numParts)
 	db.Save(originalPart)
 
 	log.Printf("[自动分P] 文件分割完成，已创建 %d 个新Part，原Part(id=%d)标记为已处理", len(newParts), originalPart.ID)

@@ -105,16 +105,22 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	// 如果启用了弹幕烧录，同时包含弹幕版（temp_file_type='danmaku_burn'）作为独立分P一并投稿
 	// 其他临时文件类型（切分等）仍然排除
 	// 注意：本地文件被删除（file_delete=true）不影响投稿，CID/FileName 仍保存在DB中
+	// 查询待投稿的分P：
+	// - 条件1：正常原始分P（is_temp_file=false）
+	// - 条件2：大文件切分的子分P（temp_file_type='split'）—— 替代超大原始分P投稿
+	// - 条件3（仅当启用弹幕烧录时）：弹幕烧录版分P（temp_file_type='danmaku_burn'）
 	var parts []models.RecordHistoryPart
 	var partsErr error
 	if room.EnableDanmakuBurn {
 		partsErr = db.Where(
-			"history_id = ? AND upload = ? AND (is_temp_file = ? OR temp_file_type = ?)",
-			historyID, true, false, "danmaku_burn",
+			"history_id = ? AND upload = ? AND (is_temp_file = ? OR temp_file_type = ? OR temp_file_type = ?)",
+			historyID, true, false, "danmaku_burn", "split",
 		).Order("start_time ASC").Find(&parts).Error
 	} else {
-		partsErr = db.Where("history_id = ? AND upload = ? AND is_temp_file = ?", historyID, true, false).
-			Order("start_time ASC").Find(&parts).Error
+		partsErr = db.Where(
+			"history_id = ? AND upload = ? AND (is_temp_file = ? OR temp_file_type = ?)",
+			historyID, true, false, "split",
+		).Order("start_time ASC").Find(&parts).Error
 	}
 	if partsErr != nil {
 		return fmt.Errorf("查询分P失败: %w", partsErr)
@@ -551,23 +557,24 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 	}
 
 	// 获取已存在投稿的所有原始分P（仅包含 publish=true 且非临时文件的分P）
+	// 获取已投稿视频的所有分P（非临时文件 OR 切分子分P，排除弹幕版以免对B站选P重复）
 	// - record_histories.publish=true：只统计已成功投稿/追加的历史记录分P，与B站视频当前状态保持一致
-	// - is_temp_file=false：排除弹幕烧录/切分等临时文件，避免B站视频出现重复分P
 	// - file_delete 不过滤：本地文件删除不影响CID/FileName，已上传记录仍有效
 	var existingParts []models.RecordHistoryPart
 	if err := db.Joins("JOIN record_histories ON record_history_parts.history_id = record_histories.id").
-		Where("record_histories.session_id = ? AND record_histories.publish = ? AND record_history_parts.upload = ? AND record_history_parts.is_temp_file = ?",
-			existingHistory.SessionID, true, true, false).
+		Where("record_histories.session_id = ? AND record_histories.publish = ? AND record_history_parts.upload = ? AND (record_history_parts.is_temp_file = ? OR record_history_parts.temp_file_type = ?)",
+			existingHistory.SessionID, true, true, false, "split").
 		Order("record_history_parts.start_time ASC").
 		Find(&existingParts).Error; err != nil {
 		return fmt.Errorf("查询已存在分P失败: %w", err)
 	}
 
-	// 获取新历史记录的已上传原始分P（排除临时烧录/切分文件）
+	// 获取新历史记录的已上传分P（原始分P + 切分子分P，排除弹幕烧录版临时文件避免重复）
 	// file_delete 不过滤：本地文件删除后CID/FileName仍有效，投稿时使用DB中保存的服务端文件名
 	var newParts []models.RecordHistoryPart
-	if err := db.Where("history_id = ? AND upload = ? AND is_temp_file = ?",
-		newHistoryID, true, false).
+	if err := db.Where(
+		"history_id = ? AND upload = ? AND (is_temp_file = ? OR temp_file_type = ?)",
+		newHistoryID, true, false, "split").
 		Order("start_time ASC").
 		Find(&newParts).Error; err != nil {
 		return fmt.Errorf("查询新分P失败: %w", err)
