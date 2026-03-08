@@ -202,13 +202,13 @@ type OfficialLine struct {
 	URL   string `json:"url"`
 }
 
-// TestAllLines 批量测试所有线路的可用性（延迟）- 采用限流策略避免风控
+// TestAllLines 批量测试所有线路的可用性（延迟）- 全并发策略
 func TestAllLines(c *gin.Context) {
 	result := make(map[string]string)
 	var mu sync.Mutex
 
-	// 1. 获取官方线路列表
-	client := req.C().SetTimeout(30 * time.Second).ImpersonateChrome()
+	// 1. 获取官方线路列表（5s超时）
+	client := req.C().SetTimeout(10 * time.Second).ImpersonateChrome()
 	resp, err := client.R().Get("https://member.bilibili.com/preupload?r=ping&file=lines.json")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取官方线路失败: " + err.Error()})
@@ -221,116 +221,68 @@ func TestAllLines(c *gin.Context) {
 		return
 	}
 
-	// 1.5. 优先快速检测所有官方线路可用性
-	availableLines := make(map[string]bool)
-	for _, line := range officialLines {
-		testURL := line.URL
-		if strings.HasPrefix(testURL, "//") {
-			testURL = "https:" + testURL
-		}
-		// 快速HEAD请求检测可用性（2秒超时）
-		testClient := req.C().SetTimeout(2 * time.Second).ImpersonateChrome()
-		if _, err := testClient.R().Head(testURL); err == nil {
-			availableLines[line.Query] = true
-		}
-	}
-
 	// 2. 构建 query -> url 映射
 	queryToURL := make(map[string]string)
 	for _, line := range officialLines {
 		queryToURL[line.Query] = line.URL
 	}
 
-	// 3. 限流并发测试 - 每批3条，避免风控
+	// 3. 全并发测试：所有线路同时发起，用信号量限制最大并发数为 20
 	allLines := getAllUploadLines()
-	batchSize := 3              // 每批测试3条线路
-	delayBetweenBatches := 1500 // 批次间延迟1.5秒
-	delayBetweenRequests := 300 // 同批次内请求间延迟300ms
+	sem := make(chan struct{}, 20) // 最大并发 20
+	var wg sync.WaitGroup
 
-	for i := 0; i < len(allLines); i += batchSize {
-		end := i + batchSize
-		if end > len(allLines) {
-			end = len(allLines)
-		}
-		batch := allLines[i:end]
+	for _, uploadLine := range allLines {
+		wg.Add(1)
+		go func(line UploadLine) {
+			defer wg.Done()
+			sem <- struct{}{}        // 占用并发槽
+			defer func() { <-sem }() // 释放并发槽
 
-		var wg sync.WaitGroup
-		for idx, uploadLine := range batch {
-			// 同批次内也加延迟，避免瞬间并发
-			if idx > 0 {
-				time.Sleep(time.Duration(delayBetweenRequests) * time.Millisecond)
+			// 构建查询 key
+			queryKey := line.LineQuery
+			if len(queryKey) > 0 && queryKey[0] == '?' {
+				queryKey = queryKey[1:]
 			}
 
-			wg.Add(1)
-			go func(line UploadLine) {
-				defer wg.Done()
+			testURLStr, exists := queryToURL[queryKey]
+			if !exists {
+				mu.Lock()
+				result[line.Value] = "Unknown"
+				mu.Unlock()
+				return
+			}
+			if strings.HasPrefix(testURLStr, "//") {
+				testURLStr = "https:" + testURLStr
+			}
 
-				// 构建查询 key（去掉 LineQuery 的 ?）
-				queryKey := ""
-				if len(line.LineQuery) > 0 && line.LineQuery[0] == '?' {
-					queryKey = line.LineQuery[1:]
-				} else {
-					queryKey = line.LineQuery
-				}
+			start := time.Now()
+			testClient := req.C().SetTimeout(5 * time.Second).ImpersonateChrome()
+			testResp, testErr := testClient.R().Head(testURLStr)
+			if testErr != nil {
+				mu.Lock()
+				result[line.Value] = "Timeout"
+				mu.Unlock()
+				return
+			}
 
-				// 先检查官方线路是否可用
-				if !availableLines[queryKey] {
-					mu.Lock()
-					result[line.Value] = "Unavailable"
-					mu.Unlock()
-					return
-				}
-
-				testURLStr, exists := queryToURL[queryKey]
-				if !exists {
-					mu.Lock()
-					result[line.Value] = "Unknown"
-					mu.Unlock()
-					return
-				}
-
-				// 补全 URL
-				if strings.HasPrefix(testURLStr, "//") {
-					testURLStr = "https:" + testURLStr
-				}
-
-				// 测试延迟
-				start := time.Now()
-				testClient := req.C().SetTimeout(3 * time.Second).ImpersonateChrome()
-				testResp, testErr := testClient.R().Get(testURLStr)
-
-				if testErr != nil {
-					mu.Lock()
-					result[line.Value] = "Timeout"
-					mu.Unlock()
-					return
-				}
-
-				if testResp.StatusCode == 200 {
-					cost := time.Since(start).Milliseconds()
-					mu.Lock()
-					result[line.Value] = fmt.Sprintf("%dms", cost)
-					mu.Unlock()
-				} else {
-					mu.Lock()
-					result[line.Value] = fmt.Sprintf("Error %d", testResp.StatusCode)
-					mu.Unlock()
-				}
-			}(uploadLine)
-		}
-
-		wg.Wait()
-
-		// 批次间延迟，避免风控
-		if end < len(allLines) {
-			time.Sleep(time.Duration(delayBetweenBatches) * time.Millisecond)
-		}
+			cost := time.Since(start).Milliseconds()
+			mu.Lock()
+			if testResp.StatusCode == 200 || testResp.StatusCode == 405 {
+				// 405 Method Not Allowed 也代表服务器可达
+				result[line.Value] = fmt.Sprintf("%dms", cost)
+			} else {
+				result[line.Value] = fmt.Sprintf("Error %d", testResp.StatusCode)
+			}
+			mu.Unlock()
+		}(uploadLine)
 	}
 
+	wg.Wait()
 	c.JSON(http.StatusOK, result)
 }
 
-// TestLineSpeed 测试单个线路的真实上传速度
+// TestLineSpeed 测试单个线路的真实上传速度（通过 preupload API）
 func TestLineSpeed(c *gin.Context) {
 	line := c.Query("line")
 	if line == "" {
@@ -358,11 +310,11 @@ func TestLineSpeed(c *gin.Context) {
 		return
 	}
 
-	// 2. 获取官方线路列表
-	client := req.C().SetTimeout(30 * time.Second).ImpersonateChrome()
+	// 2. 获取官方线路列表（5s超时）
+	client := req.C().SetTimeout(10 * time.Second).ImpersonateChrome()
 	resp, err := client.R().Get("https://member.bilibili.com/preupload?r=ping&file=lines.json")
 	if err != nil {
-		result["msg"] = "获取官方线路失败"
+		result["msg"] = "获取官方线路失败: " + err.Error()
 		c.JSON(http.StatusOK, result)
 		return
 	}
@@ -375,11 +327,9 @@ func TestLineSpeed(c *gin.Context) {
 	}
 
 	// 3. 查找对应的测速 URL
-	queryKey := ""
-	if len(targetLine.LineQuery) > 0 && targetLine.LineQuery[0] == '?' {
-		queryKey = targetLine.LineQuery[1:]
-	} else {
-		queryKey = targetLine.LineQuery
+	queryKey := targetLine.LineQuery
+	if len(queryKey) > 0 && queryKey[0] == '?' {
+		queryKey = queryKey[1:]
 	}
 
 	var testURLStr string
@@ -396,13 +346,12 @@ func TestLineSpeed(c *gin.Context) {
 		return
 	}
 
-	// 补全 URL
 	if strings.HasPrefix(testURLStr, "//") {
 		testURLStr = "https:" + testURLStr
 	}
 
-	// 4. 生成 1MB 随机数据进行上传测速
-	size := 1024 * 1024 // 1MB
+	// 4. 生成 2MB 随机数据进行真实上传测速
+	size := 2 * 1024 * 1024 // 2MB
 	data := make([]byte, size)
 	if _, err := rand.Read(data); err != nil {
 		result["msg"] = "生成测试数据失败"
@@ -410,23 +359,30 @@ func TestLineSpeed(c *gin.Context) {
 		return
 	}
 
-	// 5. 执行上传测速
+	// 5. 执行上传测速（PUT，模拟分片上传，15s超时）
 	start := time.Now()
-	testClient := req.C().SetTimeout(10 * time.Second).ImpersonateChrome()
+	testClient := req.C().SetTimeout(15 * time.Second).ImpersonateChrome()
 	testResp, testErr := testClient.R().
-		SetQueryParam("line", "1"). // line=1 表示 1MB
 		SetBodyBytes(data).
-		Post(testURLStr)
+		Put(testURLStr)
 
 	if testErr != nil {
-		result["msg"] = "上传测试失败: Timeout/Error"
+		// 尝试 POST
+		start = time.Now()
+		testResp, testErr = testClient.R().
+			SetBodyBytes(data).
+			Post(testURLStr)
+	}
+
+	if testErr != nil {
+		result["msg"] = "上传测试失败: " + testErr.Error()
 		c.JSON(http.StatusOK, result)
 		return
 	}
 
-	if testResp.StatusCode == 200 {
-		cost := time.Since(start).Milliseconds()
-		// 计算速度 MB/s
+	cost := time.Since(start).Milliseconds()
+	// 4xx/5xx 也计入速度（已到达服务器说明连接成功），只要不是超时
+	if testResp.StatusCode < 600 {
 		speedMBps := float64(size) / 1024.0 / 1024.0 / (float64(cost) / 1000.0)
 		result["success"] = true
 		result["speed"] = fmt.Sprintf("%.2f MB/s", speedMBps)

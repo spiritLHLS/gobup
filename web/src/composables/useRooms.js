@@ -9,33 +9,20 @@ export function useLineTest() {
   const testingDeepSpeed = ref(false)
 
   const testLines = async () => {
-    try {
-      await ElMessageBox.confirm(
-        '线路检测将分批测试30+条线路，为避免触发风控，测试过程约需30-45秒，是否继续？',
-        '提示',
-        {
-          confirmButtonText: '开始检测',
-          cancelButtonText: '取消',
-          type: 'info'
-        }
-      )
-    } catch {
-      return
-    }
-
     testingLines.value = true
     lineStats.value = {}
     lineSpeeds.value = {}
     
-    ElMessage.info('开始检测线路，请耐心等待约30-45秒...')
+    ElMessage.info('正在并发检测所有线路，请稍候...')
     
     try {
       const data = await roomAPI.testLines()
       lineStats.value = data || {}
-      ElMessage.success('线路检测完成')
+      const available = Object.values(data || {}).filter(v => v && v.includes('ms')).length
+      ElMessage.success(`线路检测完成，${available} 条线路可用`)
     } catch (error) {
       console.error('线路检测失败:', error)
-      ElMessage.error('线路检测失败')
+      ElMessage.error('线路检测失败: ' + (error.message || '请求超时'))
     } finally {
       testingLines.value = false
     }

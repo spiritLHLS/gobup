@@ -49,8 +49,8 @@ export const roomAPI = {
   update: (data) => request.post('/room/update', data),
   delete: (id) => request.get(`/room/delete/${id}`),
   getLines: () => request.get('/room/lines'),
-  testLines: () => request.get('/room/testLines'),
-  testSpeed: (line) => request.get('/room/testSpeed', { params: { line } }),
+  testLines: () => request.get('/room/testLines', { timeout: 60000 }),
+  testSpeed: (line) => request.get('/room/testSpeed', { params: { line }, timeout: 30000 }),
   verifyTemplate: (data) => request.post('/room/verifyTemplate', data),
   getSeasons: (userId) => request.get('/room/seasons', { params: { userId } })
 }

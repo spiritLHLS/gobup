@@ -37,7 +37,7 @@
       </el-button>
     </div>
     <div class="help-text" style="margin-top: 5px;">
-      提示：线路检测采用分批限流策略，避免触发风控。深度测速将逐条测试，耗时较长。
+      提示：线路检测采用全并发策略，通常在 10 秒内完成。深度测速将对可用线路逐一上传 2MB 测试数据以确认真实速度。
     </div>
   </el-form-item>
 </template>
