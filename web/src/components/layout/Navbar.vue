@@ -96,7 +96,7 @@ const route = useRoute()
 const router = useRouter()
 
 const username = ref(localStorage.getItem('username') || 'Admin')
-const isDark = ref(localStorage.getItem('theme') === 'dark')
+const isDark = ref(false)
 const privacyMode = ref(localStorage.getItem('privacyMode') === 'true')
 
 const displayUsername = computed(() => {
@@ -153,6 +153,8 @@ const handleCommand = (command) => {
 }
 
 onMounted(() => {
+  // 始终以亮色模式启动，清除之前保存的暗色偏好
+  localStorage.removeItem('theme')
   applyTheme()
   emit('update:privacy-mode', privacyMode.value)
 })

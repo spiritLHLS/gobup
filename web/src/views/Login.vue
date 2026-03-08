@@ -164,10 +164,10 @@ const handleLogin = async () => {
 }
 
 .login-header {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-color-secondary);
   backdrop-filter: blur(20px);
   box-shadow: 0 2px 20px rgba(22, 163, 74, 0.1);
-  border-bottom: 1px solid rgba(22, 163, 74, 0.1);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .header-content {
@@ -206,11 +206,11 @@ const handleLogin = async () => {
 }
 
 .login-card {
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--bg-color-secondary);
   backdrop-filter: blur(10px);
   border-radius: var(--border-radius-2xl);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(22, 163, 74, 0.1);
+  box-shadow: var(--box-shadow-hover);
+  border: 1px solid var(--border-color-hover);
   
   :deep(.el-card__body) {
     padding: 40px;
@@ -258,8 +258,8 @@ const handleLogin = async () => {
   margin-top: 24px;
   
   .el-alert {
-    background-color: #f0f9ff;
-    border-color: #bae6fd;
+    background-color: var(--bg-color-tertiary);
+    border-color: var(--border-color);
     border-radius: var(--border-radius-medium);
   }
   

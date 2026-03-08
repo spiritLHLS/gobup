@@ -175,7 +175,7 @@ onUnmounted(() => {
 .log-console {
   flex: 1;
   overflow-y: auto;
-  background: #1e1e1e;
+  background: var(--log-console-bg, #1e1e1e);
   border-radius: 4px;
   padding: 12px;
   font-family: 'Courier New', monospace;
@@ -239,11 +239,11 @@ onUnmounted(() => {
 }
 
 .log-console::-webkit-scrollbar-track {
-  background: #2d2d30;
+  background: var(--log-console-scrollbar-track);
 }
 
 .log-console::-webkit-scrollbar-thumb {
-  background: #3e3e42;
+  background: var(--log-console-scrollbar-thumb);
   border-radius: 4px;
 }
 

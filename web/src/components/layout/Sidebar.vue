@@ -82,9 +82,10 @@ const activeMenu = computed(() => route.path)
 .sidebar-container {
   height: 100vh;
   width: var(--sidebar-width);
-  background: linear-gradient(180deg, #16a34a 0%, #15803d 100%);
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
-  transition: width var(--transition-normal);
+  background: var(--sidebar-bg);
+  box-shadow: var(--sidebar-shadow);
+  border-right: 1px solid var(--border-color);
+  transition: width 0.3s ease, background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   overflow: hidden;
   position: fixed;
   left: 0;
@@ -111,15 +112,16 @@ const activeMenu = computed(() => route.path)
   justify-content: center;
   align-items: center;
   padding: var(--spacing-md);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--sidebar-logo-bg);
+  border-bottom: 1px solid var(--sidebar-logo-border);
   margin-bottom: var(--spacing-sm);
   
   h1 {
-    color: #ffffff;
+    color: var(--sidebar-logo-title);
     font-weight: var(--font-weight-bold);
     font-size: var(--font-size-2xl);
     margin: 0;
-    transition: opacity 0.3s;
+    transition: opacity 0.3s, color 0.3s;
     line-height: 1.2;
     
     &.logo-collapsed {
@@ -129,9 +131,10 @@ const activeMenu = computed(() => route.path)
   
   span {
     font-size: var(--font-size-xs);
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--sidebar-logo-subtitle);
     margin-top: 4px;
     white-space: nowrap;
+    transition: color 0.3s;
   }
 }
 
@@ -148,21 +151,22 @@ const activeMenu = computed(() => route.path)
   :deep(.el-menu-item) {
     height: 48px;
     line-height: 48px;
-    color: rgba(255, 255, 255, 0.85);
+    color: var(--sidebar-item-text);
     border-left: 3px solid transparent;
     transition: var(--transition-normal);
     margin: var(--spacing-xs) 0;
     padding: 0 var(--spacing-lg);
+    background-color: transparent;
     
     &:hover {
-      background-color: rgba(255, 255, 255, 0.1);
-      color: #ffffff;
+      background-color: var(--sidebar-item-hover-bg);
+      color: var(--sidebar-item-hover-text);
     }
     
     &.is-active {
-      background-color: rgba(255, 255, 255, 0.15);
-      color: #ffffff;
-      border-left-color: #ffffff;
+      background-color: var(--sidebar-item-active-bg);
+      color: var(--sidebar-item-active-text);
+      border-left-color: var(--sidebar-item-active-border);
       font-weight: var(--font-weight-semibold);
     }
     
