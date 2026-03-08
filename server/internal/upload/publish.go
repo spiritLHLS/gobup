@@ -1062,6 +1062,8 @@ func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHist
 			// 已上传但未成功追加，直接重新触发 UpdatePublishedVideoWithBurnedParts
 			log.Printf("[弹幕回补] 发现已上传但未追加的弹幕版，重新触发追加: burned_part_id=%d", pendingAppend.ID)
 			go func(pid uint) {
+				s.appendBurnedSem <- struct{}{}
+				defer func() { <-s.appendBurnedSem }()
 				if err := s.UpdatePublishedVideoWithBurnedParts(pid); err != nil {
 					log.Printf("[弹幕回补] 重新追加失败: burned_part_id=%d, err=%v", pid, err)
 				}
@@ -1107,6 +1109,17 @@ func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHist
 			burnedPath, err := bs.BurnDanmakuToVideo(&p, &h, &r)
 			if err != nil {
 				log.Printf("[弹幕回补] 烧录失败: part_id=%d, err=%v", p.ID, err)
+				// 创建失败标记，防止定时任务对同一损坏/无效XML无限重试
+				failedMarker := &models.RecordHistoryPart{
+					HistoryID:    p.HistoryID,
+					SourcePartID: p.ID,
+					IsTempFile:   true,
+					TempFileType: "danmaku_burn",
+					Upload:       false,
+				}
+				if createErr := database.GetDB().Create(failedMarker).Error; createErr != nil {
+					log.Printf("[弹幕回补] 创建失败标记出错: part_id=%d, err=%v", p.ID, createErr)
+				}
 				return
 			}
 

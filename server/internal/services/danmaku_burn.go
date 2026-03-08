@@ -520,6 +520,37 @@ func (s *DanmakuBurnService) CleanSplitTempFilesBySessionID(sessionID string) er
 	}
 
 	log.Printf("[split清理] 清理完成: 成功 %d/%d", successCount, len(tempParts))
+
+	// 清理源分P（原始大文件分P）的弹幕文件。
+	// 源分P由 splitLargeFile 负责删除视频文件并标记 FileDelete=true，
+	// 但 deleteByScope/moveByScope 会跳过 FileDelete=true 的分P，导致其弹幕文件永久泄漏。
+	// 此处在所有子分P清理完毕后，一并清理源分P的弹幕文件。
+	sourceIDs := make(map[uint]struct{})
+	for _, part := range tempParts {
+		if part.SourcePartID != 0 {
+			sourceIDs[part.SourcePartID] = struct{}{}
+		}
+	}
+	for sourceID := range sourceIDs {
+		var sourcePart models.RecordHistoryPart
+		if err := db.First(&sourcePart, sourceID).Error; err != nil {
+			log.Printf("[split清理] 查询源分P(id=%d)失败: %v", sourceID, err)
+			continue
+		}
+		if sourcePart.FilePath == "" {
+			continue
+		}
+		dir := filepath.Dir(sourcePart.FilePath)
+		base := strings.TrimSuffix(filepath.Base(sourcePart.FilePath), filepath.Ext(sourcePart.FilePath))
+		for _, danmakuExt := range []string{".xml", ".json", ".ass", ".srt", ".txt"} {
+			p := filepath.Join(dir, base+danmakuExt)
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				log.Printf("[split清理] 删除源分P弹幕文件失败: %s, error: %v", p, err)
+			} else if err == nil {
+				log.Printf("[split清理] ✓ 已删除源分P弹幕文件: %s", p)
+			}
+		}
+	}
 	return nil
 }
 

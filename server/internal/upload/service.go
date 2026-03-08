@@ -21,9 +21,10 @@ const (
 )
 
 type Service struct {
-	uploadingParts       sync.Map // partID -> true，防止同一分P并发上传
-	publishingHistories  sync.Map // historyID -> true，防止同一历史记录并发投稿
-	appendingBurnedParts sync.Map // burnedPartID -> true，防止同一烧录版分P并发调用 EditVideo
+	uploadingParts       sync.Map      // partID -> true，防止同一分P并发上传
+	publishingHistories  sync.Map      // historyID -> true，防止同一历史记录并发投稿
+	appendingBurnedParts sync.Map      // burnedPartID -> true，防止同一烧录版分P并发调用 EditVideo
+	appendBurnedSem      chan struct{} // 限制弹幕回补并发数，避免批量触发时超出B站API限流
 	wxPusher             *services.WxPusherService
 	templateSvc          *services.TemplateService
 	progressTracker      *ProgressTracker
@@ -35,6 +36,7 @@ func NewService() *Service {
 		wxPusher:        services.NewWxPusherService(),
 		templateSvc:     services.NewTemplateService(),
 		progressTracker: NewProgressTracker(),
+		appendBurnedSem: make(chan struct{}, 3), // 最多3个并发追加，避免B站API限流
 	}
 	svc.queueManager = NewQueueManager(svc)
 	return svc
@@ -884,6 +886,21 @@ func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history
 
 	// 创建新的Part记录
 	var newParts []*models.RecordHistoryPart
+	// 出错时自动清理已创建的子分P（文件 + DB 记录），确保原始分P下次重试时能重新切分
+	cleanupOnErr := true
+	defer func() {
+		if !cleanupOnErr {
+			return
+		}
+		for _, np := range newParts {
+			if np.FilePath != "" {
+				_ = os.Remove(np.FilePath)
+			}
+			if np.ID != 0 {
+				db.Delete(np)
+			}
+		}
+	}()
 	for i := int64(0); i < numParts; i++ {
 		startTime := int(i) * durationPerPart
 		duration := durationPerPart
@@ -899,6 +916,7 @@ func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history
 		// 使用ffmpeg切割视频
 		// -ss: 开始时间 -t: 持续时间 -c copy: 不重新编码
 		var ffmpegArgs []string
+		ffmpegArgs = append(ffmpegArgs, "-y") // 覆盖已有的输出文件，确保重试时幂等
 		if startTime > 0 {
 			ffmpegArgs = append(ffmpegArgs, "-ss", fmt.Sprintf("%d", startTime))
 		}
@@ -984,5 +1002,6 @@ func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history
 		}
 	}
 
+	cleanupOnErr = false
 	return nil
 }
