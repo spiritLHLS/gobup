@@ -229,7 +229,108 @@ body {
   }
 }
 
-/* 动画效果 */
+/* ===== 深色主题 ===== */
+[data-theme="dark"] {
+  /* 主题色 - 绿色系（保持不变） */
+  --primary-color: #22c55e;
+  --primary-color-light: #4ade80;
+  --primary-color-lighter: #86efac;
+  --primary-color-dark: #16a34a;
+  --primary-color-shadow: rgba(34, 197, 94, 0.25);
+  --primary-gradient: linear-gradient(135deg, #16a34a, #22c55e);
+
+  /* 背景色 */
+  --bg-color-primary: #0f172a;
+  --bg-color-secondary: #1e293b;
+  --bg-color-tertiary: #334155;
+  --bg-color-hover: #1e3a2f;
+  --bg-gradient-light: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+
+  /* 文字颜色 */
+  --text-color-primary: #f1f5f9;
+  --text-color-secondary: #94a3b8;
+  --text-color-regular: #64748b;
+  --text-color-placeholder: #475569;
+
+  /* 边框颜色 */
+  --border-color: #334155;
+  --border-color-light: #1e293b;
+  --border-color-lighter: #0f172a;
+  --border-color-hover: rgba(34, 197, 94, 0.4);
+
+  /* 阴影 */
+  --box-shadow-light: 0 2px 4px rgba(0, 0, 0, 0.3);
+  --box-shadow-medium: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --box-shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --box-shadow-primary: 0 8px 25px rgba(34, 197, 94, 0.2);
+}
+
+/* Element Plus 深色主题覆盖 */
+[data-theme="dark"] {
+  --el-color-primary: #22c55e;
+  --el-color-primary-light-3: #4ade80;
+  --el-color-primary-light-5: #86efac;
+  --el-color-primary-light-7: #bbf7d0;
+  --el-color-primary-light-9: rgba(34, 197, 94, 0.1);
+  --el-color-primary-dark-2: #16a34a;
+
+  --el-bg-color: #1e293b;
+  --el-bg-color-page: #0f172a;
+  --el-bg-color-overlay: #1e293b;
+
+  --el-text-color-primary: #f1f5f9;
+  --el-text-color-regular: #94a3b8;
+  --el-text-color-secondary: #64748b;
+  --el-text-color-placeholder: #475569;
+  --el-text-color-disabled: #334155;
+
+  --el-border-color: #334155;
+  --el-border-color-light: #1e293b;
+  --el-border-color-lighter: #0f172a;
+  --el-border-color-extra-light: #0f172a;
+  --el-border-color-dark: #475569;
+  --el-border-color-darker: #64748b;
+
+  --el-fill-color: #334155;
+  --el-fill-color-light: #1e293b;
+  --el-fill-color-lighter: #0f172a;
+  --el-fill-color-extra-light: #0f172a;
+  --el-fill-color-dark: #475569;
+  --el-fill-color-darker: #64748b;
+  --el-fill-color-blank: #1e293b;
+
+  --el-mask-color: rgba(0, 0, 0, 0.7);
+  --el-mask-color-extra-light: rgba(0, 0, 0, 0.3);
+
+  --el-box-shadow: 0 12px 32px 4px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.4);
+  --el-box-shadow-light: 0 0 12px rgba(0, 0, 0, 0.3);
+  --el-box-shadow-lighter: 0 0 6px rgba(0, 0, 0, 0.2);
+
+  --el-scrollbar-bg-color: rgba(255, 255, 255, 0.06);
+  --el-scrollbar-hover-bg-color: rgba(255, 255, 255, 0.12);
+  color-scheme: dark;
+}
+
+/* ===== 全局基础样式 ===== */
+html {
+  background-color: var(--bg-color-primary);
+  transition: background-color 0.2s ease;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--bg-color-primary);
+  color: var(--text-color-primary);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ===== 动画效果 ===== */
 @keyframes fadeIn {
   from {
     opacity: 0;

@@ -11,6 +11,29 @@
     </div>
     
     <div class="navbar-right">
+      <!-- 隐私模式 -->
+      <el-tooltip :content="privacyMode ? '隐私模式已开启' : '开启隐私模式'" placement="bottom">
+        <el-button
+          class="nav-icon-btn"
+          :class="{ active: privacyMode }"
+          circle
+          @click="togglePrivacy"
+        >
+          <el-icon><component :is="privacyMode ? Hide : View" /></el-icon>
+        </el-button>
+      </el-tooltip>
+
+      <!-- 主题切换 -->
+      <el-tooltip :content="isDark ? '切换到浅色模式' : '切换到深色模式'" placement="bottom">
+        <el-button
+          class="nav-icon-btn"
+          circle
+          @click="toggleTheme"
+        >
+          <el-icon><component :is="isDark ? Sunny : Moon" /></el-icon>
+        </el-button>
+      </el-tooltip>
+
       <!-- 用户信息下拉菜单 -->
       <el-dropdown @command="handleCommand" trigger="click">
         <div class="user-info">
@@ -22,9 +45,9 @@
               color: 'white'
             }"
           >
-            {{ username.charAt(0).toUpperCase() }}
+            {{ displayUsername.charAt(0).toUpperCase() }}
           </el-avatar>
-          <span class="username">{{ username }}</span>
+          <span class="username">{{ displayUsername }}</span>
           <el-icon class="dropdown-icon"><ArrowDown /></el-icon>
         </div>
         <template #dropdown>
@@ -45,7 +68,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { 
@@ -53,7 +76,11 @@ import {
   Expand, 
   ArrowDown, 
   User, 
-  SwitchButton 
+  SwitchButton,
+  Moon,
+  Sunny,
+  View,
+  Hide
 } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -63,16 +90,48 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['toggle-sidebar'])
+const emit = defineEmits(['toggle-sidebar', 'update:privacy-mode'])
 
 const route = useRoute()
 const router = useRouter()
 
 const username = ref(localStorage.getItem('username') || 'Admin')
+const isDark = ref(localStorage.getItem('theme') === 'dark')
+const privacyMode = ref(localStorage.getItem('privacyMode') === 'true')
+
+const displayUsername = computed(() => {
+  if (privacyMode.value) return '***'
+  return username.value
+})
 
 const currentTitle = computed(() => {
   return route.meta.title || 'GoBup'
 })
+
+const applyTheme = () => {
+  if (isDark.value) {
+    document.documentElement.setAttribute('data-theme', 'dark')
+  } else {
+    document.documentElement.removeAttribute('data-theme')
+  }
+}
+
+const toggleTheme = () => {
+  isDark.value = !isDark.value
+  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
+  applyTheme()
+}
+
+const togglePrivacy = () => {
+  privacyMode.value = !privacyMode.value
+  localStorage.setItem('privacyMode', String(privacyMode.value))
+  emit('update:privacy-mode', privacyMode.value)
+  ElMessage({
+    message: privacyMode.value ? '隐私模式已开启' : '隐私模式已关闭',
+    type: privacyMode.value ? 'warning' : 'success',
+    duration: 1500
+  })
+}
 
 const handleToggleSidebar = () => {
   emit('toggle-sidebar')
@@ -92,12 +151,17 @@ const handleCommand = (command) => {
     }).catch(() => {})
   }
 }
+
+onMounted(() => {
+  applyTheme()
+  emit('update:privacy-mode', privacyMode.value)
+})
 </script>
 
 <style scoped lang="scss">
 .navbar-container {
   height: var(--navbar-height);
-  background: #ffffff;
+  background: var(--bg-color-secondary);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   display: flex;
   justify-content: space-between;
@@ -106,6 +170,8 @@ const handleCommand = (command) => {
   position: sticky;
   top: 0;
   z-index: var(--z-navbar);
+  border-bottom: 1px solid var(--border-color);
+  transition: background-color var(--transition-normal), border-color var(--transition-normal);
 }
 
 .navbar-left {
@@ -134,7 +200,26 @@ const handleCommand = (command) => {
 .navbar-right {
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm);
+}
+
+.nav-icon-btn {
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-color-secondary);
+  transition: all var(--transition-normal);
+  
+  &:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background-color: var(--bg-color-hover);
+  }
+
+  &.active {
+    border-color: var(--warning-color);
+    color: var(--warning-color);
+    background-color: rgba(230, 162, 60, 0.1);
+  }
 }
 
 .user-info {

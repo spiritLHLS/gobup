@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,10 +56,30 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 	}
 
 	// 检查是否有对应的XML弹幕文件
-	xmlPath := s.findDanmakuXML(part.FilePath)
-	if xmlPath == "" {
-		log.Printf("[弹幕烧录] 未找到弹幕XML文件，跳过烧录: %s", part.FilePath)
-		return "", fmt.Errorf("未找到弹幕XML文件")
+	// 对于切分分P（TempFileType=="split"），从源分P所在目录查找XML，并记录时间偏移
+	var xmlPath string
+	xmlTimeOffsetSec := 0
+	if part.TempFileType == "split" && part.SourcePartID != 0 {
+		var sourcePart models.RecordHistoryPart
+		if err := db.First(&sourcePart, part.SourcePartID).Error; err != nil {
+			return "", fmt.Errorf("切分分P找不到源分P(id=%d): %w", part.SourcePartID, err)
+		}
+		xmlPath = s.findDanmakuXML(sourcePart.FilePath)
+		if xmlPath == "" {
+			log.Printf("[弹幕烧录] 源分P无弹幕XML文件，跳过切分分P烧录: %s", sourcePart.FilePath)
+			return "", fmt.Errorf("未找到弹幕XML文件")
+		}
+		offsetSec := int(part.StartTime.Sub(sourcePart.StartTime).Seconds())
+		if offsetSec > 0 {
+			xmlTimeOffsetSec = offsetSec
+		}
+		log.Printf("[弹幕烧录] 切分分P使用源XML: %s, 时间偏移: %ds", xmlPath, xmlTimeOffsetSec)
+	} else {
+		xmlPath = s.findDanmakuXML(part.FilePath)
+		if xmlPath == "" {
+			log.Printf("[弹幕烧录] 未找到弹幕XML文件，跳过烧录: %s", part.FilePath)
+			return "", fmt.Errorf("未找到弹幕XML文件")
+		}
 	}
 
 	// 去重检查：若已存在该源分P的烧录记录且文件完好，直接返回，避免重复烧录
@@ -90,6 +111,14 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 		return "", fmt.Errorf("DanmakuFactory 转换弹幕为ASS失败（仅支持DanmakuFactory，不启用内置转换）: %w", err)
 	}
 	defer os.Remove(assPath) // 临时文件，用完删除
+
+	// 对切分分P：将全段ASS的时间戳平移至分P起始点，过滤掉偏移后时间为负的弹幕
+	if xmlTimeOffsetSec > 0 {
+		if err := shiftASSFile(assPath, xmlTimeOffsetSec); err != nil {
+			return "", fmt.Errorf("调整切分分P弹幕时间偏移失败: %w", err)
+		}
+		log.Printf("[弹幕烧录] 切分分P ASS时间已偏移 -%ds", xmlTimeOffsetSec)
+	}
 
 	log.Printf("[弹幕烧录] ASS字幕文件生成: %s", assPath)
 
@@ -460,15 +489,17 @@ func (s *DanmakuBurnService) CleanTempFilesBySessionID(sessionID string) error {
 	return nil
 }
 
-// CleanSplitTempFilesBySessionID 按SessionID清理 split（切分）类型的临时文件。
+// CleanSplitTempFilesBySessionID 按SessionID清理 split（切分）类型的文件。
 // 只清理 temp_file_type='split' 的已上传分P，不触碰弹幕烧录版文件。
 // 由审核通过事件调用，弹幕烧录版在 AppendDanmakuBurnedPartsToApprovedVideos 追加并标记后清理。
+// 注意：不通过 is_temp_file 过滤，因为切分分P现为 is_temp_file=false（正式文件），
+// 使用 temp_file_type='split' 作为唯一判据。
 func (s *DanmakuBurnService) CleanSplitTempFilesBySessionID(sessionID string) error {
 	db := database.GetDB()
 
 	var tempParts []models.RecordHistoryPart
-	if err := db.Where("session_id = ? AND is_temp_file = ? AND upload = ? AND temp_file_type = ?",
-		sessionID, true, true, "split").Find(&tempParts).Error; err != nil {
+	if err := db.Where("session_id = ? AND upload = ? AND temp_file_type = ?",
+		sessionID, true, "split").Find(&tempParts).Error; err != nil {
 		return fmt.Errorf("查询split临时文件失败: %w", err)
 	}
 
@@ -526,4 +557,97 @@ func (s *DanmakuBurnService) CleanAppendedBurnedPartsBySessionID(sessionID strin
 		log.Printf("[弹幕烧录清理] SessionID=%s 清理了 %d 个已追加的弹幕烧录文件", sessionID, successCount)
 	}
 	return nil
+}
+
+// shiftASSFile 将 ASS 文件中所有 Dialogue 行的时间戳减去 offsetSeconds。
+// 偏移后结束时间 ≤ 0 的行直接丢弃；开始时间变为负值时截断为 0。
+// 用于切分分P弹幕烧录：全段 ASS 需按本切分片段的起始时间做平移。
+func shiftASSFile(assPath string, offsetSeconds int) error {
+	if offsetSeconds <= 0 {
+		return nil
+	}
+	content, err := os.ReadFile(assPath)
+	if err != nil {
+		return fmt.Errorf("读取ASS文件失败: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), "Dialogue:") {
+			out = append(out, line)
+			continue
+		}
+
+		// 格式: Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+		// SplitN 10 保留 Text 字段中的逗号
+		rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "Dialogue:"))
+		fields := strings.SplitN(rest, ",", 10)
+		if len(fields) < 10 {
+			out = append(out, line)
+			continue
+		}
+
+		startSec, err1 := parseASSTime(strings.TrimSpace(fields[1]))
+		endSec, err2 := parseASSTime(strings.TrimSpace(fields[2]))
+		if err1 != nil || err2 != nil {
+			out = append(out, line)
+			continue
+		}
+
+		startSec -= float64(offsetSeconds)
+		endSec -= float64(offsetSeconds)
+
+		// 完全落在偏移点之前的弹幕直接丢弃
+		if endSec <= 0 {
+			continue
+		}
+		if startSec < 0 {
+			startSec = 0
+		}
+
+		fields[1] = formatASSTime(startSec)
+		fields[2] = formatASSTime(endSec)
+		out = append(out, "Dialogue: "+strings.Join(fields, ","))
+	}
+
+	return os.WriteFile(assPath, []byte(strings.Join(out, "\n")), 0644)
+}
+
+// parseASSTime 将 ASS 时间格式 "H:MM:SS.cc" 解析为秒（float64）
+func parseASSTime(s string) (float64, error) {
+	parts := strings.Split(s, ":")
+	if len(parts) != 3 {
+		return 0, fmt.Errorf("invalid ASS time: %s", s)
+	}
+	h, err1 := strconv.Atoi(parts[0])
+	m, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return 0, fmt.Errorf("invalid ASS time: %s", s)
+	}
+	secParts := strings.Split(parts[2], ".")
+	if len(secParts) != 2 {
+		return 0, fmt.Errorf("invalid ASS time: %s", s)
+	}
+	sec, err3 := strconv.Atoi(secParts[0])
+	cs, err4 := strconv.Atoi(secParts[1])
+	if err3 != nil || err4 != nil {
+		return 0, fmt.Errorf("invalid ASS time: %s", s)
+	}
+	return float64(h*3600+m*60+sec) + float64(cs)/100.0, nil
+}
+
+// formatASSTime 将秒（float64）格式化为 ASS 时间 "H:MM:SS.cc"
+func formatASSTime(secs float64) string {
+	if secs < 0 {
+		secs = 0
+	}
+	total := int(secs * 100) // 转为厘秒
+	cs := total % 100
+	total /= 100
+	s := total % 60
+	total /= 60
+	m := total % 60
+	h := total / 60
+	return fmt.Sprintf("%d:%02d:%02d.%02d", h, m, s, cs)
 }

@@ -202,12 +202,12 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 		}
 
 		// 1. 处理文件（删除/移动/复制）
-		if room.DeleteType == 11 || room.DeleteType == 12 {
+		{
 			fileMoverSvc := NewFileMoverService()
-			if err := fileMoverSvc.ProcessFilesByStrategy(historyID, room.DeleteType); err != nil {
+			if err := fileMoverSvc.TriggerFileOp(historyID, &room, FileOpTriggerAfterReview); err != nil {
 				log.Printf("审核通过后文件处理失败: %v", err)
 			} else {
-				log.Printf("审核通过后文件处理成功: history_id=%d, strategy=%d", historyID, room.DeleteType)
+				log.Printf("审核通过后文件处理成功: history_id=%d", historyID)
 			}
 		}
 

@@ -60,6 +60,19 @@ var (
 
 const sessionExpireTime = 3 * 60 // 3分钟过期
 
+// cleanupExpiredLoginSessions 清理已过期的登录会话，防止内存泄漏
+func cleanupExpiredLoginSessions() {
+	now := time.Now().Unix()
+	loginSessionsMu.Lock()
+	for key, session := range loginSessions {
+		// 保留双倍过期时间的缓冲，避免已成功但还未返回的会话被过早清除
+		if now-session.CreateTime > sessionExpireTime*2 {
+			delete(loginSessions, key)
+		}
+	}
+	loginSessionsMu.Unlock()
+}
+
 // ListBiliUsers 获取B站用户列表（不包括管理员）
 func ListBiliUsers(c *gin.Context) {
 	db := database.GetDB()
@@ -75,6 +88,9 @@ func ListBiliUsers(c *gin.Context) {
 
 // LoginUser 生成B站登录二维码
 func LoginUser(c *gin.Context) {
+	// 每次创建新会话时顺手清理已过期的遗留会话，防止 loginSessions map 无限增长
+	cleanupExpiredLoginSessions()
+
 	// 获取登录类型参数 (web/tv)，默认为tv
 	loginType := c.DefaultQuery("type", "tv")
 	log.Printf("开始生成%s端二维码...", loginType)
@@ -356,6 +372,11 @@ func UpdateBiliUser(c *gin.Context) {
 	var user models.BiliBiliUser
 	if err := c.ShouldBindJSON(&user); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if user.ID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "用户ID不能为空"})
 		return
 	}
 

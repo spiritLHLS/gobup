@@ -59,6 +59,33 @@
           预览效果
         </el-button>
       </el-form-item>
+
+      <el-divider content-position="left">分P切割设置</el-divider>
+
+      <el-form-item label="单文件时长上限">
+        <el-input-number
+          v-model="localForm.durationLimit"
+          :min="0"
+          :max="480"
+          :step="10"
+          controls-position="right"
+          style="width: 200px"
+        />
+        <span style="margin-left: 10px">分钟（0=不限制）</span>
+        <div class="help-text">录制单个文件的最长时长，达到后自动切分为下一个分P，0 表示不限制</div>
+      </el-form-item>
+
+      <el-form-item label="单文件大小上限">
+        <el-input-number
+          v-model="localForm.fileSizeLimit"
+          :min="0"
+          :step="512"
+          controls-position="right"
+          style="width: 200px"
+        />
+        <span style="margin-left: 10px">MB（0=不限制）</span>
+        <div class="help-text">录制单个文件的最大大小（MB），达到后自动切分，0 表示不限制</div>
+      </el-form-item>
     </el-form>
   </div>
 </template>

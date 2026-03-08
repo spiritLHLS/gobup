@@ -115,13 +115,30 @@ func LoadConfigFromDB() *ScanConfig {
 		}
 	}
 
+	maxFileAge := sysConfig.FileScanMaxAge / 24 // 转换为天
+	if maxFileAge < 1 {
+		if sysConfig.FileScanMaxAge > 0 {
+			maxFileAge = 1 // 不足 24小时的值至少保留 1 天
+		} else {
+			maxFileAge = 30 // 0 表示不限制，默认 30 天
+		}
+	}
+	scanIntervalHours := sysConfig.FileScanInterval / 60 // 转换为小时
+	if scanIntervalHours < 1 {
+		if sysConfig.FileScanInterval > 0 {
+			scanIntervalHours = 1 // 不足 60 分钟的值至少 1 小时
+		} else {
+			scanIntervalHours = 1 // 0 表示不定时，默认 1 小时
+		}
+	}
+
 	config := &ScanConfig{
 		WorkPath:          workPath,
 		VideoExtensions:   []string{".flv", ".mp4", ".mkv", ".ts"},
 		MinFileSize:       sysConfig.FileScanMinSize,
 		MinFileAge:        sysConfig.FileScanMinAge,
-		MaxFileAge:        sysConfig.FileScanMaxAge / 24,   // 转换为天
-		ScanIntervalHours: sysConfig.FileScanInterval / 60, // 转换为小时
+		MaxFileAge:        maxFileAge,
+		ScanIntervalHours: scanIntervalHours,
 	}
 
 	return config

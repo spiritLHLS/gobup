@@ -87,11 +87,14 @@ export function useHistoryProgress() {
   }
 
   // 开始历史记录进度轮询
-  const startHistoryProgressPolling = () => {
+  // getHistories: 可选的 getter 函数，返回当前 histories 数组，要求轮询自动执行时必须传入
+  const startHistoryProgressPolling = (getHistories) => {
     if (historyProgressTimer.value) return
-    
+
     historyProgressTimer.value = setInterval(() => {
-      // 这个函数需要从外部传入历史记录列表
+      if (typeof getHistories === 'function') {
+        fetchHistoryProgress(getHistories())
+      }
     }, 2000)
   }
 
@@ -138,9 +141,9 @@ export function useHistoryProgress() {
   // 开始弹幕进度轮询
   const startDanmakuProgressPolling = () => {
     if (danmakuProgressTimer.value) return
-    
+
     danmakuProgressTimer.value = setInterval(() => {
-      // 这个函数需要从外部传入历史记录列表
+      fetchDanmakuProgress()
     }, 1000)
   }
 

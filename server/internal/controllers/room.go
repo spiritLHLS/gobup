@@ -438,9 +438,29 @@ func TestLineSpeed(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// VerifyTemplate 验证/预览模板
+// VerifyTemplate 验证/预览模板（支持GET query参数和POST JSON体）
 func VerifyTemplate(c *gin.Context) {
-	template := c.Query("template")
+	var template string
+	var roomIdStr string
+
+	if c.Request.Method == "POST" {
+		// POST: JSON body
+		var body struct {
+			Template string `json:"template"`
+			RoomId   string `json:"roomId"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		template = body.Template
+		roomIdStr = body.RoomId
+	} else {
+		// GET: query param
+		template = c.Query("template")
+		roomIdStr = c.Query("roomId")
+	}
+
 	if template == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "template参数不能为空"})
 		return
@@ -451,12 +471,15 @@ func VerifyTemplate(c *gin.Context) {
 	data := map[string]interface{}{
 		"uname":     "主播名称",
 		"title":     "直播标题",
-		"roomId":    "123456",
+		"roomId":    roomIdStr,
 		"areaName":  "游戏",
 		"index":     1,
 		"fileName":  "example_file_20241230.flv",
 		"uid":       int64(987654321),
 		"startTime": now,
+	}
+	if roomIdStr == "" {
+		data["roomId"] = "123456"
 	}
 
 	// 渲染模板

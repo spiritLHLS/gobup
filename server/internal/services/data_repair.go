@@ -67,8 +67,8 @@ func (s *DataRepairService) repairOrphanParts(result *RepairResult, dryRun bool)
 	err := db.Raw(`
 		SELECT p.* 
 		FROM record_history_parts p 
-		LEFT JOIN record_histories h ON p.history_id = h.id 
-		WHERE h.id IS NULL
+		LEFT JOIN record_histories h ON p.history_id = h.id AND h.deleted_at IS NULL
+		WHERE h.id IS NULL AND p.deleted_at IS NULL
 	`).Scan(&orphanParts).Error
 
 	if err != nil {

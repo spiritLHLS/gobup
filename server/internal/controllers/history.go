@@ -26,22 +26,85 @@ func SetHistoryUploadService(svc *upload.Service) {
 func ListHistories(c *gin.Context) {
 	db := database.GetDB()
 
-	// 获取分页参数
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "10"))
-	roomId := c.Query("roomId")
-	bvId := c.Query("bvId")
+	// 支持 POST 请求体（新接口）
+	type ListRequest struct {
+		Page      int    `json:"page" form:"page"`
+		PageSize  int    `json:"pageSize" form:"pageSize"`
+		RoomId    string `json:"roomId" form:"roomId"`
+		BvId      string `json:"bvId" form:"bvId"`
+		ViewType  string `json:"viewType" form:"viewType"` // working | archived
+		From      string `json:"from" form:"from"`
+		To        string `json:"to" form:"to"`
+		Recording *bool  `json:"recording"`
+		Upload    *int   `json:"upload"`
+		Publish   *bool  `json:"publish"`
+	}
+
+	var req ListRequest
+	req.Page = 1
+	req.PageSize = 10
+	req.ViewType = "working"
+
+	if c.Request.Method == "POST" {
+		c.ShouldBindJSON(&req)
+	} else {
+		c.ShouldBindQuery(&req)
+	}
+
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 || req.PageSize > 200 {
+		req.PageSize = 10
+	}
 
 	// 构建查询
 	query := db.Model(&models.RecordHistory{})
 
 	// 添加搜索条件
-	if roomId != "" {
-		query = query.Where("room_id = ?", roomId)
+	if req.RoomId != "" {
+		query = query.Where("room_id = ?", req.RoomId)
 	}
-	if bvId != "" {
-		query = query.Where("bv_id = ?", bvId)
+	if req.BvId != "" {
+		query = query.Where("bv_id = ?", req.BvId)
 	}
+	if req.Recording != nil {
+		query = query.Where("recording = ?", *req.Recording)
+	}
+	if req.Publish != nil {
+		if *req.Publish {
+			query = query.Where("bv_id IS NOT NULL AND bv_id != ''")
+		} else {
+			query = query.Where("(bv_id IS NULL OR bv_id = '')")
+		}
+	}
+
+	// upload_status 过滤：0=未上传, 1=上传中, 2=已上传
+	if req.Upload != nil {
+		query = query.Where("upload_status = ?", *req.Upload)
+	}
+
+	// 日期范围过滤
+	if req.From != "" {
+		query = query.Where("start_time >= ?", req.From+" 00:00:00")
+	}
+	if req.To != "" {
+		query = query.Where("start_time <= ?", req.To+" 23:59:59")
+	}
+
+	// viewType 过滤：working = 录制中或最近7天未整理；archived = 其余
+	if req.ViewType == "working" {
+		sevenDaysAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+		query = query.Where("recording = ? OR start_time >= ?", true, sevenDaysAgo)
+	} else if req.ViewType == "archived" {
+		sevenDaysAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+		query = query.Where("recording = ? AND start_time < ?", false, sevenDaysAgo)
+	}
+
+	// 统计 workingCount（用于标签徽章）
+	var workingCount int64
+	sevenDaysAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+	db.Model(&models.RecordHistory{}).Where("recording = ? OR start_time >= ?", true, sevenDaysAgo).Count(&workingCount)
 
 	// 获取总数
 	var total int64
@@ -49,8 +112,8 @@ func ListHistories(c *gin.Context) {
 
 	// 分页查询
 	var histories []models.RecordHistory
-	offset := (page - 1) * pageSize
-	query.Order("end_time DESC").Limit(pageSize).Offset(offset).Find(&histories)
+	offset := (req.Page - 1) * req.PageSize
+	query.Order("end_time DESC").Limit(req.PageSize).Offset(offset).Find(&histories)
 
 	// 统计每个历史记录的分P信息
 	for i := range histories {
@@ -74,15 +137,16 @@ func ListHistories(c *gin.Context) {
 		} else if uploadPartCount > 0 && uploadPartCount == partCount {
 			histories[i].UploadStatus = 2 // 全部已上传
 		} else if uploadPartCount > 0 {
-			histories[i].UploadStatus = 2 // 部分已上传，也标记为已上传
+			histories[i].UploadStatus = 2 // 部分已上传
 		} else {
 			histories[i].UploadStatus = 0 // 未上传
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"list":  histories,
-		"total": total,
+		"list":         histories,
+		"total":        total,
+		"workingCount": workingCount,
 	})
 }
 
@@ -238,13 +302,35 @@ func CleanOldHistories(c *gin.Context) {
 
 	// 只删除未上传、未发布、不在上传中的旧记录
 	// 原来条件未排除 upload_status>0 的记录，会删除上传中/已上传的记录并导致数据循环损坏
-	result := db.Where("end_time < ? AND publish = false AND upload_status = 0 AND recording = false", cutoffTime).
-		Delete(&models.RecordHistory{})
+	// 先查询需要删除的历史记录 ID
+	var toDelete []models.RecordHistory
+	db.Select("id", "session_id").
+		Where("end_time < ? AND publish = false AND upload_status = 0 AND recording = false", cutoffTime).
+		Find(&toDelete)
+
+	var deletedCount int64
+	if len(toDelete) > 0 {
+		deleteIDs := make([]uint, len(toDelete))
+		sessionIDs := make([]string, 0, len(toDelete))
+		for i, h := range toDelete {
+			deleteIDs[i] = h.ID
+			if h.SessionID != "" {
+				sessionIDs = append(sessionIDs, h.SessionID)
+			}
+		}
+		// 级联删除关联弹幕和分P
+		if len(sessionIDs) > 0 {
+			db.Delete(&models.LiveMsg{}, "session_id IN ?", sessionIDs)
+		}
+		db.Delete(&models.RecordHistoryPart{}, "history_id IN ?", deleteIDs)
+		result := db.Delete(&models.RecordHistory{}, deleteIDs)
+		deletedCount = result.RowsAffected
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"type":         "success",
 		"msg":          "清理完成",
-		"deletedCount": result.RowsAffected,
+		"deletedCount": deletedCount,
 	})
 }
 
@@ -266,7 +352,29 @@ func BatchDelete(c *gin.Context) {
 	}
 
 	db := database.GetDB()
-	result := db.Delete(&models.RecordHistory{}, req.IDs)
+
+	// 将 IDs 转为 uint64切片以支持 GORM WHERE IN 查询
+	ids := make([]uint, len(req.IDs))
+	copy(ids, req.IDs)
+
+	// 级联删除：先获取 session_id 用于删除 LiveMsg
+	var histories []models.RecordHistory
+	db.Select("id", "session_id").Where("id IN ?", ids).Find(&histories)
+	sessionIDs := make([]string, 0, len(histories))
+	for _, h := range histories {
+		if h.SessionID != "" {
+			sessionIDs = append(sessionIDs, h.SessionID)
+		}
+	}
+
+	// 删除关联弹幕
+	if len(sessionIDs) > 0 {
+		db.Delete(&models.LiveMsg{}, "session_id IN ?", sessionIDs)
+	}
+	// 删除关联分P
+	db.Delete(&models.RecordHistoryPart{}, "history_id IN ?", ids)
+	// 删除历史记录本身
+	result := db.Delete(&models.RecordHistory{}, ids)
 
 	c.JSON(http.StatusOK, gin.H{
 		"type":  "success",
@@ -500,10 +608,14 @@ func BatchResetStatus(c *gin.Context) {
 
 		if req.Upload {
 			updates["upload_status"] = 0
-			// 重置分P的上传状态
+			// 重置分P的上传状态（包括清除卡广 "uploading" 和错误信息）
 			db.Model(&models.RecordHistoryPart{}).
 				Where("history_id = ?", historyID).
-				Updates(map[string]interface{}{"upload": false})
+				Updates(map[string]interface{}{
+					"upload":           false,
+					"uploading":        false,
+					"upload_error_msg": "",
+				})
 		}
 
 		if req.Publish {

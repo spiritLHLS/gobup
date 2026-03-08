@@ -6,6 +6,12 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 
+// 提前初始化主题，防止白屏闪烁
+const savedTheme = localStorage.getItem('theme')
+if (savedTheme === 'dark') {
+  document.documentElement.setAttribute('data-theme', 'dark')
+}
+
 const app = createApp(App)
 
 // 注册所有Element Plus图标

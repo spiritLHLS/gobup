@@ -1,6 +1,180 @@
 /* GoBup 全局样式 */
 @use './theme.scss';
 
+/* 深色模式全局覆盖 */
+[data-theme="dark"] {
+  body {
+    background-color: var(--bg-color-primary);
+    color: var(--text-color-primary);
+  }
+
+  .el-card {
+    background-color: var(--bg-color-secondary);
+    border-color: var(--border-color);
+    
+    .el-card__header {
+      background-color: var(--bg-color-tertiary);
+      border-bottom-color: var(--border-color);
+    }
+  }
+
+  .el-table {
+    --el-table-bg-color: var(--bg-color-secondary);
+    --el-table-tr-bg-color: var(--bg-color-secondary);
+    --el-table-header-bg-color: var(--bg-color-tertiary);
+    --el-table-row-hover-bg-color: var(--bg-color-hover);
+    --el-table-border-color: var(--border-color);
+    background-color: var(--bg-color-secondary);
+
+    th.el-table__cell {
+      background-color: var(--bg-color-tertiary);
+    }
+  }
+
+  .el-dialog {
+    background-color: var(--bg-color-secondary);
+    
+    .el-dialog__header {
+      background-color: var(--bg-color-tertiary);
+      border-bottom-color: var(--border-color);
+    }
+  }
+
+  .el-input__wrapper {
+    background-color: var(--bg-color-tertiary);
+    box-shadow: 0 0 0 1px var(--border-color) inset;
+    
+    &:hover {
+      box-shadow: 0 0 0 1px var(--border-color-hover) inset;
+    }
+    
+    .el-input__inner {
+      color: var(--text-color-primary);
+      background-color: transparent;
+    }
+  }
+
+  .el-select-dropdown {
+    background-color: var(--bg-color-secondary);
+    border-color: var(--border-color);
+    
+    .el-select-dropdown__item {
+      color: var(--text-color-primary);
+      
+      &:hover, &.hover {
+        background-color: var(--bg-color-hover);
+      }
+      
+      &.selected {
+        color: var(--primary-color);
+      }
+    }
+  }
+
+  .el-dropdown-menu {
+    background-color: var(--bg-color-secondary);
+    border-color: var(--border-color);
+    
+    .el-dropdown-menu__item {
+      color: var(--text-color-primary);
+      
+      &:hover {
+        background-color: var(--bg-color-hover);
+        color: var(--primary-color);
+      }
+    }
+  }
+
+  .el-pagination {
+    .el-input__wrapper {
+      background-color: var(--bg-color-tertiary);
+    }
+    .btn-prev, .btn-next, .el-pager li {
+      background-color: var(--bg-color-secondary);
+      color: var(--text-color-primary);
+      border-color: var(--border-color);
+      
+      &:hover {
+        color: var(--primary-color);
+      }
+    }
+  }
+
+  .el-tabs__header {
+    background-color: var(--bg-color-secondary);
+    border-bottom-color: var(--border-color);
+    
+    .el-tabs__item {
+      color: var(--text-color-secondary);
+      
+      &.is-active {
+        color: var(--primary-color);
+      }
+      
+      &:hover {
+        color: var(--primary-color);
+      }
+    }
+    
+    .el-tabs__active-bar {
+      background-color: var(--primary-color);
+    }
+  }
+
+  .el-tag {
+    &.el-tag--success {
+      background-color: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.3);
+      color: #4ade80;
+    }
+    &.el-tag--warning {
+      background-color: rgba(230, 162, 60, 0.15);
+      border-color: rgba(230, 162, 60, 0.3);
+      color: #fbbf24;
+    }
+    &.el-tag--danger {
+      background-color: rgba(245, 108, 108, 0.15);
+      border-color: rgba(245, 108, 108, 0.3);
+      color: #f87171;
+    }
+    &.el-tag--info {
+      background-color: rgba(144, 147, 153, 0.15);
+      border-color: rgba(144, 147, 153, 0.3);
+      color: #94a3b8;
+    }
+  }
+
+  .el-message-box {
+    background-color: var(--bg-color-secondary);
+    border-color: var(--border-color);
+    
+    .el-message-box__title {
+      color: var(--text-color-primary);
+    }
+    
+    .el-message-box__content {
+      color: var(--text-color-secondary);
+    }
+  }
+
+  .el-empty__description p {
+    color: var(--text-color-secondary);
+  }
+  
+  .el-loading-mask {
+    background-color: rgba(15, 23, 42, 0.7);
+  }
+  
+  .el-badge__content {
+    background-color: var(--danger-color);
+  }
+  
+  /* 进度条暗色 */
+  .el-progress-bar__outer {
+    background-color: var(--bg-color-tertiary);
+  }
+}
+
 /* Element Plus 主题定制 */
 :root {
   --el-color-primary: #16a34a;

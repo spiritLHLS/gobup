@@ -19,38 +19,439 @@ func NewFileMoverService() *FileMoverService {
 	return &FileMoverService{}
 }
 
-// ProcessFilesByStrategy 根据策略处理文件
-func (s *FileMoverService) ProcessFilesByStrategy(historyID uint, strategy int) error {
-	switch strategy {
-	case 0: // 不处理
+// ─── 文件操作常量 ────────────────────────────────────────────────────────────
+
+// FileOpTrigger 触发时机
+const (
+	FileOpTriggerDisabled      = 0 // 不处理
+	FileOpTriggerAfterPart     = 1 // 分P上传完成后
+	FileOpTriggerBeforePublish = 2 // 全部分P上传完成、投稿前
+	FileOpTriggerAfterPublish  = 3 // 投稿成功后
+	FileOpTriggerAfterReview   = 4 // 审核通过后
+)
+
+// FileOpAction 操作类型
+const (
+	FileOpActionNothing = 0 // 不处理
+	FileOpActionDelete  = 1 // 删除
+	FileOpActionMove    = 2 // 移动
+	FileOpActionCopy    = 3 // 复制
+)
+
+// FileOpScope 操作范围（位掩码）
+const (
+	FileOpScopeVideo   = 1 // 视频文件 (.flv/.mp4/.mkv/.ts 等)
+	FileOpScopeDanmaku = 2 // 弹幕文件 (.xml)
+	FileOpScopeCover   = 4 // 封面文件 (.jpg/.jpeg/.png)
+	FileOpScopeAll     = 7 // 全部文件
+)
+
+// TriggerFileOp 在特定事件发生时触发文件操作（根据房间配置）。
+// event 必须与 room.FileOpTrigger 吻合才会执行操作，否则直接返回 nil。
+func (s *FileMoverService) TriggerFileOp(historyID uint, room *models.RecordRoom, event int) error {
+	if room == nil || room.FileOpTrigger != event || room.FileOpTrigger == FileOpTriggerDisabled {
 		return nil
-	case 1: // 上传前删除
-		return s.deleteFiles(historyID)
-	case 2: // 上传前移动
-		return s.MoveFilesForHistory(historyID)
-	case 3: // 上传后删除
-		return s.deleteFiles(historyID)
-	case 4: // 上传后移动
-		return s.MoveFilesForHistory(historyID)
-	case 5: // 上传前复制
-		return s.copyFiles(historyID)
-	case 6: // 上传后复制
-		return s.copyFiles(historyID)
-	case 7: // 上传完成后立即删除
-		return s.deleteFiles(historyID)
-	case 8: // N天后删除移动（需要定时任务支持）
-		return s.scheduleDelayedDelete(historyID)
-	case 9: // 投稿成功后删除
-		return s.deleteFiles(historyID)
-	case 10: // 投稿成功后移动
-		return s.MoveFilesForHistory(historyID)
-	case 11: // 审核通过后复制
-		return s.copyFiles(historyID)
-	case 12: // 审核通过后3天延迟删除（避免弹幕烧录未完成时立即删除原始文件）
-		return s.scheduleDelayedDelete(historyID)
-	default:
-		return fmt.Errorf("未知的文件处理策略: %d", strategy)
 	}
+	if room.FileOpAction == FileOpActionNothing {
+		return nil
+	}
+	if room.FileOpDelay > 0 {
+		return s.scheduleFileOp(historyID, room.FileOpAction, room.FileOpScope, room.FileOpDelay)
+	}
+	return s.executeFileOp(historyID, room.FileOpAction, room.FileOpScope, room.MoveDir)
+}
+
+// executeFileOp 根据 action 和 scope 立即执行文件操作
+func (s *FileMoverService) executeFileOp(historyID uint, action, scope int, moveDir string) error {
+	switch action {
+	case FileOpActionNothing:
+		return nil
+	case FileOpActionDelete:
+		return s.deleteByScope(historyID, scope)
+	case FileOpActionMove:
+		return s.moveByScope(historyID, scope, moveDir)
+	case FileOpActionCopy:
+		return s.copyByScope(historyID, scope, moveDir)
+	default:
+		return fmt.Errorf("未知文件操作类型: %d", action)
+	}
+}
+
+// scheduleFileOp 将文件操作计划到 delayDays 天后执行（由定时任务 ProcessScheduledDeletes 消费）
+func (s *FileMoverService) scheduleFileOp(historyID uint, action, scope, delayDays int) error {
+	db := database.GetDB()
+
+	var history models.RecordHistory
+	if err := db.First(&history, historyID).Error; err != nil {
+		return fmt.Errorf("历史记录不存在: %w", err)
+	}
+
+	if history.ScheduledDeleteAt != nil {
+		log.Printf("历史记录 %d 已有计划操作时间: %s，跳过", historyID, history.ScheduledDeleteAt.Format("2006-01-02 15:04:05"))
+		return nil
+	}
+
+	if delayDays <= 0 {
+		delayDays = 3
+	}
+	opAt := time.Now().Add(time.Duration(delayDays) * 24 * time.Hour)
+	history.ScheduledDeleteAt = &opAt
+	history.ScheduledOpAction = action
+	history.ScheduledOpScope = scope
+	if err := db.Save(&history).Error; err != nil {
+		return fmt.Errorf("保存计划操作时间失败: %w", err)
+	}
+
+	log.Printf("历史记录 %d 已计划在 %d 天后（%s）执行文件操作 (action=%d, scope=%d)",
+		historyID, delayDays, opAt.Format("2006-01-02 15:04:05"), action, scope)
+	return nil
+}
+
+// removeIfExists 尝试删除文件，文件不存在时静默跳过
+func (s *FileMoverService) removeIfExists(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	return os.Remove(path)
+}
+
+// deleteByScope 按作用域删除文件（scope 为位掩码：FileOpScopeVideo/Danmaku/Cover）
+func (s *FileMoverService) deleteByScope(historyID uint, scope int) error {
+	db := database.GetDB()
+
+	var history models.RecordHistory
+	if err := db.First(&history, historyID).Error; err != nil {
+		return fmt.Errorf("历史记录不存在: %w", err)
+	}
+
+	var parts []models.RecordHistoryPart
+	if err := db.Where("history_id = ?", historyID).Find(&parts).Error; err != nil {
+		return fmt.Errorf("查询分P失败: %w", err)
+	}
+
+	successCount := 0
+	for _, part := range parts {
+		if part.FileDelete {
+			continue
+		}
+		if part.Uploading {
+			log.Printf("跳过正在上传中的分P: part_id=%d, file=%s", part.ID, part.FilePath)
+			continue
+		}
+		if part.FilePath == "" {
+			continue
+		}
+
+		dir := filepath.Dir(part.FilePath)
+		base := strings.TrimSuffix(filepath.Base(part.FilePath), filepath.Ext(part.FilePath))
+		deletedVideo := false
+
+		// 删除视频文件
+		if scope&FileOpScopeVideo != 0 {
+			if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
+				part.FileDelete = true
+				db.Save(&part)
+				deletedVideo = true
+			} else if err := os.Remove(part.FilePath); err != nil {
+				log.Printf("删除视频文件失败: %s, error: %v", part.FilePath, err)
+			} else {
+				part.FileDelete = true
+				db.Save(&part)
+				deletedVideo = true
+				log.Printf("已删除视频文件: %s", part.FilePath)
+			}
+		}
+
+		// 删除弹幕/字幕文件 (.xml/.json/.txt/.ass/.srt) — 临时分P不处理，避免误删原始分P的配套文件
+		if scope&FileOpScopeDanmaku != 0 && !part.IsTempFile {
+			for _, ext := range []string{".xml", ".json", ".txt", ".ass", ".srt"} {
+				p := filepath.Join(dir, base+ext)
+				if err := s.removeIfExists(p); err != nil {
+					log.Printf("删除弹幕/字幕文件失败: %s, error: %v", p, err)
+				}
+			}
+		}
+
+		// 删除封面文件 (.jpg/.jpeg/.png/.cover.jpg) — 临时分P同样跳过
+		if scope&FileOpScopeCover != 0 && !part.IsTempFile {
+			for _, ext := range []string{".jpg", ".jpeg", ".png", ".cover.jpg"} {
+				coverPath := filepath.Join(dir, base+ext)
+				if err := s.removeIfExists(coverPath); err != nil {
+					log.Printf("删除封面文件失败: %s, error: %v", coverPath, err)
+				}
+			}
+		}
+
+		if deletedVideo {
+			successCount++
+		}
+	}
+
+	// 仅在处理了视频文件时标记 FilesMoved（防止定时任务或其他逻辑重复触发）
+	if scope&FileOpScopeVideo != 0 {
+		history.FilesMoved = true
+		db.Save(&history)
+	}
+
+	log.Printf("历史记录 %d: 成功删除 %d/%d 个分P的文件 (scope=%d)", historyID, successCount, len(parts), scope)
+	return nil
+}
+
+// moveByScope 按作用域移动文件到 moveDir/<roomID>/<sessionID>/ 子目录
+func (s *FileMoverService) moveByScope(historyID uint, scope int, moveDir string) error {
+	db := database.GetDB()
+
+	var history models.RecordHistory
+	if err := db.First(&history, historyID).Error; err != nil {
+		return fmt.Errorf("历史记录不存在: %w", err)
+	}
+
+	if scope&FileOpScopeVideo != 0 && history.FilesMoved {
+		return fmt.Errorf("视频文件已移动，跳过")
+	}
+
+	if moveDir == "" {
+		var room models.RecordRoom
+		if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
+			return fmt.Errorf("房间配置不存在: %w", err)
+		}
+		moveDir = room.MoveDir
+	}
+	if moveDir == "" {
+		return fmt.Errorf("未配置目标目录")
+	}
+
+	var parts []models.RecordHistoryPart
+	if err := db.Where("history_id = ?", historyID).Find(&parts).Error; err != nil {
+		return fmt.Errorf("查询分P失败: %w", err)
+	}
+
+	movedCount := 0
+	errs := []string{}
+	for _, part := range parts {
+		if part.FileMoved || part.FileDelete || part.FilePath == "" {
+			continue
+		}
+
+		dir := filepath.Dir(part.FilePath)
+		fileName := filepath.Base(part.FilePath)
+		base := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+		targetDir := filepath.Join(moveDir, history.RoomID, history.SessionID)
+
+		if err := os.MkdirAll(targetDir, 0755); err != nil {
+			errs = append(errs, fmt.Sprintf("创建目录失败 %s: %v", targetDir, err))
+			continue
+		}
+
+		movedVideo := false
+		if scope&FileOpScopeVideo != 0 {
+			if _, err := os.Stat(part.FilePath); !os.IsNotExist(err) {
+				dst := filepath.Join(targetDir, fileName)
+				if err := s.moveFile(part.FilePath, dst); err != nil {
+					errs = append(errs, fmt.Sprintf("移动视频文件失败 %s: %v", fileName, err))
+				} else {
+					movedVideo = true
+					log.Printf("已移动视频文件: %s -> %s", part.FilePath, dst)
+				}
+			}
+		}
+
+		if scope&FileOpScopeDanmaku != 0 {
+			for _, ext := range []string{".xml", ".json", ".txt", ".ass", ".srt"} {
+				src := filepath.Join(dir, base+ext)
+				if _, err := os.Stat(src); err == nil {
+					if err := s.moveFile(src, filepath.Join(targetDir, base+ext)); err != nil {
+						log.Printf("移动弹幕/字幕文件失败: %s, error: %v", src, err)
+					}
+				}
+			}
+		}
+
+		if scope&FileOpScopeCover != 0 {
+			for _, ext := range []string{".jpg", ".jpeg", ".png", ".cover.jpg"} {
+				src := filepath.Join(dir, base+ext)
+				if _, err := os.Stat(src); err == nil {
+					if err := s.moveFile(src, filepath.Join(targetDir, base+ext)); err != nil {
+						log.Printf("移动封面文件失败: %s, error: %v", src, err)
+					}
+				}
+			}
+		}
+
+		if movedVideo {
+			part.FileMoved = true
+			part.FileDelete = false
+			db.Save(&part)
+			movedCount++
+		}
+	}
+
+	if movedCount > 0 && scope&FileOpScopeVideo != 0 {
+		history.FilesMoved = true
+		db.Save(&history)
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("部分文件移动失败: %s", strings.Join(errs, "; "))
+	}
+	log.Printf("历史记录 %d: 成功移动 %d/%d 个分P文件 (scope=%d)", historyID, movedCount, len(parts), scope)
+	return nil
+}
+
+// copyByScope 按作用域复制文件到 moveDir/<roomID>/<sessionID>/ 子目录（原文件保留）
+func (s *FileMoverService) copyByScope(historyID uint, scope int, moveDir string) error {
+	db := database.GetDB()
+
+	var history models.RecordHistory
+	if err := db.First(&history, historyID).Error; err != nil {
+		return fmt.Errorf("历史记录不存在: %w", err)
+	}
+
+	if moveDir == "" {
+		var room models.RecordRoom
+		if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
+			return fmt.Errorf("房间配置不存在: %w", err)
+		}
+		moveDir = room.MoveDir
+	}
+	if moveDir == "" {
+		return fmt.Errorf("未配置目标目录")
+	}
+
+	var parts []models.RecordHistoryPart
+	if err := db.Where("history_id = ?", historyID).Find(&parts).Error; err != nil {
+		return fmt.Errorf("查询分P失败: %w", err)
+	}
+
+	copiedCount := 0
+	for _, part := range parts {
+		if part.FilePath == "" {
+			continue
+		}
+
+		dir := filepath.Dir(part.FilePath)
+		fileName := filepath.Base(part.FilePath)
+		base := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+		targetDir := filepath.Join(moveDir, history.RoomID, history.SessionID)
+
+		if err := os.MkdirAll(targetDir, 0755); err != nil {
+			log.Printf("创建目录失败 %s: %v", targetDir, err)
+			continue
+		}
+
+		copiedVideo := false
+		if scope&FileOpScopeVideo != 0 {
+			if _, err := os.Stat(part.FilePath); err == nil {
+				dst := filepath.Join(targetDir, fileName)
+				if err := s.copyFile(part.FilePath, dst); err != nil {
+					log.Printf("复制视频文件失败: %s -> %s, error: %v", part.FilePath, dst, err)
+					continue
+				}
+				log.Printf("已复制视频文件: %s -> %s", part.FilePath, dst)
+				copiedVideo = true
+			}
+		}
+
+		if scope&FileOpScopeDanmaku != 0 {
+			for _, ext := range []string{".xml", ".json", ".txt", ".ass", ".srt"} {
+				src := filepath.Join(dir, base+ext)
+				if _, err := os.Stat(src); err == nil {
+					if err := s.copyFile(src, filepath.Join(targetDir, base+ext)); err != nil {
+						log.Printf("复制弹幕/字幕文件失败: %s, error: %v", src, err)
+					}
+				}
+			}
+		}
+
+		if scope&FileOpScopeCover != 0 {
+			for _, ext := range []string{".jpg", ".jpeg", ".png", ".cover.jpg"} {
+				src := filepath.Join(dir, base+ext)
+				if _, err := os.Stat(src); err == nil {
+					if err := s.copyFile(src, filepath.Join(targetDir, base+ext)); err != nil {
+						log.Printf("复制封面文件失败: %s, error: %v", src, err)
+					}
+				}
+			}
+		}
+
+		if copiedVideo {
+			copiedCount++
+		}
+	}
+
+	// 复制不修改原文件状态，但标记 FilesMoved 防止被定时任务重复触发
+	if copiedCount > 0 {
+		history.FilesMoved = true
+		db.Save(&history)
+	}
+
+	log.Printf("历史记录 %d: 成功复制 %d/%d 个分P文件 (scope=%d)", historyID, copiedCount, len(parts), scope)
+	return nil
+}
+
+// BackfillFileOps 对存量历史记录补执行文件操作。
+// 用于版本升级后首次启动时将新的文件操作规则应用到历史已完成但未处理的记录上。
+// 此函数是幂等的：files_moved=true 或已设置 scheduled_delete_at 的记录会被跳过。
+func (s *FileMoverService) BackfillFileOps() error {
+	db := database.GetDB()
+
+	// 获取所有配置了文件操作的房间
+	var rooms []models.RecordRoom
+	if err := db.Where("file_op_trigger != 0 AND file_op_action != 0").Find(&rooms).Error; err != nil {
+		return fmt.Errorf("查询房间配置失败: %w", err)
+	}
+
+	if len(rooms) == 0 {
+		return nil
+	}
+
+	log.Printf("[回填] 开始对 %d 个房间的存量历史记录补执行文件操作", len(rooms))
+	total := 0
+
+	for _, room := range rooms {
+		// 基础条件：文件未处理、无待执行计划、非录制中
+		baseQuery := db.Where(
+			"room_id = ? AND files_moved = ? AND scheduled_delete_at IS NULL AND recording = ?",
+			room.RoomID, false, false,
+		)
+
+		var histories []models.RecordHistory
+		var err error
+		switch room.FileOpTrigger {
+		case FileOpTriggerAfterPart, FileOpTriggerBeforePublish:
+			// 以 streaming=false 作为所有分P已完成的代理判断
+			err = baseQuery.Where("streaming = ?", false).Find(&histories).Error
+		case FileOpTriggerAfterPublish:
+			err = baseQuery.Where("publish = ?", true).Find(&histories).Error
+		case FileOpTriggerAfterReview:
+			err = baseQuery.Where("video_state = ?", 1).Find(&histories).Error
+		default:
+			continue
+		}
+		if err != nil {
+			log.Printf("[回填] 查询历史记录失败 room=%s: %v", room.RoomID, err)
+			continue
+		}
+
+		for _, history := range histories {
+			log.Printf("[回填] 补执行文件操作: history_id=%d, room=%s, trigger=%d, action=%d, scope=%d, delay=%d",
+				history.ID, room.RoomID, room.FileOpTrigger, room.FileOpAction, room.FileOpScope, room.FileOpDelay)
+			if room.FileOpDelay > 0 {
+				if err := s.scheduleFileOp(history.ID, room.FileOpAction, room.FileOpScope, room.FileOpDelay); err != nil {
+					log.Printf("[回填] 计划文件操作失败: history_id=%d, error=%v", history.ID, err)
+				}
+			} else {
+				if err := s.executeFileOp(history.ID, room.FileOpAction, room.FileOpScope, room.MoveDir); err != nil {
+					log.Printf("[回填] 执行文件操作失败: history_id=%d, error=%v", history.ID, err)
+				}
+			}
+			total++
+			time.Sleep(200 * time.Millisecond) // 避免IO过载
+		}
+	}
+
+	log.Printf("[回填] 完成，共处理 %d 条历史记录", total)
+	return nil
 }
 
 // MoveFilesForHistory 移动历史记录的所有相关文件
@@ -200,13 +601,19 @@ func (s *FileMoverService) moveRelatedFiles(sourceDir, targetDir, baseName strin
 	}
 }
 
-// AutoMoveFiles 自动移动已完成投稿的文件（定时任务调用）
+// AutoMoveFiles 自动移动已完成投稿的文件（定时任务调用）。
+// 只处理仍在使用旧版 MoveDir 配置（file_op_action=0）的房间；
+// 已迁移到新文件操作系统（file_op_action != 0）的房间由 TriggerFileOp/BackfillFileOps 处理。
 func (s *FileMoverService) AutoMoveFiles() error {
 	db := database.GetDB()
 
-	// 查找需要移动的历史记录
+	// 查找需要移动的历史记录：
+	//   - 已投稿（publish=true）、文件未处理（files_moved=false）、有BV号
+	//   - JOIN record_rooms，仅处理配置了 MoveDir 且未启用新文件操作的房间（file_op_action=0）
 	var histories []models.RecordHistory
-	if err := db.Where("publish = ? AND files_moved = ? AND bv_id != ?", true, false, "").
+	if err := db.Joins("JOIN record_rooms r ON r.room_id = record_histories.room_id").
+		Where("record_histories.publish = ? AND record_histories.files_moved = ? AND record_histories.bv_id != ? AND r.move_dir != ? AND r.file_op_action = ? AND r.deleted_at IS NULL",
+			true, false, "", "", 0).
 		Find(&histories).Error; err != nil {
 		return err
 	}
@@ -223,65 +630,15 @@ func (s *FileMoverService) AutoMoveFiles() error {
 	return nil
 }
 
-// deleteFiles 删除历史记录的所有文件
+// deleteFiles 删除历史记录的所有文件（视频+弹幕+封面）
 func (s *FileMoverService) deleteFiles(historyID uint) error {
-	db := database.GetDB()
-
-	var history models.RecordHistory
-	if err := db.First(&history, historyID).Error; err != nil {
-		return fmt.Errorf("历史记录不存在: %w", err)
-	}
-
-	// 获取所有分P
-	var parts []models.RecordHistoryPart
-	if err := db.Where("history_id = ?", historyID).Find(&parts).Error; err != nil {
-		return fmt.Errorf("查询分P失败: %w", err)
-	}
-
-	successCount := 0
-	for _, part := range parts {
-		if part.FileDelete {
-			continue
-		}
-
-		// 跳过正在上传中的分P，避免删除中类弹幕烧录版等正在进行的文件
-		if part.Uploading {
-			log.Printf("跳过正在上传中的分P: part_id=%d, file=%s", part.ID, part.FilePath)
-			continue
-		}
-
-		if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
-			part.FileDelete = true
-			db.Save(&part)
-			continue
-		}
-
-		// 删除主视频文件
-		if err := os.Remove(part.FilePath); err != nil {
-			log.Printf("删除文件失败: %s, error: %v", part.FilePath, err)
-			continue
-		}
-
-		// 删除相关文件（XML弹幕、封面、字幕等）
-		// 注意：仅删除原始文件的相关文件，不删除临时文件的相关文件
-		if !part.IsTempFile {
-			s.DeleteRelatedFiles(part.FilePath)
-		}
-
-		part.FileDelete = true
-		db.Save(&part)
-		successCount++
-		log.Printf("已删除文件及其相关文件: %s", part.FilePath)
-	}
-
-	history.FilesMoved = true
-	db.Save(&history)
-
-	log.Printf("历史记录 %d: 成功删除 %d/%d 个文件", historyID, successCount, len(parts))
-	return nil
+	return s.deleteByScope(historyID, FileOpScopeAll)
 }
 
-// copyFiles 复制历史记录的所有文件
+// deleteVideoFilesOnly 仅删除视频文件本身，保留弹幕(.xml)、封面(.jpg/.png)等相关文件
+func (s *FileMoverService) deleteVideoFilesOnly(historyID uint) error {
+	return s.deleteByScope(historyID, FileOpScopeVideo)
+}
 func (s *FileMoverService) copyFiles(historyID uint) error {
 	db := database.GetDB()
 
@@ -330,73 +687,64 @@ func (s *FileMoverService) copyFiles(historyID uint) error {
 		log.Printf("已复制文件: %s -> %s", part.FilePath, targetPath)
 	}
 
+	// 标记文件已处理，避免定时任务重复触发复制
+	if successCount > 0 {
+		history.FilesMoved = true
+		db.Save(&history)
+	}
+
 	log.Printf("历史记录 %d: 成功复制 %d/%d 个文件到 %s", historyID, successCount, len(parts), room.MoveDir)
 	return nil
 }
 
-// scheduleDelayedDelete 计划延迟删除
-// 将在 room.DeleteDay 天后删除文件（默认3天）。定时任务 ProcessScheduledDeletes 会检查并执行实际删除。
-func (s *FileMoverService) scheduleDelayedDelete(historyID uint) error {
-	db := database.GetDB()
-
-	var history models.RecordHistory
-	if err := db.First(&history, historyID).Error; err != nil {
-		return fmt.Errorf("历史记录不存在: %w", err)
-	}
-
-	// 如果已经设置了计划删除时间，不重复设置
-	if history.ScheduledDeleteAt != nil {
-		log.Printf("历史记录 %d 已有计划删除时间: %s，跳过", historyID, history.ScheduledDeleteAt.Format("2006-01-02 15:04:05"))
-		return nil
-	}
-
-	var room models.RecordRoom
-	if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
-		return fmt.Errorf("房间配置不存在: %w", err)
-	}
-
-	days := room.DeleteDay
-	if days <= 0 {
-		days = 3 // 默认3天
-	}
-
-	deleteAt := time.Now().Add(time.Duration(days) * 24 * time.Hour)
-	history.ScheduledDeleteAt = &deleteAt
-	if err := db.Save(&history).Error; err != nil {
-		return fmt.Errorf("保存计划删除时间失败: %w", err)
-	}
-
-	log.Printf("历史记录 %d 已计划在 %d 天后（%s）删除文件", historyID, days, deleteAt.Format("2006-01-02 15:04:05"))
-	return nil
-}
-
-// ProcessScheduledDeletes 处理到期的计划删除任务（由定时任务调用）
+// ProcessScheduledDeletes 处理到期的计划文件操作任务（由定时任务调用）
 func (s *FileMoverService) ProcessScheduledDeletes() error {
 	db := database.GetDB()
 
 	var histories []models.RecordHistory
 	now := time.Now()
-	if err := db.Where("scheduled_delete_at IS NOT NULL AND scheduled_delete_at <= ?", now).
+	// 加上 recording = false 过滤，避免误处理还在录制中的历史记录
+	if err := db.Where("scheduled_delete_at IS NOT NULL AND scheduled_delete_at <= ? AND recording = ?", now, false).
 		Find(&histories).Error; err != nil {
-		return fmt.Errorf("查询计划删除记录失败: %w", err)
+		return fmt.Errorf("查询计划操作记录失败: %w", err)
 	}
 
 	if len(histories) == 0 {
 		return nil
 	}
 
-	log.Printf("[计划删除] 发现 %d 个到期的计划删除任务", len(histories))
+	log.Printf("[计划操作] 发现 %d 个到期的计划文件操作任务", len(histories))
 
 	for _, history := range histories {
-		log.Printf("[计划删除] 开始执行计划删除: history_id=%d, bv_id=%s", history.ID, history.BvID)
-		if err := s.deleteFiles(history.ID); err != nil {
-			log.Printf("[计划删除] 删除文件失败: history_id=%d, error=%v", history.ID, err)
+		action := history.ScheduledOpAction
+		scope := history.ScheduledOpScope
+		// 向后兼容：旧版 scheduleDelayedDelete 写入的记录 ScheduledOpAction=0（GORM默认值），
+		// 且 ScheduledOpScope 会被 GORM AutoMigrate 填为列默认值 1（仅视频），而旧逻辑是删除全部文件。
+		// 因此当 action==0 时，同时把 scope 也重置为全部，确保行为与升级前完全一致。
+		if action == FileOpActionNothing {
+			action = FileOpActionDelete
+			scope = FileOpScopeAll
+		}
+
+		moveDir := ""
+		if action == FileOpActionMove || action == FileOpActionCopy {
+			var room models.RecordRoom
+			if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err == nil {
+				moveDir = room.MoveDir
+			}
+		}
+
+		log.Printf("[计划操作] 开始执行: history_id=%d, bv_id=%s, action=%d, scope=%d", history.ID, history.BvID, action, scope)
+		if err := s.executeFileOp(history.ID, action, scope, moveDir); err != nil {
+			log.Printf("[计划操作] 执行失败: history_id=%d, error=%v", history.ID, err)
 			continue
 		}
-		// 清除计划删除时间标记
-		scheduledAt := (*time.Time)(nil)
-		db.Model(&history).Update("scheduled_delete_at", scheduledAt)
-		log.Printf("[计划删除] ✓ 计划删除执行完成: history_id=%d", history.ID)
+		// 清除计划操作时间标记
+		// 注意：不能用 Update("field", nil) — GORM v2 会忽略 nil 指针导致字段无法清空。用原始 SQL 确保生效。
+		if err := db.Exec("UPDATE record_histories SET scheduled_delete_at = NULL WHERE id = ?", history.ID).Error; err != nil {
+			log.Printf("[计划操作] 清除标记失败: history_id=%d, error=%v", history.ID, err)
+		}
+		log.Printf("[计划操作] ✓ 计划操作执行完成: history_id=%d", history.ID)
 		time.Sleep(500 * time.Millisecond) // 避免IO过载
 	}
 

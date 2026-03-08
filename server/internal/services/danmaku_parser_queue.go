@@ -57,32 +57,33 @@ func (q *DanmakuParserQueue) Add(task *DanmakuParseTask) error {
 }
 
 // process 处理队列中的任务
+// 使用 select+default 模式，避免检查队列长度和设置 processing=false 之间的窾争条件导致任务丢失
 func (q *DanmakuParserQueue) process() {
-	defer func() {
-		q.mu.Lock()
-		q.processing = false
-		q.mu.Unlock()
-		log.Printf("[弹幕解析队列] 队列处理完毕")
-	}()
-
-	for task := range q.tasks {
-		log.Printf("[弹幕解析队列] 开始处理解析任务: history_id=%d (剩余队列: %d)",
-			task.HistoryID, len(q.tasks))
-
-		// 执行弹幕解析
-		count, err := q.parser.ParseDanmakuForHistory(task.HistoryID)
-		if err != nil {
-			log.Printf("[弹幕解析队列] 解析任务失败: history_id=%d, error=%v",
-				task.HistoryID, err)
-		} else {
-			log.Printf("[弹幕解析队列] 解析任务成功: history_id=%d, count=%d",
-				task.HistoryID, count)
-		}
-
-		// 队列为空时退出
-		if len(q.tasks) == 0 {
-			log.Printf("[弹幕解析队列] 队列已空，准备退出处理循环")
-			break
+	for {
+		select {
+		case task := <-q.tasks:
+			log.Printf("[弹幕解析队列] 开始处理解析任务: history_id=%d (剩余队列: %d)",
+				task.HistoryID, len(q.tasks))
+			// 执行弹幕解析
+			count, err := q.parser.ParseDanmakuForHistory(task.HistoryID)
+			if err != nil {
+				log.Printf("[弹幕解析队列] 解析任务失败: history_id=%d, error=%v",
+					task.HistoryID, err)
+			} else {
+				log.Printf("[弹幕解析队列] 解析任务成功: history_id=%d, count=%d",
+					task.HistoryID, count)
+			}
+		default:
+			// 队列中暂时没有任务——只有在持锁状态下确认为空才能退出，避免 Add() 在此窗口期内入队
+			q.mu.Lock()
+			if len(q.tasks) == 0 {
+				q.processing = false
+				q.mu.Unlock()
+				log.Printf("[弹幕解析队列] 队列已空，处理完毕")
+				return
+			}
+			// 在这个窗口期間有新任务入队，继续循环
+			q.mu.Unlock()
 		}
 	}
 }

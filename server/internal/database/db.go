@@ -71,6 +71,34 @@ func InitDB(dbPath string) error {
 	// 用 COALESCE(synced_at, updated_at) 作为近似的审核通过时间，保证历史数据立即参与回补扫描。
 	DB.Exec(`UPDATE record_histories SET approved_at = COALESCE(synced_at, updated_at) WHERE video_state = 1 AND approved_at IS NULL`)
 
+	// 数据迁移：将旧的 delete_type 单字段策略迁移到新的 file_op_* 四字段体系。
+	// 仅对 delete_type != 0 且 file_op_action = 0 的房间执行（幂等，不重复执行）。
+	// 迁移映射关系（原 delete_type → 新字段）：
+	//   0=不处理, 1=上传前删除(全量), 2=上传前移动, 3=上传后删除, 4=上传后移动,
+	//   5=上传前复制, 6=上传后复制, 7=上传后立即删除, 8=N天后删除,
+	//   9=投稿后删除(仅视频), 10=投稿后移动, 11=审核后复制, 12=审核后延迟删除(仅视频,3天)
+	DB.Exec(`UPDATE record_rooms SET
+		file_op_trigger = CASE delete_type
+			WHEN 1 THEN 2 WHEN 2 THEN 2 WHEN 5 THEN 2
+			WHEN 3 THEN 1 WHEN 4 THEN 1 WHEN 6 THEN 1 WHEN 7 THEN 1 WHEN 8 THEN 1
+			WHEN 9 THEN 3 WHEN 10 THEN 3
+			WHEN 11 THEN 4 WHEN 12 THEN 4
+			ELSE 0 END,
+		file_op_action = CASE delete_type
+			WHEN 1 THEN 1 WHEN 3 THEN 1 WHEN 7 THEN 1 WHEN 8 THEN 1
+			WHEN 9 THEN 1 WHEN 12 THEN 1
+			WHEN 2 THEN 2 WHEN 4 THEN 2 WHEN 10 THEN 2
+			WHEN 5 THEN 3 WHEN 6 THEN 3 WHEN 11 THEN 3
+			ELSE 0 END,
+		file_op_scope = CASE delete_type
+			WHEN 9 THEN 1 WHEN 12 THEN 1
+			ELSE 7 END,
+		file_op_delay = CASE delete_type
+			WHEN 8 THEN delete_day
+			WHEN 12 THEN 3
+			ELSE 0 END
+		WHERE delete_type != 0 AND file_op_action = 0`)
+
 	// 初始化系统配置（如果不存在）
 	var config models.SystemConfig
 	if err := DB.First(&config).Error; err != nil {

@@ -31,7 +31,9 @@ func SetupRoutes(router *gin.Engine) {
 				rooms.GET("/testLines", controllers.TestAllLines)
 				rooms.GET("/testSpeed", controllers.TestLineSpeed)
 				rooms.GET("/seasons", controllers.GetSeasons)
+				// 模板验证：同时支持GET (verification) 和 POST (verifyTemplate)
 				rooms.GET("/verification", controllers.VerifyTemplate)
+				rooms.POST("/verifyTemplate", controllers.VerifyTemplate)
 			}
 
 			users := auth.Group("/biliUser")
@@ -44,6 +46,7 @@ func SetupRoutes(router *gin.Engine) {
 				users.GET("/loginCheck", controllers.LoginCheck)
 				users.GET("/loginCancel", controllers.LoginCancel)
 				users.GET("/delete/:id", controllers.DeleteBiliUser)
+				users.POST("/update", controllers.UpdateBiliUser)
 			}
 
 			histories := auth.Group("/history")
@@ -57,6 +60,12 @@ func SetupRoutes(router *gin.Engine) {
 				histories.POST("/publish/:id", controllers.RePublishHistory)
 				histories.GET("/updatePublishStatus/:id", controllers.UpdatePublishStatus)
 				histories.POST("/manualSetPublish/:id", controllers.ManualSetPublishInfo) // 手动设置投稿信息
+				// 分P列表（前端兼容路径）
+				histories.GET("/part/:id", controllers.ListPartsById)
+				// 强制归档（避免卡在进行中状态）
+				histories.POST("/forceArchive/:id", controllers.ForceArchiveHistory)
+				// 候选文件（扫描磁盘可绑定文件）
+				histories.GET("/candidateFiles/:id", controllers.GetCandidateFiles)
 
 				// 批量操作
 				histories.POST("/batchUpdate", controllers.BatchUpdateStatus)
@@ -132,7 +141,7 @@ func SetupRoutes(router *gin.Engine) {
 				config.PUT("/system", controllers.UpdateSystemConfig)
 				config.POST("/toggle", controllers.ToggleSystemConfig)
 				config.GET("/stats", controllers.GetSystemStats)
-				
+
 				// 数据库瘦身
 				config.POST("/cleanup", controllers.CleanupDatabase)
 			}

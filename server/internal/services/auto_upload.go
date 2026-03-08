@@ -248,13 +248,14 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 		}
 	}
 
-	// 额外：补充扫描所有上传失败的大文件切分临时分P（is_temp_file=true, temp_file_type=split）
+	// 额外：补充扫描所有上传失败的大文件切分分P（temp_file_type=split）
 	// splitLargeFile 创建子分P并直接入队，若上传失败后服务未重启则不会被自动重试。
-	// 此处每10分钟周期调度时主动发现并重新入队（与 danmaku_burn 的重试机制保持一致）。
+	// 注意：切分分P现为 is_temp_file=false，使用 temp_file_type='split' 作为判据。
+	// 此处每10分钟周期调度时主动发现并重新入队（正常扫描也能覆盖，此处作为双重保障）。
 	var failedSplitParts []models.RecordHistoryPart
 	if err := db.Where(
-		"is_temp_file = ? AND temp_file_type = ? AND upload = ? AND uploading = ? AND file_delete = ?",
-		true, "split", false, false, false,
+		"temp_file_type = ? AND upload = ? AND uploading = ? AND file_delete = ?",
+		"split", false, false, false,
 	).Find(&failedSplitParts).Error; err != nil {
 		log.Printf("[自动上传] 查询失败的split分P失败: %v", err)
 	} else {

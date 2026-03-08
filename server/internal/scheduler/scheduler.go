@@ -49,6 +49,14 @@ func InitScheduler() {
 		if err := uploadService.AppendDanmakuBurnedPartsToApprovedVideos(); err != nil {
 			log.Printf("[启动恢复] 弹幕回补检查失败: %v", err)
 		}
+		// 6. 对存量历史记录补执行文件处理操作（版本升级入口）
+		// 确保旧规则应用到升级前已完成但未处理的历史记录上。
+		// 已处理的记录（files_moved=true 或 scheduled_delete_at 已设置）会被自动跳过。
+		log.Println("[启动恢复] 对存量历史记录补执行文件操作")
+		moverSvc := services.NewFileMoverService()
+		if err := moverSvc.BackfillFileOps(); err != nil {
+			log.Printf("[启动恢复] 文件操作回填失败: %v", err)
+		}
 	}()
 
 	// 视频同步任务 - 每10分钟执行一次

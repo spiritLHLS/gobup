@@ -108,7 +108,12 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 			if u.progressCallback != nil {
 				u.progressCallback(chunkDone, int(totalParts))
 			}
-			log.Printf("[UPOS] 上传进度: %d/%d (%.1f%%)", chunkDone, totalParts, float64(chunkDone)*100/float64(totalParts))
+			// 每跨越5%里程碑或到达100%时才打日志，避免日志堆积
+			prevPct := (chunkDone - 1) * 100 / int(totalParts)
+			currPct := chunkDone * 100 / int(totalParts)
+			if currPct/5 > prevPct/5 || chunkDone == int(totalParts) {
+				log.Printf("[UPOS] 上传进度: %d/%d (%.1f%%)", chunkDone, totalParts, float64(chunkDone)*100/float64(totalParts))
+			}
 			return nil
 		})
 

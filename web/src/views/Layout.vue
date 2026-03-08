@@ -11,7 +11,8 @@
       <!-- 导航栏 -->
       <Navbar 
         :is-collapse="isCollapse"
-        @toggle-sidebar="handleToggleSidebar" 
+        @toggle-sidebar="handleToggleSidebar"
+        @update:privacy-mode="val => privacyMode.value = val"
       />
       
       <!-- 主要内容 -->
@@ -28,11 +29,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, provide, onMounted, onBeforeUnmount } from 'vue'
 import { Sidebar, Navbar, AppMain } from '@/components/layout'
 
 const isCollapse = ref(false)
 const isMobile = ref(false)
+const privacyMode = ref(localStorage.getItem('privacyMode') === 'true')
+
+// 向所有子组件提供隐私模式状态
+provide('privacyMode', privacyMode)
 
 // 检测设备类型
 const checkDevice = () => {

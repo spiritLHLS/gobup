@@ -449,12 +449,10 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		}
 	}
 
-	// 处理文件策略：9-投稿成功后删除, 10-投稿成功后移动
-	if room.DeleteType == 9 || room.DeleteType == 10 {
-		fileMoverSvc := services.NewFileMoverService()
-		if err := fileMoverSvc.ProcessFilesByStrategy(historyID, room.DeleteType); err != nil {
-			log.Printf("文件处理失败: %v", err)
-		}
+	// 触发“投稿成功后”文件操作
+	fileMoverSvc := services.NewFileMoverService()
+	if err := fileMoverSvc.TriggerFileOp(historyID, &room, services.FileOpTriggerAfterPublish); err != nil {
+		log.Printf("文件处理失败: %v", err)
 	}
 
 	// 注意：临时文件（切分文件、弹幕烧录文件等）的清理已移至审核通过后执行
@@ -476,6 +474,31 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	}
 
 	return nil
+}
+
+// bv2avLocal 将 BV 号转换为 AV 号（upload 包内部使用，避免跨包循环导入）
+func bv2avLocal(bv string) int64 {
+	const (
+		xorCode  = int64(23442827791579)
+		maskCode = int64(2251799813685247)
+		base     = 58
+		alphabet = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf"
+	)
+	if len(bv) != 12 || bv[:2] != "BV" {
+		return 0
+	}
+	charMap := make(map[byte]int64)
+	for i, c := range alphabet {
+		charMap[byte(c)] = int64(i)
+	}
+	bytes := []byte(bv)
+	bytes[3], bytes[9] = bytes[9], bytes[3]
+	bytes[4], bytes[7] = bytes[7], bytes[4]
+	var tmp int64
+	for i := 2; i < len(bytes); i++ {
+		tmp = tmp*base + charMap[bytes[i]]
+	}
+	return (tmp ^ xorCode) & maskCode
 }
 
 // Av2Bv 将AV号转换为BV号
@@ -602,10 +625,18 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 	// 获取原投稿信息
 	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
 
-	// 从已存在的History获取AID
-	aidInt, err := strconv.ParseInt(existingHistory.AvID, 10, 64)
-	if err != nil {
-		return fmt.Errorf("解析AID失败: %w", err)
+	// 从已存在的History获取AID；若 AvID 为空（旧数据兼容），尝试从 BvID 转换
+	aidInt, parseErr := strconv.ParseInt(existingHistory.AvID, 10, 64)
+	if parseErr != nil || aidInt == 0 {
+		if existingHistory.BvID != "" {
+			aidInt = bv2avLocal(existingHistory.BvID)
+		}
+		if aidInt == 0 {
+			return fmt.Errorf("解析AID失败，AvID=%q BvID=%q 均无法解析", existingHistory.AvID, existingHistory.BvID)
+		}
+		// 顺手修复数据库中的 AvID
+		db.Model(existingHistory).Update("av_id", fmt.Sprintf("%d", aidInt))
+		log.Printf("[追加分P] 补充 AvID: history_id=%d, avID=%d", existingHistory.ID, aidInt)
 	}
 
 	// 获取原视频稿件详细信息（包含desc, tag, copyright, source）

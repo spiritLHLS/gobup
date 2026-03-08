@@ -111,6 +111,26 @@
             <el-icon><DeleteFilled /></el-icon>
             删除记录和文件
           </el-button>
+
+          <el-button
+            type="warning"
+            plain
+            :disabled="!history?.recording"
+            @click="$emit('forceArchive')"
+          >
+            <el-icon><Lock /></el-icon>
+            强制归档
+          </el-button>
+
+          <el-button
+            type="info"
+            plain
+            :disabled="!(history?.partCount > 0)"
+            @click="$emit('showParts')"
+          >
+            <el-icon><Film /></el-icon>
+            查看分P详情
+          </el-button>
         </div>
       </div>
     </div>
@@ -131,7 +151,9 @@ import {
   Delete, 
   DeleteFilled,
   Promotion,
-  Edit
+  Edit,
+  Lock,
+  Film
 } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -154,7 +176,9 @@ defineEmits([
   'moveFiles',
   'resetStatus',
   'deleteOnly',
-  'deleteWithFiles'
+  'deleteWithFiles',
+  'forceArchive',
+  'showParts'
 ])
 
 const hasUnuploadedParts = computed(() => {
@@ -165,18 +189,18 @@ const hasUnuploadedParts = computed(() => {
 })
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .actions-container {
   padding: 10px 0;
 }
 
 .section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 15px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-color-primary);
+  margin: 0 0 15px;
   padding-bottom: 8px;
-  border-bottom: 2px solid #e4e7ed;
+  border-bottom: 2px solid var(--border-color);
 }
 
 .status-section {
@@ -194,32 +218,33 @@ const hasUnuploadedParts = computed(() => {
   display: flex;
   align-items: center;
   padding: 8px 12px;
-  background: #f5f7fa;
-  border-radius: 4px;
+  background: var(--bg-color-tertiary);
+  border-radius: var(--border-radius-medium);
+  border: 1px solid var(--border-color);
 }
 
 .status-label {
-  font-size: 13px;
-  color: #606266;
+  font-size: var(--font-size-sm);
+  color: var(--text-color-secondary);
   margin-right: 8px;
+  white-space: nowrap;
 }
 
 .bv-link {
   margin-top: 12px;
   padding: 10px;
-  background: #ecf5ff;
-  border-radius: 4px;
+  background: rgba(64, 158, 255, 0.08);
+  border-radius: var(--border-radius-medium);
   text-align: center;
+  border: 1px solid rgba(64, 158, 255, 0.2);
 }
 
 .bv-link a {
-  color: #409eff;
+  color: var(--primary-color);
   text-decoration: none;
-  font-weight: 500;
-}
-
-.bv-link a:hover {
-  text-decoration: underline;
+  font-weight: var(--font-weight-medium);
+  
+  &:hover { text-decoration: underline; }
 }
 
 .actions-section {
@@ -230,20 +255,12 @@ const hasUnuploadedParts = computed(() => {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
-}
-
-.actions-grid .el-button {
-  width: 100%;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 15px;
-  box-sizing: border-box;
-}
-
-.actions-grid .el-button .el-icon {
-  margin-right: 5px;
+  
+  .el-button {
+    width: 100%;
+    height: 40px;
+    justify-content: center;
+  }
 }
 
 @media (max-width: 768px) {

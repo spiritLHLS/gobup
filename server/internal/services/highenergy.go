@@ -83,15 +83,22 @@ func (s *HighEnergyCutService) CutHighEnergySegments(historyID uint) (string, er
 		return "", fmt.Errorf("没有视频文件")
 	}
 
-	// 使用第一个视频文件作为源（简化处理，实际可能需要拼接多个分P）
-	sourceFile := parts[0].FilePath
+	// 过滤掉没有文件路径的分P
+	var validParts []models.RecordHistoryPart
+	for _, p := range parts {
+		if p.FilePath != "" {
+			validParts = append(validParts, p)
+		}
+	}
+	if len(validParts) == 0 {
+		return "", fmt.Errorf("所有分P均无文件路径")
+	}
 
-	// 创建输出文件
-	outputFile := filepath.Join(filepath.Dir(sourceFile),
-		fmt.Sprintf("%s_highlight_%d.mp4", filepath.Base(sourceFile), time.Now().Unix()))
+	outputFile := filepath.Join(filepath.Dir(validParts[0].FilePath),
+		fmt.Sprintf("highlight_%d.mp4", time.Now().Unix()))
 
-	// 使用ffmpeg剪辑（这里需要安装ffmpeg）
-	if err := s.cutVideoSegments(sourceFile, outputFile, segments); err != nil {
+	// 支持多分P：将高能片段按分P时间轴切分并合并
+	if err := s.cutMultiPartHighEnergy(&history, validParts, outputFile, segments); err != nil {
 		return "", fmt.Errorf("视频剪辑失败: %w", err)
 	}
 
@@ -154,20 +161,31 @@ func (s *HighEnergyCutService) calculateThreshold(densities []DanmakuDensity, pe
 		return 0
 	}
 
-	// 提取所有密度值并排序
+	// 防止 percentile<=0 导致阈值取最小局株尌，把所有帧都判为高能
+	if percentile <= 0 {
+		percentile = 0.5
+	}
+	if percentile > 1 {
+		percentile = 1
+	}
+
 	counts := make([]int, len(densities))
 	for i, d := range densities {
 		counts[i] = d.Count
 	}
 	sort.Ints(counts)
 
-	// 计算百分位数
 	index := int(float64(len(counts)) * percentile)
 	if index >= len(counts) {
 		index = len(counts) - 1
 	}
 
-	return counts[index]
+	// 阈值至少为 1，避免把没有弹幕的片段也就入结果
+	v := counts[index]
+	if v < 1 {
+		v = 1
+	}
+	return v
 }
 
 // TimeSegment 时间片段
@@ -293,7 +311,7 @@ func (s *HighEnergyCutService) concatenateVideos(inputFiles []string, outputFile
 		return os.Rename(inputFiles[0], outputFile)
 	}
 
-	// 创建concat列表文件
+	// 创建 concat 列表文件
 	concatFile := filepath.Join(filepath.Dir(outputFile), "concat_list.txt")
 	f, err := os.Create(concatFile)
 	if err != nil {
@@ -322,6 +340,99 @@ func (s *HighEnergyCutService) concatenateVideos(inputFiles []string, outputFile
 		return fmt.Errorf("合并视频失败: %w", err)
 	}
 
+	return nil
+}
+
+// cutMultiPartHighEnergy 从多分P视频中切出高能片段并合并
+// segments 是相对于直播开始时间的毫秒时间段
+func (s *HighEnergyCutService) cutMultiPartHighEnergy(
+	history *models.RecordHistory,
+	parts []models.RecordHistoryPart,
+	outputFile string,
+	segments []TimeSegment,
+) error {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		return fmt.Errorf("ffmpeg未安装或不在PATH中: %w", err)
+	}
+
+	historyStartMs := history.StartTime.UnixMilli()
+	tempDir := filepath.Dir(outputFile)
+	var tempFiles []string
+	cutIdx := 0
+
+	for _, seg := range segments {
+		for _, part := range parts {
+			if part.FilePath == "" {
+				continue
+			}
+
+			// 计算分P相对于历史开始的偏移量（毫秒）
+			partOffsetMs := part.StartTime.UnixMilli() - historyStartMs
+			var partDurationMs int64
+			if part.Duration > 0 {
+				partDurationMs = int64(part.Duration) * 1000
+			} else {
+				partDurationMs = part.EndTime.UnixMilli() - part.StartTime.UnixMilli()
+			}
+			if partDurationMs <= 0 {
+				log.Printf("[高能剪辑] 分P %d 时长为0，跳过", part.ID)
+				continue
+			}
+
+			// 计算片段与分P的交叉部分
+			overlapStart := seg.Start
+			if overlapStart < partOffsetMs {
+				overlapStart = partOffsetMs
+			}
+			overlapEnd := seg.End
+			if overlapEnd > partOffsetMs+partDurationMs {
+				overlapEnd = partOffsetMs + partDurationMs
+			}
+			if overlapEnd <= overlapStart {
+				continue
+			}
+
+			// 转为分P内部的局部时间
+			localStartMs := overlapStart - partOffsetMs
+			localDurationMs := overlapEnd - overlapStart
+
+			tempFile := filepath.Join(tempDir, fmt.Sprintf("he_cut_%d.mp4", cutIdx))
+			cutIdx++
+
+			args := []string{
+				"-i", part.FilePath,
+				"-ss", fmt.Sprintf("%.3f", float64(localStartMs)/1000.0),
+				"-t", fmt.Sprintf("%.3f", float64(localDurationMs)/1000.0),
+				"-c", "copy",
+				"-y", tempFile,
+			}
+			cmd := exec.Command("ffmpeg", args...)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				log.Printf("[高能剪辑] ffmpeg切片失败 part=%d seg=[%d,%d]: %s\n%s",
+					part.ID, seg.Start, seg.End, err, string(output))
+				for _, tf := range tempFiles {
+					os.Remove(tf)
+				}
+				return fmt.Errorf("切片失败 part=%d: %w", part.ID, err)
+			}
+			tempFiles = append(tempFiles, tempFile)
+		}
+	}
+
+	if len(tempFiles) == 0 {
+		return fmt.Errorf("没有可合并的片段")
+	}
+
+	if err := s.concatenateVideos(tempFiles, outputFile); err != nil {
+		for _, tf := range tempFiles {
+			os.Remove(tf)
+		}
+		return err
+	}
+
+	for _, tf := range tempFiles {
+		os.Remove(tf)
+	}
 	return nil
 }
 

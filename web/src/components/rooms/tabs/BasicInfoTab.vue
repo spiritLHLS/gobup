@@ -206,6 +206,18 @@
           支持变量: ${index} ${MM月dd日HH点mm分} ${areaName} ${fileName}
         </div>
       </el-form-item>
+
+      <el-divider content-position="left">投稿权限</el-divider>
+
+      <el-form-item label="仅自己可见">
+        <el-switch v-model="localForm.isOnlySelf" />
+        <div class="help-text">开启后投稿视频仅自己可见，方便校对内容后再公开</div>
+      </el-form-item>
+
+      <el-form-item label="不打扰模式">
+        <el-switch v-model="localForm.noDisturbance" />
+        <div class="help-text">开启后在设定的公屏区间内停止录制而不游荣主播（需录制端支持）</div>
+      </el-form-item>
     </el-form>
   </div>
 </template>

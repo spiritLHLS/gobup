@@ -57,10 +57,16 @@ export const roomAPI = {
 
 // 录制历史
 export const historyAPI = {
-  list: (params) => request.post('/history/list', null, { params }),
+  list: (params) => request.post('/history/list', params),
   publish: (id) => request.post(`/history/publish/${id}`),
   delete: (id) => request.get(`/history/delete/${id}`),
-  parts: (id) => request.get(`/history/part/${id}`)
+  parts: (id) => request.get(`/history/part/${id}`),
+  upload: (id) => request.post(`/history/upload/${id}`),
+  syncVideo: (id) => request.post(`/history/syncVideo/${id}`),
+  moveFiles: (id) => request.post(`/history/moveFiles/${id}`),
+  resetStatus: (id, options) => request.post(`/history/resetStatus/${id}`, options),
+  forceArchive: (id) => request.post(`/history/forceArchive/${id}`),
+  candidateFiles: (id) => request.get(`/history/candidateFiles/${id}`)
 }
 
 // 用户管理

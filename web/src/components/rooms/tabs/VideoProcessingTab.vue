@@ -59,6 +59,15 @@
           ⭐ 弹幕版上传完成后，自动追加到已投稿视频（同时保留原版和弹幕版）
         </div>
       </el-form-item>
+
+      <el-form-item label="弹幕烧录样式" v-if="localForm.enableDanmakuBurn">
+        <el-select v-model="localForm.danmakuBurnStyle" style="width: 200px">
+          <el-option value="default" label="默认样式" />
+          <el-option value="compact" label="紧凑样式" />
+          <el-option value="large" label="大字样式" />
+        </el-select>
+        <div class="help-text">控制烧录到视频中的弹幕字号和排列样式</div>
+      </el-form-item>
       
       <el-divider content-position="left">弹幕过滤</el-divider>
       
@@ -99,52 +108,67 @@
       </el-form-item>
       
       <el-divider content-position="left">文件处理</el-divider>
-      
-      <el-form-item label="处理方式">
-        <el-select v-model="localForm.deleteType" style="width: 100%">
-          <el-option :value="0" label="0 - 不处理" />
-          <el-option :value="1" label="1 - 上传前删除" />
-          <el-option :value="2" label="2 - 上传前移动" />
-          <el-option :value="3" label="3 - 上传后删除" />
-          <el-option :value="4" label="4 - 上传后移动" />
-          <el-option :value="5" label="5 - 上传前复制" />
-          <el-option :value="6" label="6 - 上传后复制" />
-          <el-option :value="7" label="7 - 上传完成后立即删除" />
-          <el-option :value="8" label="8 - N天后删除移动" />
-          <el-option :value="9" label="9 - 投稿成功后删除（推荐）" />
-          <el-option :value="10" label="10 - 投稿成功后移动" />
-          <el-option :value="11" label="11 - 审核通过后复制" />
-          <el-option :value="12" label="12 - 审核通过后N天延迟删除（默认3天）" />
+
+      <el-form-item label="触发时机">
+        <el-select v-model="localForm.fileOpTrigger" style="width: 100%">
+          <el-option :value="0" label="不处理" />
+          <el-option :value="1" label="分P上传完成后" />
+          <el-option :value="2" label="全部分P上传完成、投稿前" />
+          <el-option :value="3" label="投稿成功后（推荐）" />
+          <el-option :value="4" label="审核通过后" />
         </el-select>
-        <div class="help-text">
-          推荐使用“9-投稿成功后删除”，只删除视频文件，保留弹幕和封面。如开启弹幕烧录功能，建议选“12-审核通过后N天延迟删除”，避免弹幕烧录尚未完成就删除了原始文件
-        </div>
+        <div class="help-text">推荐选择“投稿成功后”，投稿完成后源文件已在B站，可安全处理本地文件</div>
       </el-form-item>
-      
-      <el-form-item 
-        v-if="[2, 4, 6, 10, 11].includes(localForm.deleteType)" 
-        label="目标路径"
-      >
-        <el-input 
-          v-model="localForm.moveDir" 
-          placeholder="请输入移动/复制的目标路径"
-        />
-        <div class="help-text">文件将被移动或复制到此路径</div>
-      </el-form-item>
-      
-      <el-form-item 
-        v-if="localForm.deleteType === 8" 
-        label="延迟天数"
-      >
-        <el-input-number 
-          v-model="localForm.deleteDay" 
-          :min="1" 
-          :max="30"
-          controls-position="right"
-          style="width: 200px"
-        />
-        <span style="margin-left: 10px;">天后删除移动</span>
-      </el-form-item>
+
+      <template v-if="localForm.fileOpTrigger !== 0">
+        <el-form-item label="操作类型">
+          <el-select v-model="localForm.fileOpAction" style="width: 100%">
+            <el-option :value="0" label="不处理" />
+            <el-option :value="1" label="删除" />
+            <el-option :value="2" label="移动" />
+            <el-option :value="3" label="复制" />
+          </el-select>
+        </el-form-item>
+
+        <template v-if="localForm.fileOpAction !== 0">
+          <el-form-item label="操作范围">
+            <el-checkbox-group
+              :model-value="scopeChecked"
+              @change="onScopeChange"
+            >
+              <el-checkbox :label="1">视频文件</el-checkbox>
+              <el-checkbox :label="2">弹幕文件 (.xml)</el-checkbox>
+              <el-checkbox :label="4">封面文件 (.jpg/.png)</el-checkbox>
+            </el-checkbox-group>
+            <div class="help-text">推荐仅勾选视频文件，保留弹幕和封面作为备份</div>
+          </el-form-item>
+
+          <el-form-item label="执行延迟">
+            <el-select v-model="localForm.fileOpDelay" style="width: 200px">
+              <el-option :value="0" label="立即执行" />
+              <el-option :value="1" label="1 天后" />
+              <el-option :value="2" label="2 天后" />
+              <el-option :value="3" label="3 天后" />
+              <el-option :value="5" label="5 天后" />
+              <el-option :value="7" label="7 天后" />
+              <el-option :value="14" label="14 天后" />
+              <el-option :value="30" label="30 天后" />
+            </el-select>
+            <div class="help-text">选择延迟时可给弹幕烧录等后续处理留出足够时间</div>
+          </el-form-item>
+
+          <el-form-item
+            v-if="localForm.fileOpAction === 2 || localForm.fileOpAction === 3"
+            label="目标路径"
+          >
+            <el-input
+              v-model="localForm.moveDir"
+              placeholder="请输入移动/复制的目标路径"
+            />
+            <div class="help-text">文件将被移动或复制到此路径下的 &lt;房间ID&gt;/&lt;SessionID&gt;/ 子目录</div>
+          </el-form-item>
+        </template>
+      </template>
     </el-form>
   </div>
 </template>
@@ -165,6 +189,17 @@ const localForm = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val)
 })
+
+// 将 fileOpScope 位掩码 ⇔ 复选框数组相互转换
+const scopeChecked = computed(() => {
+  const scope = localForm.value.fileOpScope ?? 0
+  return [1, 2, 4].filter(v => (scope & v) !== 0)
+})
+
+function onScopeChange(arr) {
+  const scope = arr.reduce((acc, v) => acc | v, 0)
+  localForm.value = { ...localForm.value, fileOpScope: scope }
+}
 </script>
 
 <style scoped>

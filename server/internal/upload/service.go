@@ -610,11 +610,11 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		}
 	}
 
-	// 处理文件策略：3-上传后删除, 4-上传后移动, 6-上传后复制, 7-上传完成后立即删除
+	// 触发“分P上传完成后”文件操作
 	// 注意：弹幕烧录在前面已执行，此时原始文件已不再需要可以安全删除
-	if room.DeleteType == 3 || room.DeleteType == 4 || room.DeleteType == 6 || room.DeleteType == 7 {
+	{
 		fileMoverSvc := services.NewFileMoverService()
-		if err := fileMoverSvc.ProcessFilesByStrategy(history.ID, room.DeleteType); err != nil {
+		if err := fileMoverSvc.TriggerFileOp(history.ID, room, services.FileOpTriggerAfterPart); err != nil {
 			log.Printf("文件处理失败: %v", err)
 		}
 	}
@@ -728,6 +728,13 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 			history.ID, totalCount, uploadedCount)
 
 		if room.UploadUserID > 0 {
+			// 触发“全部分P上传完成、投稿前”文件操作
+			{
+				fileMoverSvc := services.NewFileMoverService()
+				if err := fileMoverSvc.TriggerFileOp(history.ID, room, services.FileOpTriggerBeforePublish); err != nil {
+					log.Printf("[自动投稿] 投稿前文件处理失败: %v", err)
+				}
+			}
 			if err := s.PublishHistory(history.ID, room.UploadUserID); err != nil {
 				log.Printf("[自动投稿] 投稿失败: %v", err)
 			} else {
@@ -936,9 +943,9 @@ func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history
 			Uploading:    false,
 			Page:         0,
 			XcodeState:   0,
-			IsTempFile:   true,            // 标记为临时文件
-			SourcePartID: originalPart.ID, // 记录源Part ID
-			TempFileType: "split",         // 切分文件类型
+			IsTempFile:   false,           // 切分后的分P视为正式文件（参与投稿与弹幕烧录）
+			SourcePartID: originalPart.ID, // 记录源Part ID，供弹幕烧录查找原始XML
+			TempFileType: "split",         // 切分文件类型，供弹幕烧录做时间偏移处理
 		}
 
 		if err := db.Create(newPart).Error; err != nil {
