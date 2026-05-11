@@ -115,31 +115,48 @@ func ListHistories(c *gin.Context) {
 	offset := (req.Page - 1) * req.PageSize
 	query.Order("end_time DESC").Limit(req.PageSize).Offset(offset).Find(&histories)
 
-	// 统计每个历史记录的分P信息
-	for i := range histories {
-		var partCount int64
-		var uploadPartCount int64
-		var recordPartCount int64
-		var uploadingPartCount int64
+	// 用单条聚合 SQL 替代 N+1 的 4 次 COUNT 查询
+	if len(histories) > 0 {
+		historyIDs := make([]uint, len(histories))
+		for i, h := range histories {
+			historyIDs[i] = h.ID
+		}
 
-		db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", histories[i].ID).Count(&partCount)
-		db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND upload = ?", histories[i].ID, true).Count(&uploadPartCount)
-		db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND recording = ?", histories[i].ID, true).Count(&recordPartCount)
-		db.Model(&models.RecordHistoryPart{}).Where("history_id = ? AND uploading = ?", histories[i].ID, true).Count(&uploadingPartCount)
+		type partStats struct {
+			HistoryID      uint
+			PartCount      int64
+			UploadCount    int64
+			RecordCount    int64
+			UploadingCount int64
+		}
+		var statsRows []partStats
+		db.Model(&models.RecordHistoryPart{}).
+			Select("history_id, COUNT(*) as part_count, SUM(CASE WHEN upload=1 THEN 1 ELSE 0 END) as upload_count, SUM(CASE WHEN recording=1 THEN 1 ELSE 0 END) as record_count, SUM(CASE WHEN uploading=1 THEN 1 ELSE 0 END) as uploading_count").
+			Where("history_id IN ?", historyIDs).
+			Group("history_id").
+			Scan(&statsRows)
 
-		histories[i].PartCount = int(partCount)
-		histories[i].UploadPartCount = int(uploadPartCount)
-		histories[i].RecordPartCount = int(recordPartCount)
+		statsMap := make(map[uint]partStats, len(statsRows))
+		for _, s := range statsRows {
+			statsMap[s.HistoryID] = s
+		}
 
-		// 计算上传状态
-		if uploadingPartCount > 0 {
-			histories[i].UploadStatus = 1 // 上传中
-		} else if uploadPartCount > 0 && uploadPartCount == partCount {
-			histories[i].UploadStatus = 2 // 全部已上传
-		} else if uploadPartCount > 0 {
-			histories[i].UploadStatus = 2 // 部分已上传
-		} else {
-			histories[i].UploadStatus = 0 // 未上传
+		for i := range histories {
+			s := statsMap[histories[i].ID]
+			histories[i].PartCount = int(s.PartCount)
+			histories[i].UploadPartCount = int(s.UploadCount)
+			histories[i].RecordPartCount = int(s.RecordCount)
+
+			// 计算上传状态
+			if s.UploadingCount > 0 {
+				histories[i].UploadStatus = 1 // 上传中
+			} else if s.UploadCount > 0 && s.UploadCount == s.PartCount {
+				histories[i].UploadStatus = 2 // 全部已上传
+			} else if s.UploadCount > 0 {
+				histories[i].UploadStatus = 2 // 部分已上传（对外仍显示为已上传）
+			} else {
+				histories[i].UploadStatus = 0 // 未上传
+			}
 		}
 	}
 
@@ -484,28 +501,49 @@ func BatchUploadHistory(c *gin.Context) {
 	totalParts := 0
 	successHistories := 0
 
-	for _, historyID := range req.HistoryIDs {
-		// 获取历史记录
-		var history models.RecordHistory
-		if err := db.First(&history, historyID).Error; err != nil {
-			log.Printf("[批量上传] 历史记录不存在 history_id=%d", historyID)
-			continue
-		}
+	// 一次性加载全部历史记录，避免 N+1
+	var histories []models.RecordHistory
+	if err := db.Where("id IN ?", req.HistoryIDs).Find(&histories).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"type": "error", "msg": "查询历史记录失败"})
+		return
+	}
 
-		// 获取房间信息
-		var room models.RecordRoom
-		if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err != nil {
-			log.Printf("[批量上传] 房间不存在 history_id=%d, room_id=%s", historyID, history.RoomID)
+	// 收集所有 room_id，一次性查询房间信息
+	roomIDSet := make(map[string]struct{})
+	for _, h := range histories {
+		if h.RoomID != "" {
+			roomIDSet[h.RoomID] = struct{}{}
+		}
+	}
+	roomIDs := make([]string, 0, len(roomIDSet))
+	for rid := range roomIDSet {
+		roomIDs = append(roomIDs, rid)
+	}
+	var rooms []models.RecordRoom
+	if len(roomIDs) > 0 {
+		db.Where("room_id IN ?", roomIDs).Find(&rooms)
+	}
+	roomMap := make(map[string]*models.RecordRoom, len(rooms))
+	for i := range rooms {
+		roomMap[rooms[i].RoomID] = &rooms[i]
+	}
+
+	// 逐条处获取分P并入队（分P查询本身已有索引，无法简单批量合并入队逻辑）
+	for i := range histories {
+		history := &histories[i]
+		room, ok := roomMap[history.RoomID]
+		if !ok {
+			log.Printf("[批量上传] 房间不存在 history_id=%d, room_id=%s", history.ID, history.RoomID)
 			continue
 		}
 
 		// 获取所有未上传且未正在上传中的分P
 		// 加上 uploading=false 过滤，防止批量操作导致重复入队
 		var parts []models.RecordHistoryPart
-		if err := db.Where("history_id = ? AND upload = ? AND recording = ? AND uploading = ?", historyID, false, false, false).
+		if err := db.Where("history_id = ? AND upload = ? AND recording = ? AND uploading = ?", history.ID, false, false, false).
 			Order("start_time ASC").
 			Find(&parts).Error; err != nil {
-			log.Printf("[批量上传] 查询分P失败 history_id=%d", historyID)
+			log.Printf("[批量上传] 查询分P失败 history_id=%d", history.ID)
 			continue
 		}
 
@@ -514,9 +552,9 @@ func BatchUploadHistory(c *gin.Context) {
 		}
 
 		// 添加所有分P到上传队列
-		for i := range parts {
-			if err := historyUploadService.UploadPart(&parts[i], &history, &room); err != nil {
-				log.Printf("[批量上传] 添加分P失败 part_id=%d: %v", parts[i].ID, err)
+		for j := range parts {
+			if err := historyUploadService.UploadPart(&parts[j], history, room); err != nil {
+				log.Printf("[批量上传] 添加分P失败 part_id=%d: %v", parts[j].ID, err)
 				continue
 			}
 			totalParts++
@@ -595,50 +633,66 @@ func BatchResetStatus(c *gin.Context) {
 	}
 
 	db := database.GetDB()
+
+	// 一次性加载全部历史记录，避免 N+1
+	var histories []models.RecordHistory
+	if err := db.Where("id IN ?", req.HistoryIDs).Find(&histories).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"type": "error", "msg": "查询历史记录失败"})
+		return
+	}
+
+	historyIDs := make([]uint, len(histories))
+	for i, h := range histories {
+		historyIDs[i] = h.ID
+	}
+
+	// 批量更新分P状态（仅当需要时执行一次）
+	if req.Upload && len(historyIDs) > 0 {
+		db.Model(&models.RecordHistoryPart{}).
+			Where("history_id IN ?", historyIDs).
+			Updates(map[string]interface{}{
+				"upload":           false,
+				"uploading":        false,
+				"upload_error_msg": "",
+			})
+	}
+
+	// 构建批量适用的历史记录更新字段
+	historyUpdates := make(map[string]interface{})
+	if req.Upload {
+		historyUpdates["upload_status"] = 0
+	}
+	if req.Publish {
+		historyUpdates["publish"] = false
+		historyUpdates["bv_id"] = ""
+		historyUpdates["video_state"] = -1
+		historyUpdates["video_state_desc"] = ""
+	}
+	if req.Danmaku {
+		historyUpdates["danmaku_sent"] = false
+		historyUpdates["danmaku_count"] = 0
+	}
+
 	successCount := 0
+	if len(historyUpdates) > 0 && len(historyIDs) > 0 {
+		// 批量更新公共字段
+		db.Model(&models.RecordHistory{}).Where("id IN ?", historyIDs).Updates(historyUpdates)
+		successCount = len(historyIDs)
+	}
 
-	for _, historyID := range req.HistoryIDs {
-		var history models.RecordHistory
-		if err := db.First(&history, historyID).Error; err != nil {
-			log.Printf("[批量重置] 历史记录不存在 history_id=%d", historyID)
-			continue
+	// Files 清空需要逐条检查 FilePath 是否非空，收集后批量更新
+	if req.Files {
+		var fileIDs []uint
+		for _, h := range histories {
+			if h.FilePath != "" {
+				fileIDs = append(fileIDs, h.ID)
+			}
 		}
-
-		updates := make(map[string]interface{})
-
-		if req.Upload {
-			updates["upload_status"] = 0
-			// 重置分P的上传状态（包括清除卡广 "uploading" 和错误信息）
-			db.Model(&models.RecordHistoryPart{}).
-				Where("history_id = ?", historyID).
-				Updates(map[string]interface{}{
-					"upload":           false,
-					"uploading":        false,
-					"upload_error_msg": "",
-				})
-		}
-
-		if req.Publish {
-			updates["publish"] = false
-			updates["bv_id"] = ""
-			updates["video_state"] = -1
-			updates["video_state_desc"] = ""
-		}
-
-		if req.Danmaku {
-			updates["danmaku_sent"] = false
-			updates["danmaku_count"] = 0
-		}
-
-		if req.Files && history.FilePath != "" {
-			// 重置状态时只清空数据库记录，不删除实际文件
-			// 如需删除文件，请使用"删除记录和文件"功能
-			updates["file_path"] = ""
-		}
-
-		if len(updates) > 0 {
-			db.Model(&history).Updates(updates)
-			successCount++
+		if len(fileIDs) > 0 {
+			db.Model(&models.RecordHistory{}).Where("id IN ?", fileIDs).Update("file_path", "")
+			if len(historyUpdates) == 0 {
+				successCount = len(fileIDs)
+			}
 		}
 	}
 

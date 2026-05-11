@@ -162,7 +162,7 @@
               v-for="season in seasons"
               :key="season.id"
               :label="season.name + ' (' + season.count + '个视频)'"
-              :value="season.sectionId || season.id"
+              :value="season.sectionId > 0 ? season.sectionId : season.id"
             />
           </el-select>
           <el-button
