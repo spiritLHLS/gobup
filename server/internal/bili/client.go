@@ -297,14 +297,21 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 func (c *BiliClient) GetSeasons() ([]Season, error) {
 	apiURL := "https://member.bilibili.com/x2/creative/web/season/list?pn=1&ps=100"
 
+	// B站 /season/list 接口有两种响应格式：
+	// 旧格式：name/total 直接位于 item 顶层
+	// 新格式：name/total 嵌套在 item.meta 中
 	var result struct {
 		Code int    `json:"code"`
 		Msg  string `json:"message"`
 		Data struct {
 			Items []struct {
-				ID       int64  `json:"id"`
-				Name     string `json:"name"`
-				Total    int    `json:"total"`
+				ID    int64  `json:"id"`
+				Name  string `json:"name"`  // 旧格式
+				Total int    `json:"total"` // 旧格式
+				Meta  struct {
+					Name  string `json:"name"`  // 新格式
+					Total int    `json:"total"` // 新格式
+				} `json:"meta"`
 				Sections []struct {
 					ID    int64  `json:"id"`
 					Title string `json:"title"`
@@ -327,10 +334,19 @@ func (c *BiliClient) GetSeasons() ([]Season, error) {
 
 	var seasons []Season
 	for _, item := range result.Data.Items {
+		// 优先使用 meta 中的字段（新格式），若为空则回退到顶层字段（旧格式）
+		name := item.Meta.Name
+		if name == "" {
+			name = item.Name
+		}
+		total := item.Meta.Total
+		if total == 0 {
+			total = item.Total
+		}
 		s := Season{
 			ID:    item.ID,
-			Name:  item.Name,
-			Count: item.Total,
+			Name:  name,
+			Count: total,
 		}
 		// 取第一个节的 ID 作为 SectionID（投稿时使用）
 		if len(item.Sections) > 0 {
@@ -373,8 +389,8 @@ func (c *BiliClient) AddToSeason(sectionID int64, aid, cid int64, title string) 
 
 	_, err := c.ReqClient.R().
 		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame?page_from=creative_home_top_upload").
-		SetHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36").
-		SetBody(requestBody).
+		SetHeader("Content-Type", "application/json").
+		SetBodyJsonMarshal(requestBody).
 		SetSuccessResult(&result).
 		Post(apiURL)
 
