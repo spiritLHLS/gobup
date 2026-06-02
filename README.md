@@ -1,138 +1,138 @@
 # GoBup - B站录播自动上传工具
 
-[![Build and Release](https://github.com/spiritlhls/gobup/actions/workflows/main.yml/badge.svg)](https://github.com/spiritlhls/gobup/actions/workflows/main.yml)
-[![Build and Push Docker Images](https://github.com/spiritlhls/gobup/actions/workflows/build_docker.yml/badge.svg)](https://github.com/spiritlhls/gobup/actions/workflows/build_docker.yml)
+[English](README.en.md) | [架构文档](docs/architecture.md) | [Architecture](docs/architecture.en.md)
 
-一个用Go语言实现的B站录播自动上传工具，支持自动上传录播文件到B站，支持多账号管理、WxPusher消息推送等功能。
+[![Build and Release](https://github.com/spiritlhl/gobup/actions/workflows/main.yml/badge.svg)](https://github.com/spiritlhl/gobup/actions/workflows/main.yml)
+[![Build and Push Docker Images](https://github.com/spiritlhl/gobup/actions/workflows/build_docker.yml/badge.svg)](https://github.com/spiritlhl/gobup/actions/workflows/build_docker.yml)
+
+GoBup 是一个 Go + Vue 实现的 B 站录播管理工具。它面向录播姬、blrec 等录制工具产生的本地视频文件，提供自动入库、上传、投稿、弹幕处理、文件清理、多账号管理和 Web 控制台。
+
+## 功能概览
+
+- 录播目录自动扫描，并支持目录事件监听触发即时扫盘。
+- 多 B 站账号管理，账号列表显示 Cookie 有效期。
+- 上传队列按账号隔离，支持固定账号、轮询、最短队列策略。
+- 上传时间窗口、失败重试、速率限制退避和重启恢复。
+- 可选上传前 FFmpeg 转码压缩，可设置 preset、CRF、宽度和音频码率。
+- 可从视频第 N 秒自动截取封面。
+- 自动投稿、历史筛选、CSV 导出和 WebSocket 上传进度推送。
+- DanmakuFactory + FFmpeg 弹幕烧录，支持 default、compact、large 样式；烧录失败不会阻塞原始视频上传。
+- 文件操作策略：按分P上传后、投稿前、投稿后、审核后删除、移动或复制视频、弹幕、封面文件。
+- Docker amd64/arm64 部署，内置前端静态资源。
 
 ## 快速部署
 
-- **Docker 部署**：使用环境变量 `USERNAME` 和 `PASSWORD`
-
-### 方式一：使用预构建 Docker 镜像
-
-所有镜像均支持 `linux/amd64` 和 `linux/arm64` 架构，**已内置 DanmakuFactory 专业弹幕转换工具**。
-
-**完整配置运行**
+推荐使用 DanmakuFactory 版本镜像：
 
 ```bash
-docker pull spiritlhl/gobup:latest
-
 docker run -d \
   --name gobup \
   -p 22380:12380 \
   -v /root/bilirecord:/rec \
-  -v /root/data:/app/data \
+  -v /root/gobup-data:/app/data \
   -e USERNAME=admin \
   -e PASSWORD=your_secure_password \
   --restart unless-stopped \
   spiritlhl/gobup:latest
 ```
 
-> 注意：
-> - USERNAME 和 PASSWORD 仅用于首次启动时创建管理员账户，后续修改环境变量不会更新已存在的账户
-> - 镜像已内置 DanmakuFactory，启用弹幕烧录功能可获得专业弹幕效果
+访问 `http://服务器IP:22380`。`USERNAME` 和 `PASSWORD` 只在首次初始化数据库时创建管理员账号，后续修改环境变量不会覆盖已有账号。
 
-### 方式二：使用 Docker Compose
-
-创建 `docker-compose.yml`：
-
-```yaml
-version: '3.8'
-
-services:
-  gobup:
-    image: spiritlhl/gobup:latest
-    container_name: gobup
-    restart: unless-stopped
-    ports:
-      - "22380:12380"
-    volumes:
-      - ./bilirecord:/rec
-      - ./data:/app/data
-    environment:
-      - TZ=Asia/Shanghai
-      - USERNAME=admin  # 可选，仅首次启动时创建管理员账户
-      - PASSWORD=your_password  # 可选，仅首次启动时创建管理员账户
-```
-
-运行：
+Docker Compose：
 
 ```bash
-docker-compose up -d
+cp .env.example .env
+docker compose up -d
 ```
 
-### 方式三：从源码构建 Docker 镜像
+挂载约定：
+
+- `/rec`：录播文件目录，必须和录播软件输出目录对应。
+- `/app/data`：GoBup 数据目录，默认数据库文件为 `/app/data/gobup.db`。
+
+## 源码运行
+
+依赖：
+
+- Go 1.24+
+- Node.js 24+
+- FFmpeg 和 ffprobe
+- 可选：DanmakuFactory
+
+构建：
 
 ```bash
-# 克隆仓库
-git clone https://github.com/spiritlhls/gobup.git
-cd gobup
-
-# 构建镜像（默认使用 Dockerfile.danmaku，包含 DanmakuFactory）
-docker build -f Dockerfile.danmaku -t gobup .
-
-# 或构建标准版（仅内置弹幕转换）
-# docker build -f Dockerfile -t gobup .
-
-# 运行容器
-docker run -d \
-  --name gobup \
-  -p 22380:12380 \
-  -v /path/to/bilirecord:/rec \
-  -v /path/to/data:/app/data \
-  -e USERNAME=admin \
-  -e PASSWORD=your_password \
-  --restart unless-stopped \
-  gobup
+make build
 ```
 
-### 配置WxPusher消息推送（可选）
+生产单二进制构建：
 
-1. 注册WxPusher账号：https://wxpusher.zjiecode.com/
-2. 创建应用获取AppToken
-3. 在 **用户管理** 页面点击"配置推送"，填写WxPusher Token
-4. 在房间配置中填写推送UID（微信UID），选择推送类型：
-   - 开播提醒
-   - 上传完成通知
-   - 投稿成功通知
+```bash
+make build-embed
+./bin/gobup-embed -port 12380 -work-path /path/to/recordings -data-path ./data -username admin -password your_password
+```
 
-> 注意：每个B站用户可以配置自己的WxPusher Token，实现个性化推送
+开发：
 
-## 使用指南
+```bash
+make dev-backend
+make dev-frontend
+```
 
-### 工作原理
+## 基本流程
 
-1. **录播软件录制** - 录播姬/blrec监控直播并录制视频文件到指定目录
-2. **自动扫盘入库** - GoBup定时扫描录制目录，自动发现并入库新文件
-3. **自动上传** - 根据房间配置，自动上传录制文件到B站
-4. **自动投稿** - 根据房间的自动投稿设置，上传完成后自动提交投稿
-5. **消息推送** - 完成后通过WxPusher推送通知（如已配置）
+1. 录播工具把视频、XML 弹幕和封面写入录制目录。
+2. GoBup 通过 fsnotify 事件和定时任务扫描录制目录，满足大小、年龄、重复检测后写入 SQLite。
+3. 自动上传任务按房间配置把待上传分P加入账号队列。
+4. 上传服务为每个任务创建独立 B 站客户端，避免账号 Cookie/Token 串扰。
+5. 可选转码、封面截帧、弹幕烧录和文件切分在上传流程中执行。
+6. 分P全部上传后按房间配置自动投稿。
+7. 投稿或审核完成后按文件操作策略清理、移动或复制本地文件。
 
-> 关键提示：录播姬和本项目必须能访问同一个文件路径（Docker部署需映射同一宿主机目录）
+## 配置提示
 
-## 模板变量
+- 工作目录在控制面板中配置，Docker 默认是 `/rec`。
+- 自定义扫描目录可配置多个路径，用逗号分隔。
+- 文件最小年龄用于避免导入正在写入的文件；目录事件监听只触发扫盘，不绕过安全检查。
+- 上传时间窗口支持跨天，例如 `23:00` 到 `06:00`。
+- 负载均衡策略会在入队时选择账号，实际上传仍使用选定账号的独立 Cookie。
+- 自动投稿仍建议为房间配置固定投稿账号，避免不同账号上传资源与投稿账号不一致。
+- 弹幕烧录依赖 `DANMAKU_FACTORY_PATH`、`ffmpeg` 和字体目录。
 
-### 标题/简介模板
+## 常用环境变量
 
-在标题和简介模板中可以使用以下变量：
+```bash
+USERNAME=admin
+PASSWORD=your_secure_password
+TZ=Asia/Shanghai
+DANMAKU_FACTORY_PATH=/usr/local/bin/danmakufactory/DanmakuFactory
+DANMAKU_FONT_NAME="WenQuanYi Zen Hei"
+DANMAKU_FONTS_DIR=/usr/share/fonts
+```
 
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `${uname}` | 主播名称 | 某某主播 |
-| `${title}` | 直播标题 | 今日直播 |
-| `${roomId}` | 房间ID | 123456 |
-| `${areaName}` | 分区名称 | 网络游戏 |
-| `${yyyy年MM月dd日HH点mm分}` | 完整日期时间 | 2025年12月30日20点30分 |
-| `${MM月dd日HH点mm分}` | 简短日期时间 | 12月30日20点30分 |
-| `${@uid}` | @用户格式 | @uid:123456 |
+更多示例见 [.env.example](.env.example)。
+
+## 历史导入
+
+从 brec 历史数据库导入：
+
+```bash
+python3 import_brec_history_db.py /path/to/brec.db /app/data/gobup.db
+```
+
+导入脚本会兼容当前 Go 服务的 `c_id` 字段结构。
+
+## 文档
+
+- [中文架构文档](docs/architecture.md)
+- [English Architecture](docs/architecture.en.md)
+- [English README](README.en.md)
 
 ## 致谢
 
-- [FQrabbit/biliupforjava](https://github.com/FQrabbit/biliupforjava) - 功能参考
-- [mwxmmy/biliupforjava](https://github.com/mwxmmy/biliupforjava) - 原始项目
-- [spiritLHLS/LotteryAutoScript_Station](https://github.com/spiritLHLS/LotteryAutoScript_Station) - 相关项目
-- [BililiveRecorder](https://rec.danmuji.org/) - 录播姬
-- [blrec](https://github.com/acgnhiki/blrec) - 录播工具
-- [DanmakuFactory](https://github.com/hihkm/DanmakuFactory) - 专业弹幕转换工具
-- [bilibili-API-collect](https://github.com/AkagiYui/bilibili-API-collect) - API合集
+- [FQrabbit/biliupforjava](https://github.com/FQrabbit/biliupforjava)
+- [mwxmmy/biliupforjava](https://github.com/mwxmmy/biliupforjava)
+- [BililiveRecorder](https://rec.danmuji.org/)
+- [blrec](https://github.com/acgnhiki/blrec)
+- [DanmakuFactory](https://github.com/hihkm/DanmakuFactory)
+- [bilibili-API-collect](https://github.com/AkagiYui/bilibili-API-collect)

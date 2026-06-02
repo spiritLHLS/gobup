@@ -1,6 +1,58 @@
 <template>
   <div class="video-processing-tab">
     <el-form :model="localForm" label-width="120px">
+      <el-divider content-position="left">上传前转码/压缩</el-divider>
+
+      <el-form-item label="启用预转码">
+        <el-switch v-model="localForm.enablePreTranscode" />
+        <div class="help-text">上传前使用 FFmpeg 转为 H.264/AAC MP4 临时文件，可降低体积并提升 B 站兼容性</div>
+      </el-form-item>
+
+      <template v-if="localForm.enablePreTranscode">
+        <el-form-item label="编码预设">
+          <el-select v-model="localForm.transcodePreset" style="width: 200px">
+            <el-option value="ultrafast" label="ultrafast" />
+            <el-option value="veryfast" label="veryfast" />
+            <el-option value="fast" label="fast" />
+            <el-option value="medium" label="medium" />
+            <el-option value="slow" label="slow" />
+          </el-select>
+          <div class="help-text">越慢压缩率通常越好，默认 veryfast 更适合自动化队列</div>
+        </el-form-item>
+
+        <el-form-item label="CRF 画质">
+          <el-input-number
+            v-model="localForm.transcodeCrf"
+            :min="18"
+            :max="35"
+            controls-position="right"
+            style="width: 200px"
+          />
+          <div class="help-text">数值越低画质越高、文件越大；推荐 23-28</div>
+        </el-form-item>
+
+        <el-form-item label="最大宽度">
+          <el-input-number
+            v-model="localForm.transcodeMaxWidth"
+            :min="0"
+            :max="3840"
+            :step="160"
+            controls-position="right"
+            style="width: 200px"
+          />
+          <span style="margin-left: 10px">像素（0=保持原宽度）</span>
+        </el-form-item>
+
+        <el-form-item label="音频码率">
+          <el-select v-model="localForm.transcodeAudioBitrate" style="width: 200px">
+            <el-option value="96k" label="96k" />
+            <el-option value="128k" label="128k" />
+            <el-option value="160k" label="160k" />
+            <el-option value="192k" label="192k" />
+          </el-select>
+        </el-form-item>
+      </template>
+
       <el-divider content-position="left">高能剪辑</el-divider>
       
       <el-form-item label="启用高能剪辑">

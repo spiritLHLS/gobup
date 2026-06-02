@@ -22,11 +22,45 @@
           <el-option
             v-for="user in users"
             :key="user.id"
-            :label="user.name"
+            :label="`${user.uname || '未命名账号'} (${user.uid})`"
             :value="user.id"
           />
         </el-select>
         <div class="help-text">选择用于上传视频的B站账号</div>
+      </el-form-item>
+
+      <el-form-item label="多账号策略">
+        <el-select v-model="localForm.uploadUserStrategy" style="width: 100%">
+          <el-option value="fixed" label="固定使用所选账号" />
+          <el-option value="round_robin" label="轮询分配已登录账号" />
+          <el-option value="least_queue" label="分配给队列最短账号" />
+        </el-select>
+        <div class="help-text">轮询/队列策略只影响上传分P；投稿仍使用房间选择的上传用户，避免投稿归属混乱</div>
+      </el-form-item>
+
+      <el-form-item label="定时上传窗口">
+        <el-switch v-model="localForm.uploadWindowEnabled" />
+        <div class="help-text">启用后只在指定时间段内上传，可避开高峰期；支持跨天窗口</div>
+      </el-form-item>
+
+      <el-form-item v-if="localForm.uploadWindowEnabled" label="上传时间段">
+        <div style="display:flex;gap:10px;align-items:center;width:100%">
+          <el-time-picker
+            v-model="localForm.uploadWindowStart"
+            format="HH:mm"
+            value-format="HH:mm"
+            placeholder="开始时间"
+            style="flex:1"
+          />
+          <span>至</span>
+          <el-time-picker
+            v-model="localForm.uploadWindowEnd"
+            format="HH:mm"
+            value-format="HH:mm"
+            placeholder="结束时间"
+            style="flex:1"
+          />
+        </div>
       </el-form-item>
       
       <el-divider content-position="left">自动化流程</el-divider>

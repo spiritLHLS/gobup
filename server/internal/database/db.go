@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/glebarez/sqlite"
+	appconfig "github.com/gobup/server/internal/config"
 	"github.com/gobup/server/internal/models"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -14,15 +15,18 @@ var DB *gorm.DB
 
 func InitDB(dbPath string) error {
 	var err error
-	// 配置 SQLite 连接参数以支持并发
-	// WAL 模式允许并发读写，busy_timeout 设置等待时间
-	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_timeout=5000&_synchronous=NORMAL&_cache_size=10000", dbPath)
-	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
+	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		return fmt.Errorf("连接数据库失败: %w", err)
 	}
+
+	// 配置 SQLite 运行参数以支持并发读写。
+	DB.Exec("PRAGMA journal_mode=WAL")
+	DB.Exec("PRAGMA busy_timeout=5000")
+	DB.Exec("PRAGMA synchronous=NORMAL")
+	DB.Exec("PRAGMA cache_size=10000")
 
 	// 配置连接池
 	sqlDB, err := DB.DB()
@@ -105,16 +109,21 @@ func InitDB(dbPath string) error {
 		// 创建默认配置
 		config = models.SystemConfig{
 			AutoFileScan:       true,
+			EnableFileWatcher:  true,
 			FileScanInterval:   60,
 			FileScanMinAge:     12,
 			FileScanMinSize:    1048576, // 1MB
 			FileScanMaxAge:     720,     // 30天
-			CustomScanPaths:    "",      // 默认为空
+			WorkPath:           appconfig.AppConfig.WorkPath,
+			CustomScanPaths:    "", // 默认为空
 			EnableOrphanScan:   true,
 			OrphanScanInterval: 360,  // 6小时
 			AutoDataRepair:     true, // 默认开启数据修复
 		}
 		DB.Create(&config)
+	} else if config.WorkPath == "" && appconfig.AppConfig.WorkPath != "" {
+		config.WorkPath = appconfig.AppConfig.WorkPath
+		DB.Save(&config)
 	}
 
 	return nil

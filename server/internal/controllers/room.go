@@ -42,6 +42,7 @@ func AddRoom(c *gin.Context) {
 	}
 
 	room := models.RecordRoom{RoomID: req.RoomID}
+	normalizeRoomConfig(&room)
 	db.Create(&room)
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "添加成功"})
 }
@@ -57,10 +58,41 @@ func UpdateRoom(c *gin.Context) {
 	if room.Copyright == 2 && room.SourceTemplate == "" {
 		room.SourceTemplate = "直播间: https://live.bilibili.com/${roomId}  稿件直播源"
 	}
+	normalizeRoomConfig(&room)
 
 	db := database.GetDB()
 	db.Save(&room)
 	c.JSON(http.StatusOK, true)
+}
+
+func normalizeRoomConfig(room *models.RecordRoom) {
+	if room.UploadUserStrategy == "" {
+		room.UploadUserStrategy = "fixed"
+	}
+	if room.UploadWindowStart == "" {
+		room.UploadWindowStart = "00:00"
+	}
+	if room.UploadWindowEnd == "" {
+		room.UploadWindowEnd = "23:59"
+	}
+	if room.CoverFrameSecond < 0 {
+		room.CoverFrameSecond = 5
+	}
+	if room.TranscodePreset == "" {
+		room.TranscodePreset = "veryfast"
+	}
+	if room.TranscodeCRF == 0 {
+		room.TranscodeCRF = 23
+	}
+	if room.TranscodeCRF < 18 {
+		room.TranscodeCRF = 18
+	}
+	if room.TranscodeCRF > 35 {
+		room.TranscodeCRF = 35
+	}
+	if room.TranscodeAudioBitrate == "" {
+		room.TranscodeAudioBitrate = "160k"
+	}
 }
 
 func DeleteRoom(c *gin.Context) {

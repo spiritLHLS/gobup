@@ -6,64 +6,13 @@
       <p>管理系统功能开关和查看运行状态</p>
     </div>
 
-    <!-- 统计卡片 -->
-    <el-row :gutter="20" class="stats-row">
-      <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-icon primary-icon">
-              <el-icon><VideoCamera /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-number">{{ stats.totalRecordings || 0 }}</div>
-              <div class="stat-label">总录制数</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      
-      <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card success-card">
-          <div class="stat-content">
-            <div class="stat-icon success-icon">
-              <el-icon><Upload /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-number">{{ stats.uploadedCount || 0 }}</div>
-              <div class="stat-label">已上传</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      
-      <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card warning-card">
-          <div class="stat-content">
-            <div class="stat-icon warning-icon">
-              <el-icon><Clock /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-number">{{ stats.pendingCount || 0 }}</div>
-              <div class="stat-label">待处理</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      
-      <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card danger-card">
-          <div class="stat-content">
-            <div class="stat-icon danger-icon">
-              <el-icon><Warning /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-number">{{ stats.failedCount || 0 }}</div>
-              <div class="stat-label">失败</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <DashboardStats :stats="stats" />
+
+    <UploadQueueCard
+      :status="queueStatus"
+      :loading="queueLoading"
+      @refresh="loadQueueStatus"
+    />
 
     <!-- 功能开关 -->
     <el-card class="config-card">
@@ -89,6 +38,17 @@
                 size="large"
               />
               <span class="help-text">启用后，定时扫描录制目录，自动录入新文件</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="目录事件监控" v-if="config.autoFileScan">
+            <div class="switch-item">
+              <el-switch
+                v-model="config.enableFileWatcher"
+                @change="toggleFeature('enableFileWatcher', $event)"
+                size="large"
+              />
+              <span class="help-text">监听录制目录变化并触发扫盘，定时扫描仍作为兜底</span>
             </div>
           </el-form-item>
 
@@ -365,12 +325,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { VideoCamera, Upload, Clock, Warning, Check, Refresh, FolderOpened, Search, Tools, Delete, View } from '@element-plus/icons-vue'
-import api, { filescanAPI, dataRepairAPI } from '../api'
+import { Check, Refresh, FolderOpened, Search, Tools, Delete, View } from '@element-plus/icons-vue'
+import api, { filescanAPI, dataRepairAPI, queueAPI } from '../api'
 import FileScanDialog from '../components/filescan/FileScanDialog.vue'
 import CleanFilesDialog from '../components/filescan/CleanFilesDialog.vue'
+import DashboardStats from '../components/dashboard/DashboardStats.vue'
+import UploadQueueCard from '../components/dashboard/UploadQueueCard.vue'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -384,6 +346,7 @@ const fileScanDialogRef = ref(null)
 const cleanFilesDialogRef = ref(null)
 const config = ref({
   autoFileScan: true,
+  enableFileWatcher: true,
   fileScanInterval: 60,
   fileScanMinAge: 12,
   fileScanMinSize: 1048576,
@@ -403,6 +366,16 @@ const stats = ref({
   pendingCount: 0,
   failedCount: 0
 })
+const queueLoading = ref(false)
+const queueStatus = ref({
+  counts: { pending: 0, running: 0, completed: 0 },
+  pending: [],
+  running: [],
+  completed: [],
+  queues: {}
+})
+let statsTimer = null
+let queueTimer = null
 
 // 计算属性：将字节转MB显示
 const fileScanMinSizeMB = computed({
@@ -465,6 +438,17 @@ const loadStats = async () => {
   }
 }
 
+const loadQueueStatus = async () => {
+  queueLoading.value = true
+  try {
+    queueStatus.value = await queueAPI.uploadStatus()
+  } catch (error) {
+    console.error('加载队列状态失败:', error)
+  } finally {
+    queueLoading.value = false
+  }
+}
+
 // 切换功能开关（实时生效）
 const toggleFeature = async (feature, enabled) => {
   try {
@@ -513,8 +497,10 @@ const saveConfig = async () => {
 const getFeatureName = (feature) => {
   const names = {
     autoFileScan: '自动扫盘录入',
+    enableFileWatcher: '目录事件监控',
     autoDataRepair: '自动数据修复',
-    enableOrphanScan: '孤儿文件扫描'
+    enableOrphanScan: '孤儿文件扫描',
+    enableDanmakuProxy: '弹幕代理池'
   }
   return names[feature] || feature
 }
@@ -790,9 +776,16 @@ const handleFilesCleanSuccess = () => {
 onMounted(() => {
   loadConfig()
   loadStats()
+  loadQueueStatus()
   
   // 每30秒刷新统计数据
-  setInterval(loadStats, 30000)
+  statsTimer = setInterval(loadStats, 30000)
+  queueTimer = setInterval(loadQueueStatus, 5000)
+})
+
+onUnmounted(() => {
+  if (statsTimer) clearInterval(statsTimer)
+  if (queueTimer) clearInterval(queueTimer)
 })
 </script>
 
@@ -817,99 +810,6 @@ onMounted(() => {
     color: var(--text-color-secondary);
     margin: 0;
   }
-}
-
-.stats-row {
-  margin-bottom: var(--spacing-xl);
-}
-
-.stat-card {
-  height: 120px;
-  border-radius: var(--border-radius-xl);
-  transition: var(--transition-normal);
-  cursor: pointer;
-  border: 2px solid transparent;
-  
-  &:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--box-shadow-hover);
-  }
-  
-  &.success-card {
-    border-color: rgba(103, 194, 58, 0.2);
-  }
-  
-  &.warning-card {
-    border-color: rgba(230, 162, 60, 0.2);
-  }
-  
-  &.danger-card {
-    border-color: rgba(245, 108, 108, 0.2);
-  }
-  
-  :deep(.el-card__body) {
-    height: 100%;
-    display: flex;
-    align-items: center;
-    padding: 20px;
-  }
-}
-
-.stat-content {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-  width: 100%;
-}
-
-.stat-icon {
-  width: 60px;
-  height: 60px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-  flex-shrink: 0;
-  
-  &.primary-icon {
-    background: linear-gradient(135deg, var(--primary-color), var(--primary-color-light));
-    color: white;
-  }
-  
-  &.success-icon {
-    background: linear-gradient(135deg, #67c23a, #85ce61);
-    color: white;
-  }
-  
-  &.warning-icon {
-    background: linear-gradient(135deg, #e6a23c, #f0c78a);
-    color: white;
-  }
-  
-  &.danger-icon {
-    background: linear-gradient(135deg, #f56c6c, #f89898);
-    color: white;
-  }
-}
-
-.stat-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.stat-number {
-  font-size: var(--font-size-3xl);
-  font-weight: var(--font-weight-bold);
-  color: var(--text-color-primary);
-  line-height: 1.2;
-  margin-bottom: 4px;
-}
-
-.stat-label {
-  font-size: var(--font-size-sm);
-  color: var(--text-color-secondary);
-  font-weight: var(--font-weight-medium);
 }
 
 .config-card {
@@ -1009,56 +909,9 @@ onMounted(() => {
 }
 
 /* 响应式 */
-@media (max-width: 1024px) {
-  .stat-card {
-    height: 110px;
-    margin-bottom: var(--spacing-md);
-  }
-  
-  .stat-icon {
-    width: 55px;
-    height: 55px;
-    font-size: 26px;
-  }
-  
-  .stat-number {
-    font-size: var(--font-size-2xl);
-  }
-}
-
 @media (max-width: 768px) {
   .page-header h2 {
     font-size: var(--font-size-2xl);
-  }
-  
-  .stats-row {
-    margin-bottom: var(--spacing-lg);
-  }
-  
-  .stat-card {
-    height: 100px;
-    
-    :deep(.el-card__body) {
-      padding: 16px;
-    }
-  }
-  
-  .stat-content {
-    gap: var(--spacing-sm);
-  }
-  
-  .stat-icon {
-    width: 50px;
-    height: 50px;
-    font-size: 24px;
-  }
-  
-  .stat-number {
-    font-size: var(--font-size-2xl);
-  }
-  
-  .stat-label {
-    font-size: var(--font-size-xs);
   }
   
   :deep(.el-form) {
@@ -1091,29 +944,6 @@ onMounted(() => {
       font-size: var(--font-size-sm);
     }
   }
-  
-  .stat-card {
-    height: 90px;
-    
-    :deep(.el-card__body) {
-      padding: 12px;
-    }
-  }
-  
-  .stat-icon {
-    width: 45px;
-    height: 45px;
-    font-size: 20px;
-  }
-  
-  .stat-number {
-    font-size: var(--font-size-xl);
-  }
-  
-  .stat-label {
-    font-size: 12px;
-  }
-  
   .card-header {
     flex-direction: column;
     gap: var(--spacing-sm);

@@ -52,6 +52,7 @@ func SetupRoutes(router *gin.Engine) {
 			histories := auth.Group("/history")
 			{
 				histories.POST("/list", controllers.ListHistories)
+				histories.POST("/export", controllers.ExportHistories)
 				histories.POST("/update", controllers.UpdateHistory)
 				histories.GET("/delete/:id", controllers.DeleteHistory)
 				histories.POST("/deleteWithFiles/:id", controllers.DeleteHistoryWithFiles)
@@ -177,6 +178,7 @@ func SetupRoutes(router *gin.Engine) {
 	ws := router.Group("/ws")
 	{
 		ws.GET("/log", controllers.WSLog)
+		ws.GET("/progress", controllers.WSProgress)
 	}
 
 	// 进度查询API

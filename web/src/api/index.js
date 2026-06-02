@@ -58,6 +58,7 @@ export const roomAPI = {
 // 录制历史
 export const historyAPI = {
   list: (params) => request.post('/history/list', params),
+  export: (params) => request.post('/history/export', params, { responseType: 'blob' }),
   publish: (id) => request.post(`/history/publish/${id}`),
   delete: (id) => request.get(`/history/delete/${id}`),
   parts: (id) => request.get(`/history/part/${id}`),
@@ -67,6 +68,13 @@ export const historyAPI = {
   resetStatus: (id, options) => request.post(`/history/resetStatus/${id}`, options),
   forceArchive: (id) => request.post(`/history/forceArchive/${id}`),
   candidateFiles: (id) => request.get(`/history/candidateFiles/${id}`)
+}
+
+// 队列管理
+export const queueAPI = {
+  uploadStatus: () => request.get('/queue/upload/status'),
+  danmakuStatus: () => request.get('/queue/danmaku/status'),
+  parseStatus: () => request.get('/queue/parse/status')
 }
 
 // 用户管理

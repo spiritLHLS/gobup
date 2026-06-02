@@ -14,12 +14,16 @@ import (
 
 var cronJob *cron.Cron
 var uploadService *upload.Service
+var fileWatcherService *services.FileWatcherService
 
-func InitScheduler() {
+func InitScheduler(svc *upload.Service) {
 	cronJob = cron.New()
 
-	// 初始化上传服务（用于自动上传任务）
-	uploadService = upload.NewService()
+	// 复用 main 中创建的上传服务，避免自动上传队列和 API 查询队列分裂
+	uploadService = svc
+	if uploadService == nil {
+		uploadService = upload.NewService()
+	}
 
 	// Bug4修复: 向 services 包注入投稿回调，使 room_auto_tasks.go 能触发投稿而不产生循环依赖
 	services.TriggerPublish = func(historyID uint, userID uint) error {
@@ -87,6 +91,10 @@ func InitScheduler() {
 	})
 
 	// 文件扫描任务 - 每小时执行一次，扫描未入库的录制文件
+	fileWatcherService = services.NewFileWatcherService()
+	fileWatcherService.Start()
+
+	// 文件扫描任务 - 每小时执行一次，作为文件事件监听的兜底
 	cronJob.AddFunc("30 * * * *", func() {
 		// 检查是否启用自动扫盘
 		if !isFeatureEnabled("AutoFileScan") {
@@ -346,6 +354,10 @@ func processAutoUpload() error {
 }
 
 func StopScheduler() {
+	if fileWatcherService != nil {
+		fileWatcherService.Stop()
+		fileWatcherService = nil
+	}
 	if cronJob != nil {
 		cronJob.Stop()
 	}

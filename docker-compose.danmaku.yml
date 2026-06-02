@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   gobup-danmaku:
     build:
@@ -15,7 +13,7 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - USERNAME=${GOBUP_USERNAME:-admin}  # 管理员用户名，首次启动时创建
-      - PASSWORD=${GOBUP_PASSWORD:-admin123}  # 管理员密码，首次启动时创建
+      - PASSWORD=${GOBUP_PASSWORD:-admin}  # 管理员密码，首次启动时创建
       - DANMAKU_FACTORY_PATH=/usr/local/bin/danmakufactory/DanmakuFactory
     networks:
       - gobup-network

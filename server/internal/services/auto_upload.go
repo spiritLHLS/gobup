@@ -3,6 +3,8 @@ package services
 import (
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gobup/server/internal/database"
@@ -49,8 +51,12 @@ func (s *AutoUploadService) ProcessPendingUploads() error {
 			continue
 		}
 
-		// 检查房间是否配置了上传用户
-		if room.UploadUserID == 0 {
+		// 固定账号模式必须配置上传用户；负载均衡模式可由上传服务选择账号。
+		if !hasUploadUserOrStrategy(&room) {
+			continue
+		}
+		if ok, window := isRoomUploadWindowOpen(&room, time.Now()); !ok {
+			log.Printf("[自动上传] 房间 %s 当前不在上传时间窗口(%s)，跳过本轮", room.RoomID, window)
 			continue
 		}
 
@@ -126,8 +132,12 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 	var tasks []PendingUploadTask
 
 	for _, room := range rooms {
-		// 检查房间是否配置了上传用户
-		if room.UploadUserID == 0 {
+		// 固定账号模式必须配置上传用户；负载均衡模式可由上传服务选择账号。
+		if !hasUploadUserOrStrategy(&room) {
+			continue
+		}
+		if ok, window := isRoomUploadWindowOpen(&room, time.Now()); !ok {
+			log.Printf("[自动上传] 房间 %s 当前不在上传时间窗口(%s)，跳过本轮", room.RoomID, window)
 			continue
 		}
 
@@ -235,7 +245,11 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 				continue
 			}
 
-			if room.UploadUserID == 0 || !room.Upload {
+			if !room.Upload || !hasUploadUserOrStrategy(&room) {
+				continue
+			}
+			if ok, window := isRoomUploadWindowOpen(&room, time.Now()); !ok {
+				log.Printf("[自动上传] 弹幕烧录分P房间 %s 当前不在上传时间窗口(%s)，跳过本轮", room.RoomID, window)
 				continue
 			}
 
@@ -293,7 +307,11 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 				continue
 			}
 
-			if room.UploadUserID == 0 || !room.Upload {
+			if !room.Upload || !hasUploadUserOrStrategy(&room) {
+				continue
+			}
+			if ok, window := isRoomUploadWindowOpen(&room, time.Now()); !ok {
+				log.Printf("[自动上传] split分P房间 %s 当前不在上传时间窗口(%s)，跳过本轮", room.RoomID, window)
 				continue
 			}
 
@@ -307,6 +325,61 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 	}
 
 	return tasks, nil
+}
+
+func isRoomUploadWindowOpen(room *models.RecordRoom, now time.Time) (bool, string) {
+	if room == nil || !room.UploadWindowEnabled {
+		return true, ""
+	}
+
+	start, startText := parseRoomUploadClock(room.UploadWindowStart, "00:00")
+	end, endText := parseRoomUploadClock(room.UploadWindowEnd, "23:59")
+	window := startText + "-" + endText
+	if start == end {
+		return true, window
+	}
+
+	current := now.Hour()*60 + now.Minute()
+	if start < end {
+		return current >= start && current <= end, window
+	}
+	return current >= start || current <= end, window
+}
+
+func hasUploadUserOrStrategy(room *models.RecordRoom) bool {
+	if room == nil {
+		return false
+	}
+	if room.UploadUserID != 0 {
+		return true
+	}
+	switch strings.TrimSpace(room.UploadUserStrategy) {
+	case "round_robin", "least_queue":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseRoomUploadClock(value, fallback string) (int, string) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		text = fallback
+	}
+	parts := strings.Split(text, ":")
+	if len(parts) != 2 {
+		text = fallback
+		parts = strings.Split(text, ":")
+	}
+	hour, errHour := strconv.Atoi(parts[0])
+	minute, errMinute := strconv.Atoi(parts[1])
+	if errHour != nil || errMinute != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		text = fallback
+		parts = strings.Split(text, ":")
+		hour, _ = strconv.Atoi(parts[0])
+		minute, _ = strconv.Atoi(parts[1])
+	}
+	return hour*60 + minute, text
 }
 
 // isFileStable 检查文件是否已稳定（修改时间超过指定时长）

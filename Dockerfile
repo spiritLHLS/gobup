@@ -1,7 +1,7 @@
 # Gobup All-in-One Container - Frontend Embedded Build
 
 # Stage 1: Build Frontend
-FROM node:20-slim AS frontend-builder
+FROM node:24-slim AS frontend-builder
 ARG TARGETARCH
 WORKDIR /app/web
 COPY web/package*.json ./
@@ -20,7 +20,7 @@ ARG TARGETARCH
 WORKDIR /app
 
 # Install build dependencies
-RUN apk add --no-cache git ca-certificates build-base sqlite-dev
+RUN apk add --no-cache git ca-certificates
 
 # Copy backend source
 COPY server/ ./server/
@@ -31,7 +31,7 @@ COPY --from=frontend-builder /app/web/dist ./server/internal/routes/dist
 # Build backend with embed tag
 WORKDIR /app/server
 RUN go mod download
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} go build -tags embed -a -installsuffix cgo -ldflags "-w -s" -o gobup .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -tags embed -ldflags "-w -s" -o gobup .
 
 # Stage 3: Final Runtime Image
 FROM alpine:latest
@@ -70,4 +70,4 @@ EXPOSE 12380
 VOLUME ["/rec", "/app/data"]
 
 # USERNAME 和 PASSWORD 环境变量将在运行时传递给程序
-CMD ["/bin/sh", "-c", "/app/gobup -port 12380 -work-path /rec -username \"${USERNAME:-}\" -password \"${PASSWORD:-}\""]
+CMD ["/bin/sh", "-c", "/app/gobup -port 12380 -work-path /rec -data-path /app/data -username \"${USERNAME:-}\" -password \"${PASSWORD:-}\""]

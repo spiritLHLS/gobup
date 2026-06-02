@@ -14,11 +14,12 @@ help:
 # 构建前端
 build-frontend:
 	@echo "构建前端..."
-	cd web && npm install && npm run build
+	cd web && npm ci && npm run build
 
 # 构建后端（非嵌入模式）
 build-backend:
 	@echo "构建后端（非嵌入模式）..."
+	@mkdir -p bin
 	cd server && go build -o ../bin/gobup .
 
 # 构建后端（嵌入模式）
@@ -27,6 +28,7 @@ build-backend-embed: build-frontend
 	@mkdir -p server/internal/routes/dist
 	@cp -r web/dist/* server/internal/routes/dist/
 	@echo "构建后端（嵌入模式）..."
+	@mkdir -p bin
 	cd server && go build -tags embed -o ../bin/gobup-embed .
 	@echo "清理临时文件..."
 	@rm -rf server/internal/routes/dist

@@ -80,11 +80,13 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		return fmt.Errorf("房间未启用上传功能，无法投稿")
 	}
 
-	// 权限检查2：验证用户ID是否匹配房间配置的上传用户
-	if room.UploadUserID != userID {
-		log.Printf("[Publish] 用户权限不匹配: 房间配置用户ID=%d, 请求用户ID=%d",
-			room.UploadUserID, userID)
-		return fmt.Errorf("用户无权操作此房间的投稿，请联系管理员")
+	if room.UploadUserID == 0 {
+		return fmt.Errorf("房间未配置投稿用户")
+	}
+	if userID != room.UploadUserID {
+		log.Printf("[Publish] 请求用户ID=%d 与房间配置用户ID=%d 不一致，使用房间配置用户投稿",
+			userID, room.UploadUserID)
+		userID = room.UploadUserID
 	}
 
 	var user models.BiliBiliUser
@@ -166,6 +168,24 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	if coverType == "diy" && coverURL != "" {
 		// 自定义封面：直接使用用户提供的URL
 		log.Printf("使用自定义封面URL: %s", coverURL)
+	} else if coverType == "frame" && len(parts) > 0 {
+		coverPart := parts[0]
+		coverPath, err := services.NewVideoProcessingService().EnsureFrameCover(&coverPart, &room)
+		if err != nil {
+			log.Printf("自动截取封面失败: %v", err)
+			coverURL = ""
+		} else if coverData, readErr := os.ReadFile(coverPath); readErr == nil {
+			if uploadedURL, uploadErr := client.UploadCover(coverData); uploadErr == nil {
+				coverURL = uploadedURL
+				log.Printf("自动截取封面上传成功: %s", coverURL)
+			} else {
+				log.Printf("自动截取封面上传失败: %v", uploadErr)
+				coverURL = ""
+			}
+		} else {
+			log.Printf("读取自动截取封面失败: %v", readErr)
+			coverURL = ""
+		}
 	} else if coverType == "live" && len(parts) > 0 {
 		// 使用直播首帧：从录制文件查找封面图片并上传
 		// 根据直播标题查找同一房间内最早录制的封面文件
@@ -232,6 +252,21 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 							log.Printf("封面上传失败: %v", err)
 						}
 					}
+				}
+			}
+		}
+
+		if coverURL == "" && room.AutoExtractCover && len(parts) > 0 {
+			coverPart := parts[0]
+			coverPath, err := services.NewVideoProcessingService().EnsureFrameCover(&coverPart, &room)
+			if err != nil {
+				log.Printf("未找到现有封面，自动截取封面失败: %v", err)
+			} else if coverData, readErr := os.ReadFile(coverPath); readErr == nil {
+				if uploadedURL, uploadErr := client.UploadCover(coverData); uploadErr == nil {
+					coverURL = uploadedURL
+					log.Printf("自动截取封面上传成功: %s", coverURL)
+				} else {
+					log.Printf("自动截取封面上传失败: %v", uploadErr)
 				}
 			}
 		}

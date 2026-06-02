@@ -2,4 +2,3 @@
 ./web/node_modules
 ./web/dist
 example.json
-./s5proxy.sh

@@ -240,6 +240,7 @@ func UpdateSystemConfig(c *gin.Context) {
 
 	// 更新配置
 	config.AutoFileScan = req.AutoFileScan
+	config.EnableFileWatcher = req.EnableFileWatcher
 	config.FileScanInterval = req.FileScanInterval
 	config.FileScanMinAge = req.FileScanMinAge
 	config.FileScanMinSize = req.FileScanMinSize
@@ -291,6 +292,8 @@ func ToggleSystemConfig(c *gin.Context) {
 	switch req.Key {
 	case "autoFileScan":
 		config.AutoFileScan = req.Value
+	case "enableFileWatcher":
+		config.EnableFileWatcher = req.Value
 	case "enableOrphanScan":
 		config.EnableOrphanScan = req.Value
 	case "enableDanmakuProxy":
@@ -402,7 +405,7 @@ func CleanupDatabase(c *gin.Context) {
 			WHERE p.history_id = h.id
 		)
 	`).Scan(&orphanIDs)
-	
+
 	actualDeletedHistories := 0
 	if len(orphanIDs) > 0 {
 		result = tx.Where("id IN ?", orphanIDs).Delete(&models.RecordHistory{})

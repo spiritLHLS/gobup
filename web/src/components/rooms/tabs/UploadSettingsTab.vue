@@ -20,8 +20,27 @@
         <el-radio-group v-model="localForm.coverType">
           <el-radio label="default">不使用封面</el-radio>
           <el-radio label="live">使用直播首帧</el-radio>
+          <el-radio label="frame">截取视频帧</el-radio>
           <el-radio label="diy">自定义封面</el-radio>
         </el-radio-group>
+      </el-form-item>
+
+      <el-form-item v-if="localForm.coverType === 'live'" label="缺失时截取">
+        <el-switch v-model="localForm.autoExtractCover" />
+        <div class="help-text">未找到录播姬封面文件时，自动从视频第 N 秒截取封面</div>
+      </el-form-item>
+
+      <el-form-item v-if="localForm.coverType === 'frame' || (localForm.coverType === 'live' && localForm.autoExtractCover)" label="截取秒数">
+        <el-input-number
+          v-model="localForm.coverFrameSecond"
+          :min="0"
+          :max="3600"
+          :step="1"
+          controls-position="right"
+          style="width: 200px"
+        />
+        <span style="margin-left: 10px">秒</span>
+        <div class="help-text">从视频开始后的指定秒数截取一帧作为封面</div>
       </el-form-item>
       
       <el-form-item v-if="localForm.coverType === 'diy'" label="封面地址">

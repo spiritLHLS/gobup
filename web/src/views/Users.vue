@@ -28,22 +28,20 @@
         </el-table-column>
         <el-table-column label="Cookie状态" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.login ? 'success' : 'danger'">
+            <el-tag :type="getCookieStatusType(row)">
               {{ row.login ? '有效' : '无效' }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="Cookie有效期" width="180">
+          <template #default="{ row }">
+            {{ formatTime(row.expireTime) }}
           </template>
         </el-table-column>
         <el-table-column label="WxPusher" width="120">
           <template #default="{ row }">
             <el-tag :type="row.wxPushToken ? 'success' : 'info'">
               {{ row.wxPushToken ? '已配置' : '未配置' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="弹幕代理" width="120">
-          <template #default="{ row }">
-            <el-tag :type="row.enableDanmakuProxy ? 'success' : 'info'">
-              {{ row.enableDanmakuProxy ? '已启用' : '未启用' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -281,6 +279,17 @@ const handleDelete = async (row) => {
 const formatTime = (timeStr) => {
   if (!timeStr) return '-'
   return new Date(timeStr).toLocaleString('zh-CN')
+}
+
+const getCookieStatusType = (row) => {
+  if (!row.login) return 'danger'
+  if (!row.expireTime) return 'success'
+  const expireAt = new Date(row.expireTime).getTime()
+  if (!Number.isFinite(expireAt)) return 'success'
+  const daysLeft = (expireAt - Date.now()) / 86400000
+  if (daysLeft <= 0) return 'danger'
+  if (daysLeft <= 7) return 'warning'
+  return 'success'
 }
 
 const loadRateLimitConfig = async () => {

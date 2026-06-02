@@ -33,6 +33,10 @@
           筛选
           <el-badge v-if="activeFilterCount > 0" :value="activeFilterCount" :max="9" />
         </el-button>
+        <el-button @click="exportHistories">
+          <el-icon><Download /></el-icon>
+          导出
+        </el-button>
         <el-button type="primary" @click="fetchHistories">
           <el-icon><Refresh /></el-icon>
           刷新
@@ -314,7 +318,7 @@
 import { ref, computed, inject, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Grid, List, Filter, Refresh, User, HomeFilled, Film
+  Grid, List, Filter, Refresh, User, HomeFilled, Film, Download
 } from '@element-plus/icons-vue'
 import { historyAPI } from '@/api'
 import axios from 'axios'
@@ -488,6 +492,29 @@ const fetchHistories = async () => {
     console.error('获取历史记录失败:', error)
   } finally {
     loading.value = false
+  }
+}
+
+const exportHistories = async () => {
+  if (dateRange.value) {
+    searchParams.value.from = dateRange.value[0] || ''
+    searchParams.value.to = dateRange.value[1] || ''
+  } else {
+    searchParams.value.from = ''
+    searchParams.value.to = ''
+  }
+  try {
+    const blob = await historyAPI.export(searchParams.value)
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `gobup-history-${Date.now()}.csv`
+    a.click()
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch (error) {
+    console.error('导出失败:', error)
+    ElMessage.error('导出失败')
   }
 }
 
@@ -959,4 +986,3 @@ onMounted(() => fetchHistories())
   }
 }
 </style>
-

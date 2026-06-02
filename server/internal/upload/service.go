@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -29,6 +28,7 @@ type Service struct {
 	templateSvc          *services.TemplateService
 	progressTracker      *ProgressTracker
 	queueManager         *QueueManager
+	roundRobinCursor     uint64
 }
 
 func NewService() *Service {
@@ -54,12 +54,23 @@ func (s *Service) GetQueueManager() *QueueManager {
 
 // UploadPart 上传分P（通过队列）
 func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) error {
-	// 将任务添加到用户的上传队列
-	if room.UploadUserID == 0 {
-		return fmt.Errorf("房间未配置上传用户")
+	if room == nil {
+		return fmt.Errorf("房间配置为空")
 	}
 
-	return s.queueManager.AddTask(room.UploadUserID, part, history, room)
+	if ok, window := isWithinUploadWindow(room, time.Now()); !ok {
+		return fmt.Errorf("当前不在上传时间窗口(%s)，自动调度会在窗口内重试", window)
+	}
+
+	selectedUserID, err := s.selectUploadUserID(room)
+	if err != nil {
+		return err
+	}
+
+	taskRoom := *room
+	taskRoom.UploadUserID = selectedUserID
+
+	return s.queueManager.AddTask(selectedUserID, part, history, &taskRoom)
 }
 
 // RequeueStuckTempParts 将服务重启后滞留在DB中的临时分P重新加入上传队列
@@ -120,7 +131,7 @@ func (s *Service) RequeueStuckTempParts() {
 			continue
 		}
 
-		if room.UploadUserID == 0 {
+		if !roomHasUploadUserOrStrategy(&room) {
 			part.Uploading = false
 			db.Save(&part)
 			continue
@@ -165,7 +176,7 @@ func (s *Service) RequeueInterruptedBurns() {
 	}
 
 	for _, room := range rooms {
-		if room.UploadUserID == 0 {
+		if !roomHasUploadUserOrStrategy(&room) {
 			continue
 		}
 
@@ -384,6 +395,10 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		log.Printf("[Upload] 无法从DB读取分P %d 的最新状态，使用传入数据继续: %v", part.ID, err)
 	}
 
+	if ok, window := isWithinUploadWindow(room, time.Now()); !ok {
+		return fmt.Errorf("当前不在上传时间窗口(%s)，自动调度会在窗口内重试", window)
+	}
+
 	// 标记为上传中
 	part.Uploading = true
 	db.Save(part)
@@ -451,11 +466,30 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		return nil
 	}
 
-	log.Printf("开始上传: room=%s, file=%s, line=%s", room.RoomID, part.FilePath, room.Line)
+	uploadPath := part.FilePath
+	cleanupUploadFile := func() {}
+	if room.EnablePreTranscode && !part.IsTempFile {
+		processedPath, cleanup, err := services.NewVideoProcessingService().TranscodeForUpload(part.FilePath, room)
+		if err != nil {
+			part.UploadErrorMsg = fmt.Sprintf("上传前转码失败: %v", err)
+			db.Save(part)
+			return fmt.Errorf("上传前转码失败: %w", err)
+		}
+		uploadPath = processedPath
+		cleanupUploadFile = cleanup
+		defer cleanupUploadFile()
+
+		fileInfo, err = os.Stat(uploadPath)
+		if err != nil {
+			return fmt.Errorf("获取转码后文件信息失败: %w", err)
+		}
+	}
+
+	log.Printf("开始上传: room=%s, file=%s, upload_file=%s, line=%s", room.RoomID, part.FilePath, uploadPath, room.Line)
 
 	// 推送上传开始通知（使用历史记录中实际的主播名）
 	if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
-		s.wxPusher.NotifyUploadStart(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, part.FileSize)
+		s.wxPusher.NotifyUploadStart(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, fileInfo.Size())
 	}
 
 	// 创建客户端
@@ -493,7 +527,7 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	var uploadErr error
 	var is406RateLimit bool
 
-	uploadResult, uploadErr = uploader.Upload(part.FilePath)
+	uploadResult, uploadErr = uploader.Upload(uploadPath)
 
 	if uploadErr != nil {
 		// 检测是否为真正的406/601速率限制错误
@@ -516,6 +550,10 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 			part.UploadErrorMsg = fmt.Sprintf("速率限制(406)，已设置24小时冷却期至 %s", cooldownTime.Format("2006-01-02 15:04:05"))
 			db.Save(part)
 			log.Printf("[速率限制] 分P %d 触发406限制，设置24小时冷却期至: %s", part.ID, cooldownTime.Format("2006-01-02 15:04:05"))
+		} else {
+			part.UploadRetryCount++
+			part.UploadErrorMsg = uploadErr.Error()
+			db.Save(part)
 		}
 
 		// 标记上传失败
@@ -548,6 +586,7 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	part.Upload = true
 	part.FileName = uploadResult.FileName
 	part.CID = uploadResult.BizID
+	part.UploadErrorMsg = ""
 	db.Save(part)
 
 	log.Printf("上传完成: part_id=%d, cid=%d", part.ID, part.CID)
@@ -825,183 +864,4 @@ func (s *Service) checkAndAppendPendingHistories(publishedHistory *models.Record
 			time.Sleep(5 * time.Second)
 		}
 	}
-}
-
-// containsTag 检查标签列表中是否包含指定标签
-func containsTag(tags, target string) bool {
-	tagList := strings.Split(tags, ",")
-	for _, tag := range tagList {
-		if strings.TrimSpace(tag) == target {
-			return true
-		}
-	}
-	return false
-}
-
-// contains 检查字符串是否包含子串
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
-
-// splitLargeFile 将大文件分割成多个Part（当分片数超过10000时）
-func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) error {
-	db := database.GetDB()
-
-	// 获取文件信息
-	fileInfo, err := os.Stat(originalPart.FilePath)
-	if err != nil {
-		return fmt.Errorf("获取文件信息失败: %w", err)
-	}
-
-	var chunkSize int64
-	switch room.Line {
-	case "app":
-		chunkSize = 2 * 1024 * 1024 // 2MB
-	default: // upos
-		chunkSize = 5 * 1024 * 1024 // 5MB
-	}
-
-	totalChunks := bili.CalculateChunkCount(fileInfo.Size(), chunkSize)
-
-	// 计算需要分成多少个Part（每个Part最多9000个分片，留一些余量）
-	maxChunksPerPart := int64(9000)
-	numParts := (totalChunks + maxChunksPerPart - 1) / maxChunksPerPart
-
-	// 计算每个Part的时长（假设视频时长均匀分布）
-	totalDuration := originalPart.Duration
-	if totalDuration == 0 {
-		// 如果没有时长信息，使用文件大小比例来估算
-		log.Printf("[自动分P] 警告：原始Part没有时长信息，将平均分割")
-		totalDuration = int(numParts) * 3600 // 假设每个Part 1小时
-	}
-
-	durationPerPart := totalDuration / int(numParts)
-
-	log.Printf("[自动分P] 将文件分割成 %d 个Part，每个Part约 %d 秒", numParts, durationPerPart)
-
-	// 使用ffmpeg分割文件
-	baseDir := filepath.Dir(originalPart.FilePath)
-	baseNameWithoutExt := strings.TrimSuffix(filepath.Base(originalPart.FilePath), filepath.Ext(originalPart.FilePath))
-	ext := filepath.Ext(originalPart.FilePath)
-
-	// 创建新的Part记录
-	var newParts []*models.RecordHistoryPart
-	// 出错时自动清理已创建的子分P（文件 + DB 记录），确保原始分P下次重试时能重新切分
-	cleanupOnErr := true
-	defer func() {
-		if !cleanupOnErr {
-			return
-		}
-		for _, np := range newParts {
-			if np.FilePath != "" {
-				_ = os.Remove(np.FilePath)
-			}
-			if np.ID != 0 {
-				db.Delete(np)
-			}
-		}
-	}()
-	for i := int64(0); i < numParts; i++ {
-		startTime := int(i) * durationPerPart
-		duration := durationPerPart
-		if i == numParts-1 {
-			// 最后一个Part包含剩余的所有时间
-			duration = totalDuration - startTime
-		}
-
-		// 生成输出文件名
-		outputFileName := fmt.Sprintf("%s_part%d%s", baseNameWithoutExt, i+1, ext)
-		outputPath := filepath.Join(baseDir, outputFileName)
-
-		// 使用ffmpeg切割视频
-		// -ss: 开始时间 -t: 持续时间 -c copy: 不重新编码
-		var ffmpegArgs []string
-		ffmpegArgs = append(ffmpegArgs, "-y") // 覆盖已有的输出文件，确保重试时幂等
-		if startTime > 0 {
-			ffmpegArgs = append(ffmpegArgs, "-ss", fmt.Sprintf("%d", startTime))
-		}
-		ffmpegArgs = append(ffmpegArgs,
-			"-i", originalPart.FilePath,
-			"-t", fmt.Sprintf("%d", duration),
-			"-c", "copy",
-			"-avoid_negative_ts", "1",
-			outputPath,
-		)
-
-		log.Printf("[自动分P] 正在切割Part %d/%d: %s (时长: %ds)", i+1, numParts, outputFileName, duration)
-
-		cmd := exec.Command("ffmpeg", ffmpegArgs...)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("[自动分P] ffmpeg输出: %s", string(output))
-			return fmt.Errorf("ffmpeg切割失败 (Part %d): %w", i+1, err)
-		}
-
-		// 获取切割后的文件大小
-		splitFileInfo, err := os.Stat(outputPath)
-		if err != nil {
-			return fmt.Errorf("获取切割文件信息失败: %w", err)
-		}
-
-		// 创建新的Part记录
-		newPart := &models.RecordHistoryPart{
-			HistoryID:    originalPart.HistoryID,
-			RoomID:       originalPart.RoomID,
-			SessionID:    originalPart.SessionID,
-			Title:        originalPart.Title,
-			LiveTitle:    originalPart.LiveTitle,
-			AreaName:     originalPart.AreaName,
-			FilePath:     outputPath,
-			FileName:     outputFileName,
-			FileSize:     splitFileInfo.Size(),
-			Duration:     duration,
-			StartTime:    originalPart.StartTime.Add(time.Duration(startTime) * time.Second),
-			EndTime:      originalPart.StartTime.Add(time.Duration(startTime+duration) * time.Second),
-			Recording:    false,
-			Upload:       false,
-			Uploading:    false,
-			Page:         0,
-			XcodeState:   0,
-			IsTempFile:   false,           // 切分后的分P视为正式文件（参与投稿与弹幕烧录）
-			SourcePartID: originalPart.ID, // 记录源Part ID，供弹幕烧录查找原始XML
-			TempFileType: "split",         // 切分文件类型，供弹幕烧录做时间偏移处理
-		}
-
-		if err := db.Create(newPart).Error; err != nil {
-			return fmt.Errorf("创建新Part记录失败: %w", err)
-		}
-
-		newParts = append(newParts, newPart)
-		log.Printf("[自动分P] 创建Part %d/%d 成功: id=%d, size=%d, duration=%d", i+1, numParts, newPart.ID, newPart.FileSize, newPart.Duration)
-	}
-
-	// 删除原始文件，避免被识别为cid=0的文件
-	if err := os.Remove(originalPart.FilePath); err != nil {
-		log.Printf("[自动分P] 删除原始文件失败: %v (文件: %s)", err, originalPart.FilePath)
-	} else {
-		log.Printf("[自动分P] 原始文件已删除: %s", originalPart.FilePath)
-	}
-
-	// 标记原始Part为已退役（被切分替代）：file_delete=true 标记物理文件已删除，upload 保持 false。
-	// 关键：不能将 upload 置为 true，因为 CID=0 会导致 PublishHistory 检测到异常后
-	// 将其重置为 upload=false，进而被自动上传调度器反复尝试上传不存在的文件，形成无限死循环。
-	// checkAndPublish 的 NOT(file_delete=true AND upload=false) 条件将此记录排除在 totalCount 之外，
-	// 再通过 totalCount==0 时的 split 子分P补偿逻辑来触发最终的自动投稿。
-	originalPart.Upload = false
-	originalPart.FileDelete = true
-	originalPart.UploadErrorMsg = fmt.Sprintf("文件过大(分片数%d>10000)，已自动分割成%d个子分P", totalChunks, numParts)
-	db.Save(originalPart)
-
-	log.Printf("[自动分P] 文件分割完成，已创建 %d 个新Part，原Part(id=%d)标记为已处理", len(newParts), originalPart.ID)
-
-	// 将新创建的Part添加到上传队列
-	for _, newPart := range newParts {
-		if err := s.UploadPart(newPart, history, room); err != nil {
-			log.Printf("[自动分P] 将新Part(id=%d)加入上传队列失败: %v", newPart.ID, err)
-		} else {
-			log.Printf("[自动分P] 新Part(id=%d)已加入上传队列", newPart.ID)
-		}
-	}
-
-	cleanupOnErr = false
-	return nil
 }

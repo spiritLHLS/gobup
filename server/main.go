@@ -101,14 +101,14 @@ func main() {
 	// 初始化管理员用户
 	initAdminUser()
 
-	// 初始化定时任务
-	scheduler.InitScheduler()
-	defer scheduler.StopScheduler()
-
 	// 初始化上传服务
 	uploadSvc := upload.NewService()
 	controllers.SetUploadService(uploadSvc)
 	controllers.SetHistoryUploadService(uploadSvc)
+
+	// 初始化定时任务，复用同一个上传服务实例，确保自动任务、手动接口、队列状态和进度查询一致
+	scheduler.InitScheduler(uploadSvc)
+	defer scheduler.StopScheduler()
 
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)

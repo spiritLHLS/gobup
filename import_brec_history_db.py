@@ -60,18 +60,23 @@ class BrecImporterDB:
             # 检查 record_history_parts 表的字段
             cursor.execute("PRAGMA table_info(record_history_parts)")
             part_columns = {row[1] for row in cursor.fetchall()}
-            self.has_cid_field = 'cid' in part_columns
+            if 'c_id' in part_columns:
+                self.cid_column = 'c_id'
+            elif 'cid' in part_columns:
+                self.cid_column = 'cid'
+            else:
+                self.cid_column = None
             self.has_duration_field = 'duration' in part_columns
             
             if os.getenv('DEBUG'):
                 print(f"   📋 数据库字段检测:")
                 print(f"      - danmaku字段: {'✅' if self.has_danmaku_fields else '❌'}")
-                print(f"      - cid字段: {'✅' if self.has_cid_field else '❌'}")
+                print(f"      - cid字段: {self.cid_column or '❌'}")
                 print(f"      - duration字段: {'✅' if self.has_duration_field else '❌'}")
         except Exception as e:
             print(f"⚠️  检测表结构失败，使用兼容模式: {e}")
             self.has_danmaku_fields = False
-            self.has_cid_field = False
+            self.cid_column = None
             self.has_duration_field = False
     
     def close_db(self):
@@ -226,9 +231,9 @@ class BrecImporterDB:
             end_time = metadata.get('end_time', now)
             
             # 根据表结构动态构建SQL
-            if self.has_cid_field and self.has_duration_field:
+            if self.cid_column and self.has_duration_field:
                 # 新版本数据库，包含 duration 和 cid 字段
-                cursor.execute("""
+                cursor.execute(f"""
                     INSERT INTO record_history_parts (
                         created_at,
                         history_id, room_id, session_id,
@@ -236,7 +241,7 @@ class BrecImporterDB:
                         file_path, file_name, file_size, duration,
                         start_time, end_time,
                         recording, upload, uploading,
-                        file_delete, file_moved, page, xcode_state, cid
+                        file_delete, file_moved, page, xcode_state, {self.cid_column}
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     now,
@@ -505,8 +510,8 @@ def main():
     
     parser.add_argument(
         '--db',
-        default='/root/data/gobup.db',
-        help='gobup 数据库文件路径 (默认: /root/data/gobup.db)'
+        default='/app/data/gobup.db',
+        help='gobup 数据库文件路径 (默认: /app/data/gobup.db)'
     )
     
     args = parser.parse_args()

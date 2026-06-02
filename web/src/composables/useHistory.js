@@ -8,6 +8,7 @@ export function useHistoryProgress() {
   const speedTracking = ref({})
   const historyProgressMap = ref({})
   const historyProgressTimer = ref(null)
+  const progressSocket = ref(null)
   const danmakuProgressMap = ref({})
   const danmakuProgressTimer = ref(null)
 
@@ -89,6 +90,7 @@ export function useHistoryProgress() {
   // 开始历史记录进度轮询
   // getHistories: 可选的 getter 函数，返回当前 histories 数组，要求轮询自动执行时必须传入
   const startHistoryProgressPolling = (getHistories) => {
+    startProgressWebSocket()
     if (historyProgressTimer.value) return
 
     historyProgressTimer.value = setInterval(() => {
@@ -104,6 +106,67 @@ export function useHistoryProgress() {
       clearInterval(historyProgressTimer.value)
       historyProgressTimer.value = null
     }
+    stopProgressWebSocket()
+  }
+
+  const startProgressWebSocket = () => {
+    if (progressSocket.value || typeof window === 'undefined') return
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/progress`)
+    progressSocket.value = socket
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        if (payload.type !== 'uploadProgress' || !payload.items) return
+        updateHistoryProgressFromItems(Object.values(payload.items))
+      } catch (error) {
+        console.error('解析上传进度推送失败:', error)
+      }
+    }
+
+    socket.onclose = () => {
+      progressSocket.value = null
+    }
+
+    socket.onerror = () => {
+      socket.close()
+    }
+  }
+
+  const stopProgressWebSocket = () => {
+    if (progressSocket.value) {
+      progressSocket.value.close()
+      progressSocket.value = null
+    }
+  }
+
+  const updateHistoryProgressFromItems = (items) => {
+    const grouped = {}
+    items.forEach(item => {
+      if (!item || !item.historyId) return
+      if (!grouped[item.historyId]) {
+        grouped[item.historyId] = {
+          historyId: item.historyId,
+          activeCount: 0,
+          overallPercent: 0,
+          items: []
+        }
+      }
+      grouped[item.historyId].items.push(item)
+      if (item.state === 'UPLOADING' || item.state === 'RETRY_WAIT') {
+        grouped[item.historyId].activeCount += 1
+        grouped[item.historyId].overallPercent += item.percent || 0
+      }
+    })
+
+    Object.values(grouped).forEach(progress => {
+      if (progress.activeCount > 0) {
+        progress.overallPercent = Math.round(progress.overallPercent / progress.activeCount)
+      }
+      historyProgressMap.value[progress.historyId] = progress
+    })
   }
 
   // 获取所有上传中的历史记录进度
@@ -219,6 +282,7 @@ export function useHistoryProgress() {
   onUnmounted(() => {
     stopProgressPolling()
     stopHistoryProgressPolling()
+    stopProgressWebSocket()
     stopDanmakuProgressPolling()
   })
 

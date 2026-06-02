@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/csv"
 	"fmt"
 	"log"
 	"net/http"
@@ -165,6 +166,89 @@ func ListHistories(c *gin.Context) {
 		"total":        total,
 		"workingCount": workingCount,
 	})
+}
+
+func ExportHistories(c *gin.Context) {
+	db := database.GetDB()
+
+	type ExportRequest struct {
+		RoomId    string `json:"roomId" form:"roomId"`
+		BvId      string `json:"bvId" form:"bvId"`
+		ViewType  string `json:"viewType" form:"viewType"`
+		From      string `json:"from" form:"from"`
+		To        string `json:"to" form:"to"`
+		Recording *bool  `json:"recording"`
+		Upload    *int   `json:"upload"`
+		Publish   *bool  `json:"publish"`
+	}
+
+	var req ExportRequest
+	req.ViewType = "working"
+	_ = c.ShouldBindJSON(&req)
+
+	query := db.Model(&models.RecordHistory{})
+	if req.RoomId != "" {
+		query = query.Where("room_id = ?", req.RoomId)
+	}
+	if req.BvId != "" {
+		query = query.Where("bv_id = ?", req.BvId)
+	}
+	if req.Recording != nil {
+		query = query.Where("recording = ?", *req.Recording)
+	}
+	if req.Publish != nil {
+		if *req.Publish {
+			query = query.Where("bv_id IS NOT NULL AND bv_id != ''")
+		} else {
+			query = query.Where("(bv_id IS NULL OR bv_id = '')")
+		}
+	}
+	if req.Upload != nil {
+		query = query.Where("upload_status = ?", *req.Upload)
+	}
+	if req.From != "" {
+		query = query.Where("start_time >= ?", req.From+" 00:00:00")
+	}
+	if req.To != "" {
+		query = query.Where("start_time <= ?", req.To+" 23:59:59")
+	}
+	if req.ViewType == "working" {
+		sevenDaysAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+		query = query.Where("recording = ? OR start_time >= ?", true, sevenDaysAgo)
+	} else if req.ViewType == "archived" {
+		sevenDaysAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+		query = query.Where("recording = ? AND start_time < ?", false, sevenDaysAgo)
+	}
+
+	var histories []models.RecordHistory
+	if err := query.Order("end_time DESC").Limit(10000).Find(&histories).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"type": "error", "msg": "导出查询失败"})
+		return
+	}
+
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=gobup-history-%s.csv", time.Now().Format("20060102-150405")))
+	_, _ = c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
+
+	writer := csv.NewWriter(c.Writer)
+	_ = writer.Write([]string{"ID", "房间ID", "主播", "标题", "开始时间", "结束时间", "BV号", "AV号", "上传状态", "投稿状态", "视频状态", "消息"})
+	for _, history := range histories {
+		_ = writer.Write([]string{
+			strconv.FormatUint(uint64(history.ID), 10),
+			history.RoomID,
+			history.Uname,
+			history.Title,
+			history.StartTime.Format("2006-01-02 15:04:05"),
+			history.EndTime.Format("2006-01-02 15:04:05"),
+			history.BvID,
+			history.AvID,
+			strconv.Itoa(history.UploadStatus),
+			strconv.FormatBool(history.Publish),
+			history.VideoStateDesc,
+			history.Message,
+		})
+	}
+	writer.Flush()
 }
 
 func UpdateHistory(c *gin.Context) {
