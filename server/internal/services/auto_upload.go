@@ -32,7 +32,7 @@ func (s *AutoUploadService) ProcessPendingUploads() error {
 
 	// 查询所有启用了上传功能的房间
 	var rooms []models.RecordRoom
-	if err := db.Where("upload = ?", true).Find(&rooms).Error; err != nil {
+	if err := db.Where("upload = ?", true).Order("priority DESC, id ASC").Find(&rooms).Error; err != nil {
 		return err
 	}
 
@@ -64,8 +64,8 @@ func (s *AutoUploadService) ProcessPendingUploads() error {
 		// 条件：recording=false（录制完成）, upload=false（未上传）, uploading=false（未在上传中）
 		var parts []models.RecordHistoryPart
 		if err := db.Where(
-			"room_id = ? AND recording = ? AND upload = ? AND uploading = ?",
-			room.RoomID, false, false, false,
+			"room_id = ? AND recording = ? AND upload = ? AND uploading = ? AND upload_paused = ? AND upload_cancelled = ?",
+			room.RoomID, false, false, false, false, false,
 		).Order("start_time ASC").Find(&parts).Error; err != nil {
 			log.Printf("[自动上传] 查询房间 %s 的待上传分P失败: %v", room.RoomID, err)
 			continue
@@ -125,7 +125,7 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 
 	// 查询所有启用了上传功能和自动上传的房间
 	var rooms []models.RecordRoom
-	if err := db.Where("upload = ? AND auto_upload = ?", true, true).Find(&rooms).Error; err != nil {
+	if err := db.Where("upload = ? AND auto_upload = ?", true, true).Order("priority DESC, id ASC").Find(&rooms).Error; err != nil {
 		return nil, err
 	}
 
@@ -147,8 +147,8 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 		// file_delete=false：排除物理文件已删除的分P（如大文件切分时退役的原始分P），防止反复重试不存在的文件
 		var parts []models.RecordHistoryPart
 		if err := db.Where(
-			"room_id = ? AND recording = ? AND upload = ? AND uploading = ? AND is_temp_file = ? AND file_delete = ?",
-			room.RoomID, false, false, false, false, false,
+			"room_id = ? AND recording = ? AND upload = ? AND uploading = ? AND is_temp_file = ? AND file_delete = ? AND upload_paused = ? AND upload_cancelled = ?",
+			room.RoomID, false, false, false, false, false, false, false,
 		).Order("start_time ASC").Find(&parts).Error; err != nil {
 			log.Printf("[自动上传] 查询房间 %s 的待上传分P失败: %v", room.RoomID, err)
 			continue
@@ -204,8 +204,8 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 	// 此处每10分钟周期调度时主动发现并重新入队，对烧录成功但上传失败的文件进行自动重试。
 	var failedBurnedParts []models.RecordHistoryPart
 	if err := db.Where(
-		"is_temp_file = ? AND temp_file_type = ? AND upload = ? AND uploading = ? AND file_delete = ?",
-		true, "danmaku_burn", false, false, false,
+		"is_temp_file = ? AND temp_file_type = ? AND upload = ? AND uploading = ? AND file_delete = ? AND upload_paused = ? AND upload_cancelled = ?",
+		true, "danmaku_burn", false, false, false, false, false,
 	).Find(&failedBurnedParts).Error; err != nil {
 		log.Printf("[自动上传] 查询失败的弹幕烧录分P失败: %v", err)
 	} else {
@@ -268,8 +268,8 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 	// 此处每10分钟周期调度时主动发现并重新入队（正常扫描也能覆盖，此处作为双重保障）。
 	var failedSplitParts []models.RecordHistoryPart
 	if err := db.Where(
-		"temp_file_type = ? AND upload = ? AND uploading = ? AND file_delete = ?",
-		"split", false, false, false,
+		"temp_file_type = ? AND upload = ? AND uploading = ? AND file_delete = ? AND upload_paused = ? AND upload_cancelled = ?",
+		"split", false, false, false, false, false,
 	).Find(&failedSplitParts).Error; err != nil {
 		log.Printf("[自动上传] 查询失败的split分P失败: %v", err)
 	} else {
@@ -488,6 +488,7 @@ func (s *AutoUploadService) CleanOrphanedTempParts() {
 			log.Printf("[自动上传] 临时分P文件不存在，标记为已删除: part_id=%d, file=%s", part.ID, part.FilePath)
 			part.FileDelete = true
 			part.UploadErrorMsg = "临时文件不存在，已自动清理"
+			part.UploadErrorType = "file"
 			db.Save(&part)
 			cleaned++
 		}

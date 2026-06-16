@@ -127,7 +127,7 @@ func (u *AppUploader) uploadChunk(endpoint string, chunk []byte, chunkIndex, tot
 
 	// 应用全局上传限速
 	chunkReader := bytes.NewReader(chunk)
-	rateLimitedReader := ratelimit.NewRateLimitedReader(chunkReader, ratelimit.GetGlobalLimiter())
+	rateLimitedReader := ratelimit.NewRateLimitedReader(chunkReader, u.uploadRateLimiter())
 
 	resp, err := u.client.ReqClient.R().
 		SetHeader("Content-Type", "application/octet-stream").
@@ -143,6 +143,13 @@ func (u *AppUploader) uploadChunk(endpoint string, chunk []byte, chunkIndex, tot
 	}
 
 	return nil
+}
+
+func (u *AppUploader) uploadRateLimiter() *ratelimit.RateLimiter {
+	if u != nil && u.client != nil && u.client.UploadRateLimiter != nil {
+		return u.client.UploadRateLimiter
+	}
+	return ratelimit.GetGlobalLimiter()
 }
 
 func (u *AppUploader) completeUpload(endpoint string, chunks int, filesize int64, md5Hash, filename string) error {

@@ -343,7 +343,7 @@ show_info() {
         echo ""
     else
         log_warning "未设置认证信息，首次访问需要在登录页面输入用户名密码"
-        log_info "设置方法: GOBUP_USERNAME=admin GOBUP_PASSWORD=123456 bash install.sh"
+        log_info "设置方法: GOBUP_USERNAME=admin GOBUP_PASSWORD='replace_with_a_long_random_password' bash install.sh"
         echo ""
     fi
     log_info "使用方法:"
@@ -376,7 +376,7 @@ GoBup 一键安装脚本
   bash install.sh
   
   # 完整安装并设置认证
-  GOBUP_USERNAME=admin GOBUP_PASSWORD=123456 bash install.sh
+  GOBUP_USERNAME=admin GOBUP_PASSWORD='replace_with_a_long_random_password' bash install.sh
   
   # 升级到最新版本
   bash install.sh upgrade

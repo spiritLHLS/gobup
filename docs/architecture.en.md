@@ -13,14 +13,34 @@ GoBup has four main layers:
 
 Production builds embed `web/dist` into the Go binary. Development mode can run frontend and backend separately.
 
+## Architecture Diagram
+
+```mermaid
+flowchart LR
+    Recorder["Recorder<br/>BililiveRecorder / blrec"] --> Files["Recording directory<br/>video / XML / cover"]
+    Files --> Watcher["FileWatcherService<br/>directory events"]
+    Files --> Scanner["FileScanService<br/>scheduled scans"]
+    Watcher --> Scanner
+    Scanner --> DB[("SQLite<br/>GORM")]
+    Web["Vue web console"] --> API["Gin API<br/>BasicAuth"]
+    API --> DB
+    API --> Queue["upload.Service<br/>account queues / progress"]
+    Queue --> FFmpeg["FFmpeg / ffprobe"]
+    Queue --> Danmaku["DanmakuFactory<br/>convert / burn-in"]
+    Queue --> Bili["Bilibili APIs<br/>upload / publish / sync"]
+    Queue --> Wx["WxPusher<br/>notifications"]
+    Queue --> WS["/ws/progress<br/>progress stream"]
+    WS --> Web
+```
+
 ## Layout
 
 ```text
 server/internal/controllers  HTTP controllers
 server/internal/routes       API routes and embedded frontend assets
 server/internal/models       GORM models
-server/internal/services     scanning, file ops, danmaku, video processing, sync jobs
-server/internal/upload       upload queues, progress, publishing flow
+server/internal/services     scanning, scan metadata, file ops, danmaku, video processing, sync jobs
+server/internal/upload       upload queues, progress, publishing flow, burned-part backfill
 server/internal/bili         Bilibili clients, uploaders, rate limiters
 web/src/views                pages
 web/src/components           reusable components
@@ -33,7 +53,7 @@ Important tables:
 - `record_rooms`: room settings, publish templates, upload strategy, file operation policy, danmaku burn settings.
 - `record_histories`: one recording or livestream session.
 - `record_history_parts`: parts, split files, danmaku-burned files, and upload state.
-- `bili_bili_users`: admin account and Bilibili accounts, including Cookie, access key, and expiry time.
+- `bili_bili_users`: admin account and Bilibili accounts, including Cookie, access key, expiry time, enabled state, and daily upload quota.
 - `system_configs`: scan, file watcher, data repair, and proxy settings.
 
 The project supports deleting the SQLite database and initializing a fresh schema. Current initialization uses GORM AutoMigrate plus only necessary compatibility adjustments.
@@ -55,19 +75,29 @@ Manual uploads, auto uploads, queue status, and WebSocket progress use one share
 Flow:
 
 1. A scheduled job or API calls `UploadPart`.
-2. The room strategy selects an upload account: fixed, round-robin, or shortest queue.
+2. The room strategy selects an upload account: fixed, round-robin, shortest queue, or daily remaining quota.
 3. Upload window and rate-limit cooldown are checked.
 4. Large files are split when the part count would exceed the upload limit.
-5. Optional FFmpeg pre-upload transcoding runs.
+5. Optional FFmpeg pre-upload transcoding runs with room-level H.264/H.265 selection and reports into the upload progress stream. If FFmpeg is unavailable or transcoding fails, temporary files are cleaned up and the original file is uploaded.
 6. A Bilibili client is created for the selected account and uploads the file.
 7. CID, upload line, retry counters, and error messages are saved.
 8. Danmaku burn-in, file operations, and auto-publish may run.
 
 Clients are not reused across accounts or tasks, which prevents Cookie, access token, or request-context leakage.
 
+Upload requests default to a 30-minute timeout and can be adjusted with `GOBUP_UPLOAD_TIMEOUT_MINUTES`. TLS handshake timeout can be adjusted with `GOBUP_TLS_HANDSHAKE_TIMEOUT_SECONDS`. UPOS upload retries parse `Retry-After` on 429 responses and prefer the server-provided cooldown before retrying. Part failures persist `uploadErrorType` to distinguish network, rate-limit, auth, file, transcode, window, and user-operation errors.
+
+WebSocket connections are same-origin by default. Reverse proxies or cross-origin consoles can add exact origins through `GOBUP_ALLOWED_ORIGINS`; wildcard `*` is ignored. The frontend first gets a short-lived token from authenticated `/api/progress/ws-token`, then connects to `/ws/progress`.
+
+Bilibili TV QR login and refresh-token signing use `BILI_APP_KEY` and `BILI_APP_SECRET` environment variables. When they are missing, those flows return explicit errors; no AppSecret is embedded in code.
+
+Parts also have persisted pause and cancel states. Automatic scheduling, manual upload endpoints, and queue workers skip paused or cancelled parts. Resume and retry clear those states and enqueue the part again when conditions allow. Tasks submitted outside the upload window remain in the queue flow and are re-enqueued when the next window starts.
+
+The daily quota strategy reads each account's `dailyUploadQuota`. `0` means unlimited; positive values are compared against today's uploaded parts and current queue length, so exhausted limited accounts are skipped and the account with the most remaining capacity is preferred.
+
 ## Publish And Covers
 
-Publishing lives in `server/internal/upload/publish.go`. Cover modes:
+Publishing lives in `server/internal/upload/publish.go`; burned danmaku part backfill for already published videos is split into same-package `publish_burned_append.go`. Cover modes:
 
 - Default cover.
 - Live room cover.
@@ -82,11 +112,11 @@ Frame extraction uses FFmpeg and writes a `.cover.jpg` next to the source video.
 
 - Locate the XML danmaku file.
 - Convert XML to ASS with DanmakuFactory.
-- Apply room style settings and video resolution.
+- Apply video resolution plus room-level font size, color, scroll area, and display area settings.
 - Burn ASS into MP4 with FFmpeg.
 - Create a `danmaku_burn` temporary part and enqueue it for upload.
 
-Burn failures are logged and the original upload continues. A review-backfill task can later detect missing burned parts and append them.
+Danmaku sending and danmaku burn-in share the danmaku progress API. Burn-in progress exposes `stage`, `message`, `failed`, and update time. Burn failures are logged and the original upload continues. A review-backfill task can later detect missing burned parts and append them.
 
 ## File Operations
 
@@ -103,22 +133,29 @@ Scope is a bitmask: video, danmaku, cover. Delayed operations write `scheduled_d
 
 Endpoints:
 
-- `/api/queue/upload/status`: upload queue summary, pending, running, and completed lists.
-- `/api/ws/progress`: upload progress snapshots.
+- `/api/queue/upload/status`: upload queue summary, pending, running, paused, cancelled, and completed lists.
+- `/api/queue/upload/part/:id/pause|resume|cancel|retry`: controls a single upload task.
+- `/api/queue/upload/pauseAll|resumeAll|cancelAll`: batch controls for not-yet-started or paused upload tasks.
+- `/api/progress/ws-token`: issues short-lived WebSocket tokens.
+- `/ws/progress`: upload progress snapshots.
 - `/api/history/export`: CSV export with current filters.
+- `/api/swagger/index.html`: Swagger UI, available only after administrator BasicAuth succeeds.
 
-The Dashboard shows upload queue state. The History page uses WebSocket updates with polling fallback.
+The upload queue response includes part file, time, cooldown, temporary-file, and last-error details. The Dashboard shows queue state and a details dialog. The History page uses reconnecting WebSocket updates with polling fallback. Directory events only debounce-scan created, written, or renamed video files; new directory events extend recursive watching.
 
 ## Build And CI
 
 - `make build`: frontend plus non-embedded backend.
 - `make build-embed`: production binary with embedded frontend.
-- Dockerfiles use Node.js 24 and Go 1.24.
+- `make build-cross`: production binaries for linux/darwin/windows amd64/arm64 combinations.
+- Dockerfiles use Node.js 24 and Go 1.25.
 - GitHub Actions opt into Node.js 24 with `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`.
+- CI runs `swag init --parseDependency --parseInternal` to verify that Swagger/OpenAPI generated files in `server/docs` stay synchronized, and checks API route coverage stays at or above 90%.
 
 ## Operations
 
 - Back up `/app/data/gobup.db` regularly.
 - Make sure the recorder and GoBup container see the same recording directory.
 - Test move or copy policies before enabling deletion.
-- Multi-account load balancing is useful for upload distribution. Auto-publish should still use a fixed publishing account.
+- Multi-account load balancing is useful for upload distribution. Daily quotas help cap per-account part counts. Auto-publish should still use a fixed publishing account.
+- Config export redacts account credentials by default. Full account backups require explicitly including secrets and should be stored as sensitive files.

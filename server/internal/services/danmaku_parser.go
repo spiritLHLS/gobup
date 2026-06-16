@@ -200,6 +200,22 @@ func (p *DanmakuXMLParser) ParseDanmakuFile(xmlPath string, sessionID string, ro
 		msgsToSave = append(msgsToSave, msg)
 	}
 
+	// 解析礼物（转换为特殊弹幕）
+	for _, gift := range dmXML.Gift {
+		msg, err := p.parseGift(gift, sessionID)
+		if err != nil {
+			log.Printf("[弹幕解析] 解析礼物失败: %v", err)
+			continue
+		}
+		if len(partID) > 0 && partID[0] > 0 {
+			var part models.RecordHistoryPart
+			if err := db.First(&part, partID[0]).Error; err == nil {
+				msg.RoomID = part.RoomID
+			}
+		}
+		msgsToSave = append(msgsToSave, msg)
+	}
+
 	// 解析上舰（转换为特殊弹幕）
 	for _, guard := range dmXML.Guard {
 		msg, err := p.parseGuard(guard, sessionID)
@@ -302,6 +318,7 @@ func (p *DanmakuXMLParser) parseDanmaku(d D, sessionID string) (*models.LiveMsg,
 	msg := &models.LiveMsg{
 		SessionID: sessionID,
 		Timestamp: timestampMs,
+		Type:      1,
 		Message:   strings.TrimSpace(d.Text),
 		Mode:      mode,
 		FontSize:  fontSize,
@@ -351,10 +368,49 @@ func (p *DanmakuXMLParser) parseSC(sc SC, sessionID string) (*models.LiveMsg, er
 	return &models.LiveMsg{
 		SessionID: sessionID,
 		Timestamp: timestampMs,
+		Type:      2,
 		Message:   message,
 		Mode:      5,        // 顶部弹幕
 		FontSize:  64,       // 大字号
 		Color:     16776960, // 金色
+		Sent:      false,
+	}, nil
+}
+
+// parseGift 解析礼物信息
+func (p *DanmakuXMLParser) parseGift(gift Gift, sessionID string) (*models.LiveMsg, error) {
+	timestamp, err := strconv.ParseFloat(gift.TS, 64)
+	if err != nil {
+		return nil, fmt.Errorf("解析时间戳失败: %w", err)
+	}
+	timestampMs := int64(timestamp * 1000)
+
+	num, _ := strconv.Atoi(gift.Num)
+	if num <= 0 {
+		num = 1
+	}
+	giftName := strings.TrimSpace(gift.GiftName)
+	if giftName == "" {
+		giftName = "礼物"
+	}
+
+	userName := strings.TrimSpace(gift.User)
+	if userName == "" {
+		userName = "用户"
+	}
+	message := fmt.Sprintf("%s赠送了%s x%d", userName, giftName, num)
+	if len(message) > 100 {
+		message = message[:99]
+	}
+
+	return &models.LiveMsg{
+		SessionID: sessionID,
+		Timestamp: timestampMs,
+		Type:      3,
+		Message:   message,
+		Mode:      5,
+		FontSize:  36,
+		Color:     16755200,
 		Sent:      false,
 	}, nil
 }
@@ -391,6 +447,7 @@ func (p *DanmakuXMLParser) parseGuard(guard Guard, sessionID string) (*models.Li
 	return &models.LiveMsg{
 		SessionID: sessionID,
 		Timestamp: timestampMs,
+		Type:      4,
 		Message:   message,
 		Mode:      5,        // 顶部弹幕
 		FontSize:  64,       // 大字号

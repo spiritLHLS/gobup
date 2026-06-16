@@ -2,6 +2,8 @@ package services
 
 import (
 	"fmt"
+	"html"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -17,25 +19,25 @@ func NewTemplateService() *TemplateService {
 // RenderTitle 渲染标题模板
 func (s *TemplateService) RenderTitle(template string, data map[string]interface{}) string {
 	if template == "" {
-		return s.getDefault(data)
+		return cleanRenderedSingleLine(s.getDefault(data))
 	}
-	return s.render(template, data)
+	return cleanRenderedSingleLine(s.render(template, data))
 }
 
 // RenderDescription 渲染描述模板
 func (s *TemplateService) RenderDescription(template string, data map[string]interface{}) string {
 	if template == "" {
-		return s.getDefaultDesc(data)
+		return cleanRenderedMultiline(s.getDefaultDesc(data))
 	}
-	return s.render(template, data)
+	return cleanRenderedMultiline(s.render(template, data))
 }
 
 // RenderPartTitle 渲染分P标题模板
 func (s *TemplateService) RenderPartTitle(template string, data map[string]interface{}) string {
 	if template == "" {
-		return fmt.Sprintf("P%d", data["index"])
+		return cleanRenderedSingleLine(fmt.Sprintf("P%d", data["index"]))
 	}
-	return s.render(template, data)
+	return cleanRenderedSingleLine(s.render(template, data))
 }
 
 // RenderDynamic 渲染动态模板
@@ -43,7 +45,7 @@ func (s *TemplateService) RenderDynamic(template string, data map[string]interfa
 	if template == "" {
 		return ""
 	}
-	return s.render(template, data)
+	return cleanRenderedMultiline(s.render(template, data))
 }
 
 // render 渲染模板
@@ -66,8 +68,13 @@ func (s *TemplateService) render(template string, data map[string]interface{}) s
 	if uid, ok := data["uid"].(int64); ok {
 		result = strings.ReplaceAll(result, "${@uid}", fmt.Sprintf("%d", uid))
 	}
-	if index, ok := data["index"].(int); ok {
-		result = strings.ReplaceAll(result, "${index}", fmt.Sprintf("%d", index))
+	for _, key := range []string{"index", "sequence", "seq", "dailyIndex"} {
+		if val, ok := data[key].(int); ok {
+			result = strings.ReplaceAll(result, "${"+key+"}", fmt.Sprintf("%d", val))
+		}
+		if val, ok := data[key].(int64); ok {
+			result = strings.ReplaceAll(result, "${"+key+"}", fmt.Sprintf("%d", val))
+		}
 	}
 	if fileName, ok := data["fileName"].(string); ok {
 		result = strings.ReplaceAll(result, "${fileName}", fileName)
@@ -171,11 +178,43 @@ func (s *TemplateService) BuildTags(tagStr string, data map[string]interface{}) 
 	tags := strings.Split(rendered, ",")
 	var result []string
 	for _, tag := range tags {
-		tag = strings.TrimSpace(tag)
+		tag = cleanRenderedSingleLine(tag)
 		if tag != "" {
 			result = append(result, tag)
 		}
 	}
 
 	return result
+}
+
+var (
+	markdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\([^)]+\)`)
+	markdownLinkRe  = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	htmlTagRe       = regexp.MustCompile(`<[^>]+>`)
+	markdownMarkRe  = regexp.MustCompile("[`*_~#>]+")
+	blankLineRe     = regexp.MustCompile(`\n{3,}`)
+	spaceRe         = regexp.MustCompile(`[ \t\r\f\v]+`)
+)
+
+func cleanRenderedSingleLine(text string) string {
+	text = cleanRenderedMultiline(text)
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = spaceRe.ReplaceAllString(text, " ")
+	return strings.TrimSpace(text)
+}
+
+func cleanRenderedMultiline(text string) string {
+	text = strings.ReplaceAll(text, `\n`, "\n")
+	text = html.UnescapeString(text)
+	text = markdownImageRe.ReplaceAllString(text, "$1")
+	text = markdownLinkRe.ReplaceAllString(text, "$1")
+	text = htmlTagRe.ReplaceAllString(text, " ")
+	text = markdownMarkRe.ReplaceAllString(text, "")
+	lines := strings.Split(text, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimSpace(spaceRe.ReplaceAllString(lines[i], " "))
+	}
+	text = strings.Join(lines, "\n")
+	text = blankLineRe.ReplaceAllString(text, "\n\n")
+	return strings.TrimSpace(text)
 }

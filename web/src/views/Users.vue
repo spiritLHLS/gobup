@@ -26,6 +26,28 @@
             <el-avatar :src="row.face" />
           </template>
         </el-table-column>
+        <el-table-column label="启用" width="100">
+          <template #default="{ row }">
+            <el-switch
+              v-model="row.enabled"
+              :loading="row.updatingEnabled"
+              @change="handleEnabledChange(row)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="每日配额" width="160">
+          <template #default="{ row }">
+            <el-input-number
+              v-model="row.dailyUploadQuota"
+              :min="0"
+              :max="10000"
+              :step="1"
+              controls-position="right"
+              :disabled="row.updatingQuota"
+              @change="handleDailyQuotaChange(row)"
+            />
+          </template>
+        </el-table-column>
         <el-table-column label="Cookie状态" width="120">
           <template #default="{ row }">
             <el-tag :type="getCookieStatusType(row)">
@@ -38,10 +60,26 @@
             {{ formatTime(row.expireTime) }}
           </template>
         </el-table-column>
+        <el-table-column label="最近巡检" width="220">
+          <template #default="{ row }">
+            <div class="check-status">
+              <span>{{ formatTime(row.lastCheckTime) }}</span>
+              <el-tooltip
+                v-if="row.lastCheckError"
+                :content="row.lastCheckError"
+                placement="top"
+              >
+                <el-tag type="danger" size="small">异常</el-tag>
+              </el-tooltip>
+              <el-tag v-else-if="row.lastCheckTime" type="success" size="small">正常</el-tag>
+              <el-tag v-else type="info" size="small" effect="plain">未检查</el-tag>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="WxPusher" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.wxPushToken ? 'success' : 'info'">
-              {{ row.wxPushToken ? '已配置' : '未配置' }}
+            <el-tag :type="row.hasWxPushToken ? 'success' : 'info'">
+              {{ row.hasWxPushToken ? '已配置' : '未配置' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -197,7 +235,11 @@ const fetchUsers = async () => {
   loading.value = true
   try {
     const data = await userAPI.list()
-    users.value = data || []
+    users.value = (data || []).map(user => ({
+      ...user,
+      enabled: user.enabled !== false,
+      dailyUploadQuota: Number(user.dailyUploadQuota || 0)
+    }))
   } catch (error) {
     console.error('获取用户列表失败:', error)
   } finally {
@@ -261,6 +303,50 @@ const handleCheckStatus = async (row) => {
   }
 }
 
+const handleEnabledChange = async (row) => {
+  const nextEnabled = row.enabled
+  row.updatingEnabled = true
+  try {
+    const result = await userAPI.setEnabled(row.id, nextEnabled)
+    if (result.type === 'success') {
+      ElMessage.success(result.msg || (nextEnabled ? '账号已启用' : '账号已禁用'))
+    } else {
+      row.enabled = !nextEnabled
+      ElMessage.error(result.msg || '状态更新失败')
+    }
+  } catch (error) {
+    row.enabled = !nextEnabled
+    console.error('更新账号状态失败:', error)
+    ElMessage.error('状态更新失败')
+  } finally {
+    row.updatingEnabled = false
+  }
+}
+
+const handleDailyQuotaChange = async (row) => {
+  const quota = Math.max(0, Number(row.dailyUploadQuota) || 0)
+  row.dailyUploadQuota = quota
+  row.updatingQuota = true
+  try {
+    const result = await userAPI.update({
+      id: row.id,
+      dailyUploadQuota: quota
+    })
+    if (result.type === 'success') {
+      ElMessage.success(quota > 0 ? `每日配额已设为 ${quota} 个分P` : '每日配额已设为不限额')
+    } else {
+      ElMessage.error(result.msg || '配额更新失败')
+      fetchUsers()
+    }
+  } catch (error) {
+    console.error('更新每日配额失败:', error)
+    ElMessage.error('配额更新失败')
+    fetchUsers()
+  } finally {
+    row.updatingQuota = false
+  }
+}
+
 const handleDelete = async (row) => {
   try {
     await ElMessageBox.confirm('确定要删除这个用户吗？', '提示', {
@@ -318,7 +404,7 @@ const handleSaveRateLimit = async (config) => {
 const handleEditWxPush = (row) => {
   wxPushForm.value = {
     userId: row.id,
-    token: row.wxPushToken || ''
+    token: ''
   }
   showWxPushDialog.value = true
 }
@@ -359,5 +445,12 @@ onMounted(() => {
 
 .login-tabs {
   margin-top: -10px;
+}
+
+.check-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 </style>

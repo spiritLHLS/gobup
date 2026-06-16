@@ -19,9 +19,10 @@ import re
 import hashlib
 
 class BrecImporterDB:
-    def __init__(self, brec_dir: str, db_path: str):
+    def __init__(self, brec_dir: str, db_path: str, container_prefix: str = '/rec'):
         self.brec_dir = Path(brec_dir)
         self.db_path = db_path
+        self.container_prefix = container_prefix.rstrip('/') or '/rec'
         self.conn = None
         
         # 统计信息
@@ -60,6 +61,7 @@ class BrecImporterDB:
             # 检查 record_history_parts 表的字段
             cursor.execute("PRAGMA table_info(record_history_parts)")
             part_columns = {row[1] for row in cursor.fetchall()}
+            self.part_columns = part_columns
             if 'c_id' in part_columns:
                 self.cid_column = 'c_id'
             elif 'cid' in part_columns:
@@ -67,17 +69,24 @@ class BrecImporterDB:
             else:
                 self.cid_column = None
             self.has_duration_field = 'duration' in part_columns
+            self.has_queue_control_fields = {
+                'upload_paused',
+                'upload_cancelled',
+            }.issubset(part_columns)
             
             if os.getenv('DEBUG'):
                 print(f"   📋 数据库字段检测:")
                 print(f"      - danmaku字段: {'✅' if self.has_danmaku_fields else '❌'}")
                 print(f"      - cid字段: {self.cid_column or '❌'}")
                 print(f"      - duration字段: {'✅' if self.has_duration_field else '❌'}")
+                print(f"      - 上传队列控制字段: {'✅' if self.has_queue_control_fields else '❌'}")
         except Exception as e:
             print(f"⚠️  检测表结构失败，使用兼容模式: {e}")
             self.has_danmaku_fields = False
             self.cid_column = None
             self.has_duration_field = False
+            self.has_queue_control_fields = False
+            self.part_columns = set()
     
     def close_db(self):
         """关闭数据库连接"""
@@ -224,81 +233,66 @@ class BrecImporterDB:
             cursor = self.conn.cursor()
             
             # 转换为容器内路径（如果需要）
-            container_path = str(video_file).replace(str(self.brec_dir), '/rec')
+            container_path = self.to_container_path(video_file)
             
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             start_time = metadata.get('start_time', now)
             end_time = metadata.get('end_time', now)
             
-            # 根据表结构动态构建SQL
-            if self.cid_column and self.has_duration_field:
-                # 新版本数据库，包含 duration 和 cid 字段
-                cursor.execute(f"""
-                    INSERT INTO record_history_parts (
-                        created_at,
-                        history_id, room_id, session_id,
-                        title, live_title, area_name,
-                        file_path, file_name, file_size, duration,
-                        start_time, end_time,
-                        recording, upload, uploading,
-                        file_delete, file_moved, page, xcode_state, {self.cid_column}
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    now,
-                    history_id,
-                    metadata['room_id'],
-                    metadata['session_id'],
-                    metadata.get('title', ''),
-                    metadata.get('title', ''),
-                    metadata.get('area_name_parent', ''),
-                    container_path,
-                    video_file.name,
-                    self.get_file_size(video_file),
-                    0,  # duration
-                    start_time,
-                    end_time,
-                    0,  # recording
-                    0,  # upload
-                    0,  # uploading
-                    0,  # file_delete
-                    0,  # file_moved
-                    0,  # page
-                    0,  # xcode_state
-                    0   # cid
-                ))
-            else:
-                # 旧版本数据库，不包含 duration 和 cid 字段
-                cursor.execute("""
-                    INSERT INTO record_history_parts (
-                        created_at,
-                        history_id, room_id, session_id,
-                        title, live_title, area_name,
-                        file_path, file_name, file_size,
-                        start_time, end_time,
-                        recording, upload, uploading,
-                        file_delete, file_moved, page, xcode_state
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    now,
-                    history_id,
-                    metadata['room_id'],
-                    metadata['session_id'],
-                    metadata.get('title', ''),
-                    metadata.get('title', ''),
-                    metadata.get('area_name_parent', ''),
-                    container_path,
-                    video_file.name,
-                    self.get_file_size(video_file),
-                    start_time,
-                    end_time,
-                    0,  # recording
-                    0,  # upload
-                    0,  # uploading
-                    0,  # file_delete
-                    0,  # file_moved
-                    0,  # page
-                    0   # xcode_state
-                ))
+            columns = [
+                'created_at',
+                'history_id', 'room_id', 'session_id',
+                'title', 'live_title', 'area_name',
+                'file_path', 'file_name', 'file_size',
+                'start_time', 'end_time',
+                'recording', 'upload', 'uploading',
+                'file_delete', 'file_moved', 'page', 'xcode_state',
+            ]
+            values = [
+                now,
+                history_id,
+                metadata['room_id'],
+                metadata['session_id'],
+                metadata.get('title', ''),
+                metadata.get('title', ''),
+                metadata.get('area_name_parent', ''),
+                container_path,
+                video_file.name,
+                self.get_file_size(video_file),
+                start_time,
+                end_time,
+                0,  # recording
+                0,  # upload
+                0,  # uploading
+                0,  # file_delete
+                0,  # file_moved
+                0,  # page
+                0,  # xcode_state
+            ]
+
+            optional_defaults = {
+                'duration': 0,
+                'upload_paused': 0,
+                'upload_cancelled': 0,
+                'upload_error_type': '',
+                'upload_user_id': 0,
+                'uploaded_at': None,
+            }
+            for column, value in optional_defaults.items():
+                if column in self.part_columns:
+                    columns.append(column)
+                    values.append(value)
+
+            if self.cid_column:
+                columns.append(self.cid_column)
+                values.append(0)
+
+            placeholders = ', '.join(['?'] * len(columns))
+            column_sql = ', '.join(columns)
+            cursor.execute(
+                f"INSERT INTO record_history_parts ({column_sql}) VALUES ({placeholders})",
+                values
+            )
             
             self.conn.commit()
             
@@ -321,6 +315,14 @@ class BrecImporterDB:
             return file_path.stat().st_size
         except:
             return 0
+
+    def to_container_path(self, video_file: Path) -> str:
+        """将宿主机录制目录下的路径映射为 gobup 容器内路径。"""
+        try:
+            relative_path = video_file.relative_to(self.brec_dir)
+            return str(Path(self.container_prefix) / relative_path)
+        except ValueError:
+            return str(video_file)
     
     def create_default_metadata(self, video_file: Path) -> Dict:
         """为视频文件创建默认元数据"""
@@ -404,6 +406,7 @@ class BrecImporterDB:
         """扫描目录并导入"""
         print(f"🔍 开始扫描目录: {self.brec_dir}")
         print(f"💾 数据库路径: {self.db_path}")
+        print(f"📦 容器路径前缀: {self.container_prefix}")
         print("-" * 60)
         
         if not self.brec_dir.exists():
@@ -415,7 +418,7 @@ class BrecImporterDB:
         
         try:
             # 查找所有视频文件
-            video_extensions = {'.flv', '.mp4', '.mkv'}
+            video_extensions = {'.flv', '.mp4', '.m4v', '.mov', '.mkv', '.ts', '.webm'}
             video_files = []
             
             for ext in video_extensions:
@@ -447,7 +450,7 @@ class BrecImporterDB:
             return
         
         # 检查是否已导入
-        container_path = str(video_file).replace(str(self.brec_dir), '/rec')
+        container_path = self.to_container_path(video_file)
         if self.check_part_exists(container_path):
             print(f"   ⏭️  已存在，跳过")
             self.stats['skipped'] += 1
@@ -513,6 +516,12 @@ def main():
         default='/app/data/gobup.db',
         help='gobup 数据库文件路径 (默认: /app/data/gobup.db)'
     )
+
+    parser.add_argument(
+        '--container-prefix',
+        default='/rec',
+        help='录制目录在 gobup 容器内的挂载前缀 (默认: /rec)'
+    )
     
     args = parser.parse_args()
     
@@ -524,7 +533,8 @@ def main():
     # 创建导入器并执行
     importer = BrecImporterDB(
         brec_dir=args.dir,
-        db_path=args.db
+        db_path=args.db,
+        container_prefix=args.container_prefix
     )
     
     try:

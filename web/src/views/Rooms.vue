@@ -227,9 +227,15 @@
     <!-- 导出配置对话框 -->
     <el-dialog v-model="exportDialogVisible" title="导出配置" width="360px">
       <p style="margin-bottom:16px;color:var(--text-color-secondary)">选择要导出的数据：</p>
-      <el-checkbox v-model="exportOptions.rooms" label="房间配置" />
-      <el-checkbox v-model="exportOptions.users" label="用户信息" />
-      <el-checkbox v-model="exportOptions.histories" label="历史记录" />
+      <el-checkbox v-model="exportOptions.rooms">房间配置</el-checkbox>
+      <el-checkbox v-model="exportOptions.users">用户信息</el-checkbox>
+      <el-checkbox
+        v-if="exportOptions.users"
+        v-model="exportOptions.includeSecrets"
+      >
+        包含账号密钥
+      </el-checkbox>
+      <el-checkbox v-model="exportOptions.histories">历史记录</el-checkbox>
       <template #footer>
         <el-button @click="exportDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="doExport">导出</el-button>
@@ -262,7 +268,7 @@ const saving = ref(false)
 const viewMode = ref(localStorage.getItem('roomViewMode') || 'card')
 const searchKeyword = ref('')
 const exportDialogVisible = ref(false)
-const exportOptions = ref({ rooms: true, users: true, histories: false })
+const exportOptions = ref({ rooms: true, users: true, histories: false, includeSecrets: false })
 
 // 保存视图模式
 const updateViewMode = (mode) => {
@@ -288,6 +294,7 @@ const handleSearch = () => { /* reactive */ }
 const form = ref({
   roomId: '',
   upload: true,
+  priority: 50,
   autoUpload: true,
   autoPublish: true,
   mergeBySession: true,
@@ -305,6 +312,7 @@ const form = ref({
   tid: 21,
   copyright: 1,
   line: 'cs_bda2',
+  uploadSpeedLimitMbps: 0,
   fileOpTrigger: 3,
   fileOpAction: 1,
   fileOpScope: 1,
@@ -326,7 +334,12 @@ const form = ref({
   dmKeywordBlacklist: '',
   enableDanmakuBurn: false,
   danmakuBurnStyle: 'default',
+  danmakuFontSize: 0,
+  danmakuFontColor: '',
+  danmakuScrollArea: 0.75,
+  danmakuDisplayArea: 0.8,
   enablePreTranscode: false,
+  transcodeVideoCodec: 'h264',
   transcodePreset: 'veryfast',
   transcodeCrf: 23,
   transcodeMaxWidth: 0,
@@ -342,6 +355,7 @@ const form = ref({
 const getDefaultForm = () => ({
   roomId: '',
   upload: true,
+  priority: 50,
   autoUpload: true,
   autoPublish: true,
   mergeBySession: true,
@@ -359,6 +373,7 @@ const getDefaultForm = () => ({
   tid: 21,
   copyright: 1,
   line: 'cs_bda2',
+  uploadSpeedLimitMbps: 0,
   fileOpTrigger: 3,
   fileOpAction: 1,
   fileOpScope: 1,
@@ -380,7 +395,12 @@ const getDefaultForm = () => ({
   dmKeywordBlacklist: '',
   enableDanmakuBurn: false,
   danmakuBurnStyle: 'default',
+  danmakuFontSize: 0,
+  danmakuFontColor: '',
+  danmakuScrollArea: 0.75,
+  danmakuDisplayArea: 0.8,
   enablePreTranscode: false,
+  transcodeVideoCodec: 'h264',
   transcodePreset: 'veryfast',
   transcodeCrf: 23,
   transcodeMaxWidth: 0,
@@ -484,6 +504,9 @@ const handleExport = () => {
 
 const doExport = async () => {
   try {
+    if (!exportOptions.value.users) {
+      exportOptions.value.includeSecrets = false
+    }
     const blob = await configAPI.export(exportOptions.value)
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')

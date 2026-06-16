@@ -46,7 +46,7 @@ RUN ARCH_NAME=$([ "$TARGETARCH" = "amd64" ] && echo "x64" || echo "arm64") && \
     fi
 
 # Stage 3: Build Backend with Embedded Frontend
-FROM golang:1.24-alpine AS backend-builder
+FROM golang:1.25-alpine AS backend-builder
 ARG TARGETARCH
 WORKDIR /app
 

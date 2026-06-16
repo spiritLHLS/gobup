@@ -2,11 +2,13 @@ package database
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
 	appconfig "github.com/gobup/server/internal/config"
 	"github.com/gobup/server/internal/models"
+	"github.com/gobup/server/internal/ratelimit"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -64,6 +66,7 @@ func InitDB(dbPath string) error {
 	// 为 RecordHistory 添加组合索引
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_history_room_time ON record_histories(room_id, end_time DESC)")
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_history_session_room ON record_histories(session_id, room_id)")
+	DB.Exec("CREATE INDEX IF NOT EXISTS idx_room_priority_upload ON record_rooms(upload, auto_upload, priority DESC)")
 
 	// 为 RecordHistoryPart 添加组合索引
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_part_history_time ON record_history_parts(history_id, start_time)")
@@ -108,23 +111,30 @@ func InitDB(dbPath string) error {
 	if err := DB.First(&config).Error; err != nil {
 		// 创建默认配置
 		config = models.SystemConfig{
-			AutoFileScan:       true,
-			EnableFileWatcher:  true,
-			FileScanInterval:   60,
-			FileScanMinAge:     12,
-			FileScanMinSize:    1048576, // 1MB
-			FileScanMaxAge:     720,     // 30天
-			WorkPath:           appconfig.AppConfig.WorkPath,
-			CustomScanPaths:    "", // 默认为空
-			EnableOrphanScan:   true,
-			OrphanScanInterval: 360,  // 6小时
-			AutoDataRepair:     true, // 默认开启数据修复
+			AutoFileScan:         true,
+			EnableFileWatcher:    true,
+			FileScanInterval:     60,
+			FileScanMinAge:       12,
+			FileScanMinSize:      1048576, // 1MB
+			FileScanMaxAge:       720,     // 30天
+			WorkPath:             appconfig.AppConfig.WorkPath,
+			CustomScanPaths:      "", // 默认为空
+			EnableOrphanScan:     true,
+			OrphanScanInterval:   360,  // 6小时
+			AutoDataRepair:       true, // 默认开启数据修复
+			UploadSpeedLimitMBps: 0,    // 默认不限制
+			DanmakuBurnStyle:     "default",
+			DanmakuFontSize:      0,
+			DanmakuScrollArea:    0.75,
+			DanmakuDisplayArea:   0.8,
 		}
 		DB.Create(&config)
 	} else if config.WorkPath == "" && appconfig.AppConfig.WorkPath != "" {
 		config.WorkPath = appconfig.AppConfig.WorkPath
 		DB.Save(&config)
 	}
+
+	ratelimit.SetGlobalRateLimit(config.UploadSpeedLimitMBps)
 
 	return nil
 }
@@ -152,7 +162,7 @@ func WithRetry(fn func() error, maxRetries int) error {
 		}
 
 		// 检查是否是数据库锁定错误
-		if err.Error() == "database is locked" {
+		if strings.Contains(strings.ToLower(err.Error()), "database is locked") {
 			// 等待一段时间后重试，使用指数退避
 			waitTime := time.Duration(50*(i+1)) * time.Millisecond
 			time.Sleep(waitTime)

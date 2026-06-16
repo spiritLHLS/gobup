@@ -150,7 +150,7 @@ func (s *FileWatcherService) run(ctx context.Context, done chan struct{}) {
 }
 
 func (s *FileWatcherService) handleEvent(watcher *fsnotify.Watcher, watchedDirs map[string]struct{}, scanSvc *FileScanService, event fsnotify.Event) bool {
-	if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) == 0 {
+	if !isFileWatcherRelevantOp(event.Op) {
 		return false
 	}
 
@@ -159,13 +159,27 @@ func (s *FileWatcherService) handleEvent(watcher *fsnotify.Watcher, watchedDirs 
 		return false
 	}
 
-	ext := strings.ToLower(filepath.Ext(event.Name))
-	if !scanSvc.isVideoFile(ext, DefaultScanConfig("").VideoExtensions) {
+	if !isFileWatcherVideoChangeEvent(scanSvc, event) {
 		return false
 	}
 
 	log.Printf("[FileWatcher] 检测到录制文件变化，准备延迟扫盘: %s", event.Name)
 	return true
+}
+
+func isFileWatcherRelevantOp(op fsnotify.Op) bool {
+	return op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) != 0
+}
+
+func isFileWatcherVideoChangeEvent(scanSvc *FileScanService, event fsnotify.Event) bool {
+	if !isFileWatcherRelevantOp(event.Op) {
+		return false
+	}
+	if scanSvc == nil {
+		scanSvc = NewFileScanService()
+	}
+	ext := strings.ToLower(filepath.Ext(event.Name))
+	return scanSvc.isVideoFile(ext, DefaultScanConfig("").VideoExtensions)
 }
 
 func (s *FileWatcherService) addWatchTree(watcher *fsnotify.Watcher, watchedDirs map[string]struct{}, root string) {

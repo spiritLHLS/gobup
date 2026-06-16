@@ -29,13 +29,26 @@
         <div class="help-text">选择用于上传视频的B站账号</div>
       </el-form-item>
 
+      <el-form-item label="任务优先级">
+        <el-input-number
+          v-model="localForm.priority"
+          :min="0"
+          :max="100"
+          :step="5"
+          controls-position="right"
+          style="width: 200px"
+        />
+        <div class="help-text">自动上传调度优先处理高优先级房间；默认 50</div>
+      </el-form-item>
+
       <el-form-item label="多账号策略">
         <el-select v-model="localForm.uploadUserStrategy" style="width: 100%">
           <el-option value="fixed" label="固定使用所选账号" />
           <el-option value="round_robin" label="轮询分配已登录账号" />
           <el-option value="least_queue" label="分配给队列最短账号" />
+          <el-option value="daily_quota" label="按每日剩余配额分配" />
         </el-select>
-        <div class="help-text">轮询/队列策略只影响上传分P；投稿仍使用房间选择的上传用户，避免投稿归属混乱</div>
+        <div class="help-text">多账号策略只影响上传分P；投稿仍使用房间选择的上传用户，避免投稿归属混乱</div>
       </el-form-item>
 
       <el-form-item label="定时上传窗口">
@@ -117,7 +130,7 @@
           placeholder="请输入视频标题模板"
         />
         <div class="help-text">
-          支持变量: ${uname} ${title} ${yyyy年MM月dd日HH点mm分} ${roomId} ${areaName}
+          支持变量: ${uname} ${title} ${sequence} ${yyyy年MM月dd日HH点mm分} ${roomId} ${areaName}
         </div>
       </el-form-item>
       
@@ -206,6 +219,13 @@
             circle
             :icon="RefreshIcon"
           />
+          <el-button
+            :disabled="!localForm.uploadUserId"
+            @click="openCreateSeasonDialog"
+            :icon="PlusIcon"
+          >
+            新建合集
+          </el-button>
         </div>
         <div class="help-text">
           投稿成功后自动将视频加入指定合集。需先选择上传用户才能加载合集列表。若所选合集的节 ID 有误可能导致加入失败，建议通过刷新按钮重新拉取
@@ -237,7 +257,7 @@
           placeholder="多P视频的分P标题"
         />
         <div class="help-text">
-          支持变量: ${index} ${MM月dd日HH点mm分} ${areaName} ${fileName}
+          支持变量: ${index} ${sequence} ${MM月dd日HH点mm分} ${areaName} ${fileName}
         </div>
       </el-form-item>
 
@@ -253,12 +273,30 @@
         <div class="help-text">开启后在设定的公屏区间内停止录制而不游荣主播（需录制端支持）</div>
       </el-form-item>
     </el-form>
+
+    <el-dialog v-model="createSeasonVisible" title="新建投稿合集" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="合集标题" required>
+          <el-input v-model="seasonForm.title" maxlength="80" show-word-limit />
+        </el-form-item>
+        <el-form-item label="合集简介">
+          <el-input v-model="seasonForm.desc" type="textarea" :rows="3" maxlength="200" show-word-limit />
+        </el-form-item>
+        <el-form-item label="封面地址">
+          <el-input v-model="seasonForm.cover" placeholder="可选，建议使用已上传的封面 URL" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createSeasonVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creatingSeason" @click="createSeason">创建并选择</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Refresh as RefreshIcon } from '@element-plus/icons-vue'
+import { Plus as PlusIcon, Refresh as RefreshIcon } from '@element-plus/icons-vue'
 import { roomAPI } from '@/api/index.js'
 import { ElMessage } from 'element-plus'
 
@@ -282,6 +320,13 @@ const localForm = computed({
 
 const seasons = ref([])
 const loadingSeasons = ref(false)
+const createSeasonVisible = ref(false)
+const creatingSeason = ref(false)
+const seasonForm = ref({
+  title: '',
+  desc: '',
+  cover: ''
+})
 
 const fetchSeasons = async () => {
   const userId = localForm.value.uploadUserId
@@ -295,6 +340,47 @@ const fetchSeasons = async () => {
     seasons.value = []
   } finally {
     loadingSeasons.value = false
+  }
+}
+
+const openCreateSeasonDialog = () => {
+  const titleBase = localForm.value.uname || localForm.value.roomId || '直播回放'
+  seasonForm.value = {
+    title: `${titleBase} 直播回放`,
+    desc: '',
+    cover: localForm.value.coverUrl || ''
+  }
+  createSeasonVisible.value = true
+}
+
+const createSeason = async () => {
+  const title = seasonForm.value.title?.trim()
+  if (!title) {
+    ElMessage.warning('请输入合集标题')
+    return
+  }
+  creatingSeason.value = true
+  try {
+    const season = await roomAPI.createSeason({
+      userId: localForm.value.uploadUserId,
+      title,
+      desc: seasonForm.value.desc || '',
+      cover: seasonForm.value.cover || ''
+    })
+    if (season?.type === 'error' || season?.ok === false) {
+      throw new Error(season.msg || '创建合集失败')
+    }
+    await fetchSeasons()
+    const selectedId = season?.sectionId > 0 ? season.sectionId : season?.id
+    if (selectedId) {
+      localForm.value.seasonId = selectedId
+    }
+    createSeasonVisible.value = false
+    ElMessage.success('合集已创建')
+  } catch (e) {
+    ElMessage.error('创建合集失败: ' + (e?.message || e))
+  } finally {
+    creatingSeason.value = false
   }
 }
 

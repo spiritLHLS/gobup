@@ -92,7 +92,7 @@ func (s *DanmakuService) getValidUsers() ([]models.BiliBiliUser, error) {
 	db := database.GetDB()
 
 	var users []models.BiliBiliUser
-	if err := db.Where("login = ?", true).Find(&users).Error; err != nil {
+	if err := db.Where("login = ? AND enabled = ?", true, true).Find(&users).Error; err != nil {
 		return nil, fmt.Errorf("查询用户失败: %w", err)
 	}
 

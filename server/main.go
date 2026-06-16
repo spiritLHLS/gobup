@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/gobup/server/docs"
 	"github.com/gobup/server/internal/config"
 	"github.com/gobup/server/internal/controllers"
 	"github.com/gobup/server/internal/database"
@@ -16,6 +17,7 @@ import (
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/routes"
 	"github.com/gobup/server/internal/scheduler"
+	"github.com/gobup/server/internal/services"
 	"github.com/gobup/server/internal/upload"
 )
 
@@ -42,6 +44,7 @@ func initAdminUser() {
 			UID:        -1, // 使用特殊UID标识管理员账号
 			Uname:      config.AppConfig.InitUsername,
 			Login:      true,
+			Enabled:    true,
 			LoginTime:  &now,
 			ExpireTime: &expireTime,
 			// 实际的认证会通过middleware实现
@@ -57,6 +60,11 @@ func initAdminUser() {
 	}
 }
 
+// @title GoBup API
+// @version 1.0
+// @description GoBup backend API for recording import, upload queues, publishing, danmaku processing, and system operations.
+// @BasePath /api
+// @securityDefinitions.basic BasicAuth
 func main() {
 	// 命令行参数
 	port := flag.Int("port", 12380, "HTTP服务端口")
@@ -79,6 +87,7 @@ func main() {
 
 	// 设置日志拦截器，将日志推送到WebSocket
 	logging.SetupLogInterceptor()
+	services.LogVideoProcessingAvailability()
 
 	// 创建必要的目录
 	if config.AppConfig.WorkPath != "" {

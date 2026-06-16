@@ -14,6 +14,12 @@
       @refresh="loadQueueStatus"
     />
 
+    <TaskManagerCard
+      :status="taskStatus"
+      :loading="taskLoading"
+      @refresh="loadTaskStatus"
+    />
+
     <!-- 功能开关 -->
     <el-card class="config-card">
       <template #header>
@@ -112,6 +118,20 @@
                 size="large"
               />
               <span class="help-text">录制文件存放的根目录（Docker默认/rec，裸机默认./data/recordings）</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="全局上传限速">
+            <div class="number-input-wrapper">
+              <el-input-number
+                v-model="config.uploadSpeedLimitMbps"
+                :min="0"
+                :max="1000"
+                :step="0.5"
+                :precision="1"
+                size="large"
+              />
+              <span class="help-text">MB/s，0 表示不限制；房间级限速会覆盖全局限速</span>
             </div>
           </el-form-item>
 
@@ -252,6 +272,10 @@
 
         <el-divider />
 
+        <DanmakuBurnGlobalConfig :config="config" />
+
+        <el-divider />
+
         <div class="form-section">
           <div class="section-title">弹幕代理配置（全局）</div>
           
@@ -333,6 +357,9 @@ import FileScanDialog from '../components/filescan/FileScanDialog.vue'
 import CleanFilesDialog from '../components/filescan/CleanFilesDialog.vue'
 import DashboardStats from '../components/dashboard/DashboardStats.vue'
 import UploadQueueCard from '../components/dashboard/UploadQueueCard.vue'
+import TaskManagerCard from '../components/dashboard/TaskManagerCard.vue'
+import DanmakuBurnGlobalConfig from '../components/dashboard/DanmakuBurnGlobalConfig.vue'
+import { createDefaultDashboardConfig, normalizeDashboardConfig } from '../utils/dashboardConfig'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -344,21 +371,7 @@ const cleanupPreviewing = ref(false)
 const cleaningDatabase = ref(false)
 const fileScanDialogRef = ref(null)
 const cleanFilesDialogRef = ref(null)
-const config = ref({
-  autoFileScan: true,
-  enableFileWatcher: true,
-  fileScanInterval: 60,
-  fileScanMinAge: 12,
-  fileScanMinSize: 1048576,
-  fileScanMaxAge: 720,
-  workPath: '',
-  customScanPaths: '',
-  autoDataRepair: false,
-  enableOrphanScan: true,
-  orphanScanInterval: 360,
-  enableDanmakuProxy: false,
-  danmakuProxyList: ''
-})
+const config = ref(createDefaultDashboardConfig())
 
 const stats = ref({
   totalRecordings: 0,
@@ -367,6 +380,7 @@ const stats = ref({
   failedCount: 0
 })
 const queueLoading = ref(false)
+const taskLoading = ref(false)
 const queueStatus = ref({
   counts: { pending: 0, running: 0, completed: 0 },
   pending: [],
@@ -374,6 +388,7 @@ const queueStatus = ref({
   completed: [],
   queues: {}
 })
+const taskStatus = ref({})
 let statsTimer = null
 let queueTimer = null
 
@@ -418,7 +433,7 @@ const loadConfig = async () => {
   try {
     const response = await api.get('/config/system')
     // 后端直接返回 config 对象
-    config.value = response
+    config.value = normalizeDashboardConfig(config.value, response)
   } catch (error) {
     console.error('加载配置失败:', error)
     ElMessage.error('加载配置失败: ' + (error.message || '网络错误'))
@@ -446,6 +461,17 @@ const loadQueueStatus = async () => {
     console.error('加载队列状态失败:', error)
   } finally {
     queueLoading.value = false
+  }
+}
+
+const loadTaskStatus = async () => {
+  taskLoading.value = true
+  try {
+    taskStatus.value = await queueAPI.taskStatus()
+  } catch (error) {
+    console.error('加载任务状态失败:', error)
+  } finally {
+    taskLoading.value = false
   }
 }
 
@@ -480,7 +506,7 @@ const saveConfig = async () => {
       ElMessage.success('配置保存成功')
       // 使用后端返回的最新配置更新前端
       if (response.data) {
-        config.value = response.data
+        config.value = normalizeDashboardConfig(config.value, response.data)
       }
     } else {
       ElMessage.error(response.msg || '保存失败')
@@ -777,10 +803,14 @@ onMounted(() => {
   loadConfig()
   loadStats()
   loadQueueStatus()
+  loadTaskStatus()
   
   // 每30秒刷新统计数据
   statsTimer = setInterval(loadStats, 30000)
-  queueTimer = setInterval(loadQueueStatus, 5000)
+  queueTimer = setInterval(() => {
+    loadQueueStatus()
+    loadTaskStatus()
+  }, 5000)
 })
 
 onUnmounted(() => {

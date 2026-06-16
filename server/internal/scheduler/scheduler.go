@@ -61,6 +61,10 @@ func InitScheduler(svc *upload.Service) {
 		if err := moverSvc.BackfillFileOps(); err != nil {
 			log.Printf("[启动恢复] 文件操作回填失败: %v", err)
 		}
+		log.Println("[启动恢复] 执行账号Cookie可用性巡检")
+		if err := checkAllUserCookies(); err != nil {
+			log.Printf("[启动恢复] Cookie巡检失败: %v", err)
+		}
 	}()
 
 	// 视频同步任务 - 每10分钟执行一次
@@ -185,6 +189,14 @@ func InitScheduler(svc *upload.Service) {
 		}
 	})
 
+	// Cookie可用性巡检 - 每6小时执行一次，独立于RefreshToken续期
+	cronJob.AddFunc("0 */6 * * *", func() {
+		log.Println("执行定时任务: Cookie可用性巡检")
+		if err := checkAllUserCookies(); err != nil {
+			log.Printf("Cookie巡检任务失败: %v", err)
+		}
+	})
+
 	// 自动上传任务 - 每10分钟执行一次，检查并处理待上传的分P
 	cronJob.AddFunc("*/10 * * * *", func() {
 		log.Println("执行定时任务: 自动上传检查")
@@ -216,6 +228,67 @@ func InitScheduler(svc *upload.Service) {
 	log.Println("调度器已启动")
 }
 
+// checkAllUserCookies 定期验证账号Cookie是否仍然可用。
+func checkAllUserCookies() error {
+	db := database.GetDB()
+	var users []models.BiliBiliUser
+	if err := db.Where("enabled = ? AND uid != ?", true, -1).Find(&users).Error; err != nil {
+		return err
+	}
+
+	wxPusher := services.NewWxPusherService()
+	now := time.Now()
+	for _, user := range users {
+		if !user.Login || user.Cookies == "" {
+			continue
+		}
+
+		valid, err := bili.ValidateCookie(user.Cookies)
+		user.LastCheckTime = &now
+		if err != nil {
+			user.LastCheckError = err.Error()
+			if saveErr := db.Save(&user).Error; saveErr != nil {
+				log.Printf("[Cookie巡检] 保存账号巡检错误失败: user_id=%d err=%v", user.ID, saveErr)
+			}
+			log.Printf("[Cookie巡检] 验证失败但未判定失效: user=%s(%d), err=%v", user.Uname, user.UID, err)
+			continue
+		}
+		if valid {
+			if user.LastCheckError != "" {
+				user.LastCheckError = ""
+				_ = db.Save(&user).Error
+			} else {
+				_ = db.Model(&user).Update("last_check_time", now).Error
+			}
+			continue
+		}
+
+		user.Login = false
+		user.LastCheckError = "Cookie已失效"
+		if saveErr := db.Save(&user).Error; saveErr != nil {
+			log.Printf("[Cookie巡检] 保存账号失效状态失败: user_id=%d err=%v", user.ID, saveErr)
+		}
+		notifyCookieInvalidRooms(wxPusher, &user, "Cookie已失效，请重新登录")
+	}
+
+	return nil
+}
+
+func notifyCookieInvalidRooms(wxPusher *services.WxPusherService, user *models.BiliBiliUser, reason string) {
+	if wxPusher == nil || user == nil {
+		return
+	}
+	db := database.GetDB()
+	var rooms []models.RecordRoom
+	if err := db.Where("upload_user_id = ? AND wxuid != ?", user.ID, "").Find(&rooms).Error; err != nil {
+		log.Printf("[Cookie巡检] 查询账号关联房间失败: user_id=%d err=%v", user.ID, err)
+		return
+	}
+	for _, room := range rooms {
+		wxPusher.NotifyCookieInvalid(user.ID, room.Wxuid, user.Uname, room.RoomID, reason)
+	}
+}
+
 // isFeatureEnabled 检查功能是否启用
 func isFeatureEnabled(feature string) bool {
 	db := database.GetDB()
@@ -244,7 +317,7 @@ func refreshAllUserTokens() error {
 	var users []models.BiliBiliUser
 
 	// 查询所有已登录的用户（排除管理员账号 UID=-1）
-	if err := db.Where("login = ? AND uid != ?", true, -1).Find(&users).Error; err != nil {
+	if err := db.Where("login = ? AND enabled = ? AND uid != ?", true, true, -1).Find(&users).Error; err != nil {
 		return err
 	}
 

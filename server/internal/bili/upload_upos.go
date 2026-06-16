@@ -14,10 +14,14 @@ import (
 // ProgressCallback 进度回调函数
 type ProgressCallback func(chunkDone, chunkTotal int)
 
+// RetryCallback 重试等待回调函数
+type RetryCallback func(attempt, maxAttempts int, delay time.Duration, chunkDone, chunkTotal int)
+
 // UposUploader UPOS上传器
 type UposUploader struct {
 	client           *BiliClient
 	progressCallback ProgressCallback
+	retryCallback    RetryCallback
 }
 
 // NewUposUploader 创建UPOS上传器
@@ -28,6 +32,11 @@ func NewUposUploader(client *BiliClient) *UposUploader {
 // SetProgressCallback 设置进度回调
 func (u *UposUploader) SetProgressCallback(callback ProgressCallback) {
 	u.progressCallback = callback
+}
+
+// SetRetryCallback 设置重试等待回调
+func (u *UposUploader) SetRetryCallback(callback RetryCallback) {
+	u.retryCallback = callback
 }
 
 // Upload 上传文件
@@ -86,6 +95,9 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 			// 重试前等待，避免立即重试
 			retryDelay := time.Duration(uploadRetry*5) * time.Second
 			log.Printf("[UPOS] 检测到分片上传失败，等待%v后开始断点续传 (重试 %d/%d)，从分片 %d/%d 继续", retryDelay, uploadRetry+1, maxUploadRetries, chunkDone+1, totalParts)
+			if u.retryCallback != nil {
+				u.retryCallback(uploadRetry+1, maxUploadRetries, retryDelay, chunkDone, int(totalParts))
+			}
 			time.Sleep(retryDelay)
 		}
 
@@ -197,15 +209,16 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 
 		if !resp.IsSuccessState() {
 			body := resp.String()
-			log.Printf("[UPOS] 预上传HTTP错误: status=%d, body=%s", resp.GetStatusCode(), body)
+			statusCode := resp.GetStatusCode()
+			log.Printf("[UPOS] 预上传HTTP错误: status=%d, body=%s", statusCode, body)
 
 			// 检测是否为B站限流错误
-			if resp.GetStatusCode() == 406 || contains(body, "601") || contains(body, "上传视频过快") {
+			if statusCode == 429 || statusCode == 406 || contains(body, "601") || contains(body, "上传视频过快") {
 				isRateLimited = true
 				log.Printf("[UPOS] 检测到B站限流，将使用更长的重试间隔")
 			}
 
-			return fmt.Errorf("HTTP错误: status=%d", resp.GetStatusCode())
+			return wrapRetryAfterError(fmt.Errorf("HTTP错误: status=%d", statusCode), resp.GetHeader("Retry-After"), time.Now())
 		}
 
 		return nil
@@ -229,8 +242,9 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 			}
 
 			if !resp.IsSuccessState() {
-				log.Printf("[UPOS] 预上传仍然被限流: status=%d", resp.GetStatusCode())
-				return fmt.Errorf("HTTP错误: status=%d", resp.GetStatusCode())
+				statusCode := resp.GetStatusCode()
+				log.Printf("[UPOS] 预上传仍然被限流: status=%d", statusCode)
+				return wrapRetryAfterError(fmt.Errorf("HTTP错误: status=%d", statusCode), resp.GetHeader("Retry-After"), time.Now())
 			}
 
 			return nil
@@ -291,8 +305,9 @@ func (u *UposUploader) lineUpload(pre *PreUploadResp) (*LineUploadResp, error) {
 		}
 
 		if !resp.IsSuccessState() {
-			log.Printf("[UPOS] 线路上传HTTP错误: status=%d, body=%s", resp.GetStatusCode(), resp.String())
-			return fmt.Errorf("HTTP错误: status=%d", resp.GetStatusCode())
+			statusCode := resp.GetStatusCode()
+			log.Printf("[UPOS] 线路上传HTTP错误: status=%d, body=%s", statusCode, resp.String())
+			return wrapRetryAfterError(fmt.Errorf("HTTP错误: status=%d", statusCode), resp.GetHeader("Retry-After"), time.Now())
 		}
 
 		return nil
@@ -343,15 +358,26 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 	limiter := GetAPILimiter()
 
 	var lastErr error
+	var retryAfterDelay time.Duration
 	for attempt := 0; attempt <= DefaultRetryConfig.MaxRetries; attempt++ {
 		if attempt > 0 {
 			// 网络错误重试前等待
-			delay := time.Duration(float64(DefaultRetryConfig.InitialDelay) * float64(attempt))
-			if delay > DefaultRetryConfig.MaxDelay {
+			delay := retryAfterDelay
+			if delay <= 0 {
+				delay = time.Duration(float64(DefaultRetryConfig.InitialDelay) * float64(attempt))
+				if delay > DefaultRetryConfig.MaxDelay {
+					delay = DefaultRetryConfig.MaxDelay
+				}
+			} else if delay > DefaultRetryConfig.MaxDelay {
 				delay = DefaultRetryConfig.MaxDelay
 			}
-			log.Printf("[UPOS] 分片%d上传失败，等待%v后重试 (%d/%d): %v", partNum, delay, attempt, DefaultRetryConfig.MaxRetries, lastErr)
-			time.Sleep(delay)
+			retryAfterDelay = 0
+			wait := jitterDelay(delay)
+			log.Printf("[UPOS] 分片%d上传失败，等待%v后重试 (%d/%d): %v", partNum, wait, attempt, DefaultRetryConfig.MaxRetries, lastErr)
+			if u.retryCallback != nil {
+				u.retryCallback(attempt, DefaultRetryConfig.MaxRetries, wait, partNum-1, totalParts)
+			}
+			time.Sleep(wait)
 		}
 
 		// 等待限流器允许
@@ -361,7 +387,7 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 
 		// 应用全局上传限速
 		chunkReader := bytes.NewReader(chunk)
-		rateLimitedReader := ratelimit.NewRateLimitedReader(chunkReader, ratelimit.GetGlobalLimiter())
+		rateLimitedReader := ratelimit.NewRateLimitedReader(chunkReader, u.uploadRateLimiter())
 
 		resp, err := u.client.ReqClient.R().
 			SetHeader("X-Upos-Auth", pre.Auth).
@@ -385,6 +411,14 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 		statusCode := resp.GetStatusCode()
 		if !resp.IsSuccessState() {
 			log.Printf("[UPOS] 上传分片%d HTTP错误: status=%d, body=%s", partNum, statusCode, resp.String())
+			if statusCode == 429 {
+				if delay, ok := parseRetryAfterDelay(resp.GetHeader("Retry-After"), time.Now()); ok {
+					retryAfterDelay = delay
+					log.Printf("[UPOS] 分片%d收到Retry-After=%v，下一次重试优先按服务端提示等待", partNum, delay)
+				}
+				lastErr = fmt.Errorf("HTTP 429: 上传分片失败 - %s", resp.String())
+				continue
+			}
 			// 明确返回HTTP状态码，方便上层判断
 			if statusCode == 406 {
 				return fmt.Errorf("HTTP 406: 速率限制 - %s", resp.String())
@@ -406,6 +440,13 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 		return lastErr
 	}
 	return fmt.Errorf("上传分片%d失败: 未知错误", partNum)
+}
+
+func (u *UposUploader) uploadRateLimiter() *ratelimit.RateLimiter {
+	if u != nil && u.client != nil && u.client.UploadRateLimiter != nil {
+		return u.client.UploadRateLimiter
+	}
+	return ratelimit.GetGlobalLimiter()
 }
 
 func (u *UposUploader) completeUpload(pre *PreUploadResp, line *LineUploadResp, totalParts int) error {
@@ -460,7 +501,8 @@ func (u *UposUploader) completeUpload(pre *PreUploadResp, line *LineUploadResp, 
 		}
 
 		if !resp.IsSuccessState() {
-			return fmt.Errorf("完成上传失败: %s", resp.String())
+			statusCode := resp.GetStatusCode()
+			return wrapRetryAfterError(fmt.Errorf("完成上传失败: status=%d, body=%s", statusCode, resp.String()), resp.GetHeader("Retry-After"), time.Now())
 		}
 
 		return nil

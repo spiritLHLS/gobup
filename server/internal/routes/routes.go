@@ -6,6 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gobup/server/internal/controllers"
 	"github.com/gobup/server/internal/middleware"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 func SetupRoutes(router *gin.Engine) {
@@ -16,6 +18,8 @@ func SetupRoutes(router *gin.Engine) {
 
 	api := router.Group("/api")
 	{
+		api.GET("/health", controllers.Health)
+
 		auth := api.Group("")
 		auth.Use(middleware.BasicAuth())
 		{
@@ -31,6 +35,7 @@ func SetupRoutes(router *gin.Engine) {
 				rooms.GET("/testLines", controllers.TestAllLines)
 				rooms.GET("/testSpeed", controllers.TestLineSpeed)
 				rooms.GET("/seasons", controllers.GetSeasons)
+				rooms.POST("/seasons", controllers.CreateSeason)
 				// 模板验证：同时支持GET (verification) 和 POST (verifyTemplate)
 				rooms.GET("/verification", controllers.VerifyTemplate)
 				rooms.POST("/verifyTemplate", controllers.VerifyTemplate)
@@ -47,6 +52,7 @@ func SetupRoutes(router *gin.Engine) {
 				users.GET("/loginCancel", controllers.LoginCancel)
 				users.GET("/delete/:id", controllers.DeleteBiliUser)
 				users.POST("/update", controllers.UpdateBiliUser)
+				users.POST("/enabled/:id", controllers.SetBiliUserEnabled)
 			}
 
 			histories := auth.Group("/history")
@@ -126,10 +132,29 @@ func SetupRoutes(router *gin.Engine) {
 			// 队列状态
 			queue := auth.Group("/queue")
 			{
+				queue.GET("/tasks/status", controllers.GetTaskManagerStatus)
 				queue.GET("/upload/status", controllers.GetUploadQueueStatus)
+				queue.POST("/upload/part/:id/pause", controllers.PauseUploadPart)
+				queue.POST("/upload/part/:id/resume", controllers.ResumeUploadPart)
+				queue.POST("/upload/part/:id/cancel", controllers.CancelUploadPart)
+				queue.POST("/upload/part/:id/retry", controllers.RetryUploadPart)
+				queue.POST("/upload/pauseAll", controllers.PauseAllPendingUploads)
+				queue.POST("/upload/resumeAll", controllers.ResumeAllPausedUploads)
+				queue.POST("/upload/cancelAll", controllers.CancelAllPendingUploads)
 				queue.GET("/danmaku/status", controllers.GetDanmakuQueueStatus)
 				queue.GET("/parse/status", controllers.GetParseQueueStatus)
 			}
+
+			// 进度查询API
+			progress := auth.Group("/progress")
+			{
+				progress.GET("/part/:partId", controllers.GetPartProgress)
+				progress.GET("/history/:historyId", controllers.GetHistoryProgress)
+				progress.GET("/danmaku/:historyId", controllers.GetDanmakuProgress)
+				progress.GET("/ws-token", controllers.IssueWebSocketToken)
+			}
+
+			auth.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 			// 配置导入导出
 			config := auth.Group("/config")
@@ -179,13 +204,5 @@ func SetupRoutes(router *gin.Engine) {
 	{
 		ws.GET("/log", controllers.WSLog)
 		ws.GET("/progress", controllers.WSProgress)
-	}
-
-	// 进度查询API
-	progress := api.Group("/progress")
-	{
-		progress.GET("/part/:partId", controllers.GetPartProgress)
-		progress.GET("/history/:historyId", controllers.GetHistoryProgress)
-		progress.GET("/danmaku/:historyId", controllers.GetDanmakuProgress)
 	}
 }

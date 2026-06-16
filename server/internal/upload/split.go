@@ -138,6 +138,7 @@ func (s *Service) splitLargeFile(originalPart *models.RecordHistoryPart, history
 	originalPart.Upload = false
 	originalPart.FileDelete = true
 	originalPart.UploadErrorMsg = fmt.Sprintf("文件过大(分片数%d>10000)，已自动分割成%d个子分P", totalChunks, numParts)
+	originalPart.UploadErrorType = UploadErrorTypeFile
 	db.Save(originalPart)
 
 	log.Printf("[自动分P] 文件分割完成，已创建 %d 个新Part，原Part(id=%d)标记为已处理", len(newParts), originalPart.ID)

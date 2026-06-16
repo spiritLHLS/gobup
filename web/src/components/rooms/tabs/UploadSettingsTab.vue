@@ -13,15 +13,29 @@
           @test-deep-speed="$emit('test-deep-speed')"
         />
       </el-form-item>
+
+      <el-form-item label="房间限速">
+        <el-input-number
+          v-model="localForm.uploadSpeedLimitMbps"
+          :min="0"
+          :max="1000"
+          :step="0.5"
+          :precision="1"
+          controls-position="right"
+          style="width: 200px"
+        />
+        <span style="margin-left: 10px">MB/s（0=使用全局/不限制）</span>
+        <div class="help-text">仅影响该房间的上传任务，不会污染其他房间或账号队列</div>
+      </el-form-item>
       
       <el-divider content-position="left">封面设置</el-divider>
       
       <el-form-item label="封面配置">
         <el-radio-group v-model="localForm.coverType">
-          <el-radio label="default">不使用封面</el-radio>
-          <el-radio label="live">使用直播首帧</el-radio>
-          <el-radio label="frame">截取视频帧</el-radio>
-          <el-radio label="diy">自定义封面</el-radio>
+          <el-radio value="default">不使用封面</el-radio>
+          <el-radio value="live">使用直播首帧</el-radio>
+          <el-radio value="frame">截取视频帧</el-radio>
+          <el-radio value="diy">自定义封面</el-radio>
         </el-radio-group>
       </el-form-item>
 

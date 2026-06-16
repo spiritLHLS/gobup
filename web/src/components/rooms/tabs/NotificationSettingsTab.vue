@@ -22,19 +22,19 @@
       
       <el-form-item label="推送消息类型">
         <el-checkbox-group v-model="pushTags">
-          <el-checkbox label="开播">
+          <el-checkbox value="开播">
             <div class="checkbox-content">
               <span class="checkbox-label">开播通知</span>
               <div class="checkbox-desc">直播间开播时推送</div>
             </div>
           </el-checkbox>
-          <el-checkbox label="上传">
+          <el-checkbox value="上传">
             <div class="checkbox-content">
               <span class="checkbox-label">上传通知</span>
               <div class="checkbox-desc">开始上传视频时推送</div>
             </div>
           </el-checkbox>
-          <el-checkbox label="投稿">
+          <el-checkbox value="投稿">
             <div class="checkbox-content">
               <span class="checkbox-label">投稿通知</span>
               <div class="checkbox-desc">视频投稿成功时推送</div>

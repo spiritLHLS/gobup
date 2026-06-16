@@ -176,7 +176,9 @@ func CleanSelectedFiles(c *gin.Context) {
 
 	// 从请求体解析文件路径列表
 	var req struct {
-		FilePaths []string `json:"filePaths" binding:"required"`
+		FilePaths          []string `json:"filePaths" binding:"required"`
+		ConfirmDeleteFiles bool     `json:"confirmDeleteFiles"`
+		ConfirmText        string   `json:"confirmText"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -192,6 +194,13 @@ func CleanSelectedFiles(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"type": "error",
 			"msg":  "没有选择要删除的文件",
+		})
+		return
+	}
+	if !req.ConfirmDeleteFiles || req.ConfirmText != "DELETE_FILES" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"type": "error",
+			"msg":  "删除文件需要二次确认",
 		})
 		return
 	}
@@ -225,6 +234,18 @@ func CleanSelectedFiles(c *gin.Context) {
 // CleanCompletedFiles 清理已完成历史记录的xml和jpg文件（保留旧接口）
 func CleanCompletedFiles(c *gin.Context) {
 	log.Printf("[FileScan] 收到手动清理已完成文件请求")
+	var req struct {
+		ConfirmDeleteFiles bool   `json:"confirmDeleteFiles"`
+		ConfirmText        string `json:"confirmText"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if !req.ConfirmDeleteFiles || req.ConfirmText != "DELETE_FILES" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"type": "error",
+			"msg":  "删除文件需要二次确认",
+		})
+		return
+	}
 
 	// 执行清理
 	scanService := services.NewFileScanService()

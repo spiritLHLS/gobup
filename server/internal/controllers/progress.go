@@ -24,7 +24,16 @@ type HistoryProgressResponse struct {
 	Items          []*upload.Progress `json:"items"`
 }
 
-// GetPartProgress 获取分P上传进度
+// GetPartProgress 获取分P上传进度。
+//
+// @Summary Get part upload progress
+// @Description Returns current upload/transcoding progress for one part.
+// @Tags progress
+// @Security BasicAuth
+// @Produce json
+// @Param partId path int true "Part ID"
+// @Success 200 {object} map[string]interface{}
+// @Router /progress/part/{partId} [get]
 func GetPartProgress(c *gin.Context) {
 	partIDStr := c.Param("partId")
 	partID, err := strconv.ParseInt(partIDStr, 10, 64)
@@ -47,7 +56,16 @@ func GetPartProgress(c *gin.Context) {
 	})
 }
 
-// GetHistoryProgress 获取历史记录所有分P进度
+// GetHistoryProgress 获取历史记录所有分P进度。
+//
+// @Summary Get history upload progress
+// @Description Returns active part progress and an aggregate percentage for one history.
+// @Tags progress
+// @Security BasicAuth
+// @Produce json
+// @Param historyId path int true "History ID"
+// @Success 200 {object} HistoryProgressResponse
+// @Router /progress/history/{historyId} [get]
 func GetHistoryProgress(c *gin.Context) {
 	historyIDStr := c.Param("historyId")
 	historyID, err := strconv.ParseInt(historyIDStr, 10, 64)

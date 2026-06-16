@@ -251,6 +251,11 @@ func ResetHistoryStatus(c *gin.Context) {
 		history.Message = ""
 		history.VideoState = -1
 		history.VideoStateDesc = ""
+		history.PublishErrorType = ""
+		history.PublishCooldownAt = nil
+		history.PublishRetryCount = 0
+		history.GuideCommentRPID = 0
+		history.GuideCommentPinned = false
 		resetItems = append(resetItems, "投稿状态")
 	}
 
@@ -286,6 +291,7 @@ func ResetHistoryStatus(c *gin.Context) {
 			"xcode_state":        0,
 			"upload_retry_count": 0,  // 清空重试次数
 			"upload_error_msg":   "", // 清空错误信息
+			"upload_error_type":  "",
 			"upload_line":        "", // 清空上传线路
 		}
 		if options.Files {
@@ -313,6 +319,15 @@ func ResetHistoryStatus(c *gin.Context) {
 // DeleteHistoryWithFiles 删除记录和文件
 func DeleteHistoryWithFiles(c *gin.Context) {
 	historyID, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	var req struct {
+		ConfirmDeleteFiles bool   `json:"confirmDeleteFiles"`
+		ConfirmText        string `json:"confirmText"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if !req.ConfirmDeleteFiles || req.ConfirmText != "DELETE_FILES" {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "删除文件需要二次确认"})
+		return
+	}
 
 	db := database.GetDB()
 

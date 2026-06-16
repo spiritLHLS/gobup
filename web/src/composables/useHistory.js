@@ -2,6 +2,9 @@ import { ref, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import axios from 'axios'
 
+const ACTIVE_UPLOAD_STATES = new Set(['TRANSCODING', 'PROCESSING', 'UPLOADING', 'RETRY_WAIT'])
+const MAX_PROGRESS_RECONNECT_DELAY_MS = 30000
+
 export function useHistoryProgress() {
   const uploadProgress = ref(null)
   const progressTimer = ref(null)
@@ -9,6 +12,10 @@ export function useHistoryProgress() {
   const historyProgressMap = ref({})
   const historyProgressTimer = ref(null)
   const progressSocket = ref(null)
+  const progressSocketConnecting = ref(false)
+  const progressReconnectTimer = ref(null)
+  const progressReconnectAttempt = ref(0)
+  const progressSocketStopped = ref(false)
   const danmakuProgressMap = ref({})
   const danmakuProgressTimer = ref(null)
 
@@ -109,12 +116,41 @@ export function useHistoryProgress() {
     stopProgressWebSocket()
   }
 
-  const startProgressWebSocket = () => {
-    if (progressSocket.value || typeof window === 'undefined') return
+  const startProgressWebSocket = async () => {
+    if (typeof window === 'undefined') return
+    if (
+      progressSocketConnecting.value ||
+      progressSocket.value &&
+      [WebSocket.CONNECTING, WebSocket.OPEN].includes(progressSocket.value.readyState)
+    ) {
+      return
+    }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/progress`)
+    progressSocketStopped.value = false
+    clearProgressReconnectTimer()
+
+    progressSocketConnecting.value = true
+    let socketURL
+    try {
+      socketURL = await createProgressWebSocketURL()
+    } catch (error) {
+      console.error('获取上传进度推送凭证失败:', error)
+      progressSocketConnecting.value = false
+      scheduleProgressReconnect()
+      return
+    }
+    if (progressSocketStopped.value) {
+      progressSocketConnecting.value = false
+      return
+    }
+
+    const socket = new WebSocket(socketURL)
     progressSocket.value = socket
+    progressSocketConnecting.value = false
+
+    socket.onopen = () => {
+      progressReconnectAttempt.value = 0
+    }
 
     socket.onmessage = (event) => {
       try {
@@ -127,7 +163,11 @@ export function useHistoryProgress() {
     }
 
     socket.onclose = () => {
-      progressSocket.value = null
+      if (progressSocket.value === socket) {
+        progressSocket.value = null
+      }
+      progressSocketConnecting.value = false
+      scheduleProgressReconnect()
     }
 
     socket.onerror = () => {
@@ -136,10 +176,43 @@ export function useHistoryProgress() {
   }
 
   const stopProgressWebSocket = () => {
+    progressSocketStopped.value = true
+    progressSocketConnecting.value = false
+    clearProgressReconnectTimer()
     if (progressSocket.value) {
       progressSocket.value.close()
       progressSocket.value = null
     }
+  }
+
+  const createProgressWebSocketURL = async () => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const url = new URL(`${protocol}//${window.location.host}/ws/progress`)
+    const response = await axios.get('/api/progress/ws-token')
+    if (response.data?.token) {
+      url.searchParams.set('token', response.data.token)
+    }
+    return url.toString()
+  }
+
+  const clearProgressReconnectTimer = () => {
+    if (progressReconnectTimer.value) {
+      clearTimeout(progressReconnectTimer.value)
+      progressReconnectTimer.value = null
+    }
+  }
+
+  const scheduleProgressReconnect = () => {
+    if (progressSocketStopped.value || typeof window === 'undefined') return
+    if (progressReconnectTimer.value) return
+
+    const attempt = progressReconnectAttempt.value
+    const delay = Math.min(MAX_PROGRESS_RECONNECT_DELAY_MS, 1000 * 2 ** Math.min(attempt, 5))
+    progressReconnectAttempt.value = attempt + 1
+    progressReconnectTimer.value = setTimeout(() => {
+      progressReconnectTimer.value = null
+      startProgressWebSocket()
+    }, delay)
   }
 
   const updateHistoryProgressFromItems = (items) => {
@@ -155,7 +228,7 @@ export function useHistoryProgress() {
         }
       }
       grouped[item.historyId].items.push(item)
-      if (item.state === 'UPLOADING' || item.state === 'RETRY_WAIT') {
+      if (ACTIVE_UPLOAD_STATES.has(item.state)) {
         grouped[item.historyId].activeCount += 1
         grouped[item.historyId].overallPercent += item.percent || 0
       }
@@ -237,7 +310,7 @@ export function useHistoryProgress() {
           danmakuProgressMap.value[historyId] = response.data
           
           // 如果有正在发送的弹幕，保持轮询
-          if (response.data.sending && !response.data.completed) {
+          if (response.data.sending && !response.data.completed && !response.data.failed) {
             hasActiveProgress = true
           }
         }
@@ -259,7 +332,9 @@ export function useHistoryProgress() {
   // 获取弹幕进度百分比
   const getDanmakuProgressPercent = (historyId) => {
     const progress = getDanmakuProgress(historyId)
-    if (!progress || !progress.total) return 0
+    if (!progress) return 0
+    if (progress.completed) return 100
+    if (progress.failed || !progress.total || progress.total <= 0) return 0
     return Math.round((progress.current / progress.total) * 100)
   }
 
@@ -269,7 +344,9 @@ export function useHistoryProgress() {
       sending: true,
       completed: false,
       current: 0,
-      total: total
+      total: total,
+      stage: 'sending',
+      message: '弹幕发送中'
     }
     startDanmakuProgressPolling()
   }
@@ -567,7 +644,10 @@ export function useHistoryOperations() {
       
       const loadingInstance = ElLoading.service({ text: '删除中...' })
       try {
-        await axios.post(`/api/history/deleteWithFiles/${historyId}`)
+        await axios.post(`/api/history/deleteWithFiles/${historyId}`, {
+          confirmDeleteFiles: true,
+          confirmText: 'DELETE_FILES'
+        })
         ElMessage.success('记录和文件已删除')
         callback?.()
       } finally {

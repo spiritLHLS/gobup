@@ -35,14 +35,6 @@ func min(a, b int) int {
 	return b
 }
 
-// max 辅助函数
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // LoginSession 登录会话
 type LoginSession struct {
 	AuthCode   string
@@ -59,6 +51,56 @@ var (
 )
 
 const sessionExpireTime = 3 * 60 // 3分钟过期
+
+type BiliUserResponse struct {
+	ID               uint       `json:"id"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+	UID              int64      `json:"uid"`
+	Uname            string     `json:"uname"`
+	Face             string     `json:"face"`
+	Login            bool       `json:"login"`
+	Enabled          bool       `json:"enabled"`
+	Level            int        `json:"level"`
+	VipType          int        `json:"vipType"`
+	VipStatus        int        `json:"vipStatus"`
+	LoginTime        *time.Time `json:"loginTime"`
+	ExpireTime       *time.Time `json:"expireTime"`
+	LastCheckTime    *time.Time `json:"lastCheckTime"`
+	LastCheckError   string     `json:"lastCheckError"`
+	HasWxPushToken   bool       `json:"hasWxPushToken"`
+	DailyUploadQuota int        `json:"dailyUploadQuota"`
+}
+
+func safeBiliUserResponse(user models.BiliBiliUser) BiliUserResponse {
+	return BiliUserResponse{
+		ID:               user.ID,
+		CreatedAt:        user.CreatedAt,
+		UpdatedAt:        user.UpdatedAt,
+		UID:              user.UID,
+		Uname:            user.Uname,
+		Face:             user.Face,
+		Login:            user.Login,
+		Enabled:          user.Enabled,
+		Level:            user.Level,
+		VipType:          user.VipType,
+		VipStatus:        user.VipStatus,
+		LoginTime:        user.LoginTime,
+		ExpireTime:       user.ExpireTime,
+		LastCheckTime:    user.LastCheckTime,
+		LastCheckError:   user.LastCheckError,
+		HasWxPushToken:   strings.TrimSpace(user.WxPushToken) != "",
+		DailyUploadQuota: user.DailyUploadQuota,
+	}
+}
+
+func safeBiliUserResponses(users []models.BiliBiliUser) []BiliUserResponse {
+	responses := make([]BiliUserResponse, 0, len(users))
+	for _, user := range users {
+		responses = append(responses, safeBiliUserResponse(user))
+	}
+	return responses
+}
 
 // cleanupExpiredLoginSessions 清理已过期的登录会话，防止内存泄漏
 func cleanupExpiredLoginSessions() {
@@ -78,12 +120,12 @@ func ListBiliUsers(c *gin.Context) {
 	db := database.GetDB()
 	var users []models.BiliBiliUser
 	// 过滤掉UID=-1的root管理员用户
-	db.Select("id", "created_at", "updated_at", "uid", "uname", "face", "login", "level", "vip_type", "vip_status", "login_time", "expire_time", "wx_push_token").
+	db.Select("id", "created_at", "updated_at", "uid", "uname", "face", "login", "enabled", "level", "vip_type", "vip_status", "login_time", "expire_time", "last_check_time", "last_check_error", "wx_push_token", "daily_upload_quota").
 		Where("uid != ?", -1).
 		Order("created_at DESC").
 		Find(&users)
 
-	c.JSON(http.StatusOK, users)
+	c.JSON(http.StatusOK, safeBiliUserResponses(users))
 }
 
 // LoginUser 生成B站登录二维码
@@ -109,7 +151,7 @@ func LoginUser(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"error": "生成二维码失败: " + err.Error()})
 		return
 	}
-	log.Printf("%s端二维码URL: %s, AuthCode: %s", loginType, qrResp.Data.URL, qrResp.Data.AuthCode)
+	log.Printf("%s端二维码已生成: url长度=%d, authCode长度=%d", loginType, len(qrResp.Data.URL), len(qrResp.Data.AuthCode))
 
 	// 生成二维码图片
 	qrc, err := qrcode.NewWith(qrResp.Data.URL,
@@ -146,7 +188,6 @@ func LoginUser(c *gin.Context) {
 	// Base64编码
 	imageBase64 := base64.StdEncoding.EncodeToString(pngBytes)
 	log.Printf("[INFO] Base64编码长度: %d", len(imageBase64))
-	log.Printf("[DEBUG] Base64前缀: %s", imageBase64[:min(50, len(imageBase64))])
 
 	// 使用图片的最后100个字符作为session key，并转为URL安全格式（替换掉+/=避免URL编码问题）
 	rawKey := imageBase64[len(imageBase64)-100:]
@@ -164,7 +205,7 @@ func LoginUser(c *gin.Context) {
 	loginSessionsMu.Lock()
 	loginSessions[sessionKey] = session
 	loginSessionsMu.Unlock()
-	log.Printf("[SUCCESS] 登录会话已创建 - sessionKey: %s, type: %s, authCode: %s", sessionKey, loginType, qrResp.Data.AuthCode)
+	log.Printf("[SUCCESS] 登录会话已创建 - keyLength: %d, type: %s, authCodeLength: %d", len(sessionKey), loginType, len(qrResp.Data.AuthCode))
 
 	response := gin.H{
 		"image": imageBase64,
@@ -178,7 +219,7 @@ func LoginUser(c *gin.Context) {
 // LoginCheck 检查登录状态（轮询）
 func LoginCheck(c *gin.Context) {
 	sessionKey := c.Query("key")
-	log.Printf("[CHECK] 收到登录检查请求 - keyLength: %d, key后缀: %s", len(sessionKey), sessionKey[max(0, len(sessionKey)-20):])
+	log.Printf("[CHECK] 收到登录检查请求 - keyLength: %d", len(sessionKey))
 	if sessionKey == "" {
 		log.Printf("[CHECK] 缺少key参数")
 		c.JSON(http.StatusOK, gin.H{
@@ -194,7 +235,7 @@ func LoginCheck(c *gin.Context) {
 	loginSessionsMu.RUnlock()
 
 	if !exists {
-		log.Printf("[CHECK] 会话不存在 - key后缀: %s, 当前会话数: %d", sessionKey[max(0, len(sessionKey)-20):], sessionCount)
+		log.Printf("[CHECK] 会话不存在 - keyLength: %d, 当前会话数: %d", len(sessionKey), sessionCount)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "failed",
 			"message": "会话不存在或已过期",
@@ -204,7 +245,7 @@ func LoginCheck(c *gin.Context) {
 
 	// 检查会话是否过期
 	if time.Now().Unix()-session.CreateTime > sessionExpireTime {
-		log.Printf("[CHECK] 会话已过期 - type: %s, authCode: %s", session.LoginType, session.AuthCode)
+		log.Printf("[CHECK] 会话已过期 - type: %s, authCodeLength: %d", session.LoginType, len(session.AuthCode))
 		loginSessionsMu.Lock()
 		delete(loginSessions, sessionKey)
 		loginSessionsMu.Unlock()
@@ -229,7 +270,7 @@ func LoginCheck(c *gin.Context) {
 	var pollResp *bili.QRCodePollResponse
 	var err error
 
-	log.Printf("[POLL] 开始轮询 - type: %s, authCode: %s", session.LoginType, session.AuthCode)
+	log.Printf("[POLL] 开始轮询 - type: %s, authCodeLength: %d", session.LoginType, len(session.AuthCode))
 
 	if session.LoginType == "web" {
 		pollResp, err = bili.PollWebQRCodeStatus(session.AuthCode)
@@ -259,7 +300,7 @@ func LoginCheck(c *gin.Context) {
 			cookieStr = bili.ExtractCookiesFromTVPollResponse(pollResp)
 		}
 
-		log.Printf("[%s] 提取到的Cookie: %s", session.LoginType, cookieStr)
+		log.Printf("[%s] Cookie提取完成，长度=%d（已隐藏敏感内容）", session.LoginType, len(cookieStr))
 		if cookieStr == "" {
 			session.Status = "failed"
 			session.Message = "获取Cookie失败"
@@ -295,6 +336,7 @@ func LoginCheck(c *gin.Context) {
 			Cookies:      cookieStr,
 			RefreshToken: pollResp.Data.RefreshToken,
 			Login:        true,
+			Enabled:      true,
 			Level:        userInfo.Data.Level,
 			VipType:      userInfo.Data.VipType,
 			VipStatus:    userInfo.Data.VipStatus,
@@ -303,7 +345,7 @@ func LoginCheck(c *gin.Context) {
 		}
 
 		upsertCols := []string{"uname", "face", "cookies", "refresh_token", "login",
-			"level", "vip_type", "vip_status", "login_time", "expire_time", "updated_at", "deleted_at"}
+			"enabled", "level", "vip_type", "vip_status", "login_time", "expire_time", "updated_at", "deleted_at"}
 		if err := db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "uid"}},
 			DoUpdates: clause.AssignmentColumns(upsertCols),
@@ -384,16 +426,51 @@ func UpdateBiliUser(c *gin.Context) {
 
 	// 只更新允许更新的字段
 	if err := db.Model(&user).Updates(map[string]interface{}{
-		"uname":         user.Uname,
-		"face":          user.Face,
-		"level":         user.Level,
-		"wx_push_token": user.WxPushToken,
+		"uname":              user.Uname,
+		"face":               user.Face,
+		"level":              user.Level,
+		"wx_push_token":      user.WxPushToken,
+		"daily_upload_quota": user.DailyUploadQuota,
 	}).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "更新失败"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "更新成功"})
+}
+
+// SetBiliUserEnabled 启用或禁用B站账号。
+func SetBiliUserEnabled(c *gin.Context) {
+	id := c.Param("id")
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+
+	db := database.GetDB()
+	var user models.BiliBiliUser
+	if err := db.First(&user, id).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "用户不存在"})
+		return
+	}
+	if user.UID == -1 {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "管理员账号不能禁用"})
+		return
+	}
+
+	if err := db.Model(&user).Update("enabled", req.Enabled).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "状态更新失败"})
+		return
+	}
+
+	statusText := "启用"
+	if !req.Enabled {
+		statusText = "禁用"
+	}
+	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "账号已" + statusText})
 }
 
 // DeleteBiliUser 删除B站用户
@@ -467,7 +544,7 @@ func RefreshUserCookie(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"type":       "success",
 		"msg":        "Token刷新成功",
-		"user":       user,
+		"user":       safeBiliUserResponse(user),
 		"expireTime": expireTime.Format("2006-01-02 15:04:05"),
 	})
 }
@@ -484,19 +561,24 @@ func CheckUserStatus(c *gin.Context) {
 		return
 	}
 
+	now := time.Now()
+	user.LastCheckTime = &now
+
 	// 验证Cookie是否有效
 	valid, err := bili.ValidateCookie(user.Cookies)
 	if err != nil {
 		user.Login = false
+		user.LastCheckError = err.Error()
 		db.Save(&user)
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "验证失败: " + err.Error(), "user": user})
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "验证失败: " + err.Error(), "user": safeBiliUserResponse(user)})
 		return
 	}
 
 	if !valid {
 		user.Login = false
+		user.LastCheckError = "Cookie已失效"
 		db.Save(&user)
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "Cookie已失效，请重新登录", "user": user})
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "Cookie已失效，请重新登录", "user": safeBiliUserResponse(user)})
 		return
 	}
 
@@ -511,9 +593,10 @@ func CheckUserStatus(c *gin.Context) {
 	}
 
 	user.Login = true
+	user.LastCheckError = ""
 	db.Save(&user)
 
-	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "Cookie有效，用户状态正常", "user": user})
+	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "Cookie有效，用户状态正常", "user": safeBiliUserResponse(user)})
 }
 
 // LoginByCookie 通过Cookie直接登录
@@ -567,6 +650,7 @@ func LoginByCookie(c *gin.Context) {
 		Face:       userInfo.Data.Face,
 		Cookies:    cookieStr,
 		Login:      true,
+		Enabled:    true,
 		Level:      userInfo.Data.Level,
 		VipType:    userInfo.Data.VipType,
 		VipStatus:  userInfo.Data.VipStatus,
@@ -575,7 +659,7 @@ func LoginByCookie(c *gin.Context) {
 	}
 
 	// 使用 Upsert，防止并发登录时 UNIQUE 冲突
-	upsertCols := []string{"uname", "face", "cookies", "login",
+	upsertCols := []string{"uname", "face", "cookies", "login", "enabled",
 		"level", "vip_type", "vip_status", "login_time", "expire_time", "updated_at", "deleted_at"}
 	if err := db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "uid"}},
@@ -591,6 +675,6 @@ func LoginByCookie(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"type": "success",
 		"msg":  "登录成功",
-		"user": user,
+		"user": safeBiliUserResponse(user),
 	})
 }

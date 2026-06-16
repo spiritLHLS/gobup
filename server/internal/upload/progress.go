@@ -9,10 +9,12 @@ import (
 type ProgressState string
 
 const (
-	StateUploading ProgressState = "UPLOADING"
-	StateRetryWait ProgressState = "RETRY_WAIT"
-	StateSuccess   ProgressState = "SUCCESS"
-	StateFailed    ProgressState = "FAILED"
+	StateTranscoding ProgressState = "TRANSCODING"
+	StateProcessing  ProgressState = "PROCESSING"
+	StateUploading   ProgressState = "UPLOADING"
+	StateRetryWait   ProgressState = "RETRY_WAIT"
+	StateSuccess     ProgressState = "SUCCESS"
+	StateFailed      ProgressState = "FAILED"
 )
 
 // Progress 上传进度
@@ -30,7 +32,7 @@ type Progress struct {
 
 // IsActive 是否正在活跃上传
 func (p *Progress) IsActive() bool {
-	return p.State == StateUploading || p.State == StateRetryWait
+	return p.State == StateTranscoding || p.State == StateProcessing || p.State == StateUploading || p.State == StateRetryWait
 }
 
 // ProgressTracker 上传进度追踪器
@@ -64,9 +66,7 @@ func (t *ProgressTracker) Start(partID, historyID int64, page, chunkTotal int) {
 
 	p.Page = page
 	p.ChunkTotal = max(chunkTotal, 0)
-	if p.ChunkDone < 0 {
-		p.ChunkDone = 0
-	}
+	p.ChunkDone = 0
 	p.Percent = calcPercent(p.ChunkDone, p.ChunkTotal)
 	p.State = StateUploading
 	p.StateMsg = ""
@@ -74,6 +74,16 @@ func (t *ProgressTracker) Start(partID, historyID int64, page, chunkTotal int) {
 
 	t.byPartID[partID] = p
 	t.cleanupExpired(now)
+}
+
+// MarkTranscoding 标记上传前转码进度
+func (t *ProgressTracker) MarkTranscoding(partID, historyID int64, page, percent int, msg string) {
+	t.markPercentState(partID, historyID, page, percent, StateTranscoding, msg)
+}
+
+// MarkProcessing 标记上传前处理进度
+func (t *ProgressTracker) MarkProcessing(partID, historyID int64, page, percent int, msg string) {
+	t.markPercentState(partID, historyID, page, percent, StateProcessing, msg)
 }
 
 // UpdateChunkDone 更新已完成的块数
@@ -124,6 +134,32 @@ func (t *ProgressTracker) MarkFailed(partID int64, msg string) {
 		p.StateMsg = msg
 		p.UpdateAtMs = time.Now().UnixMilli()
 	}
+}
+
+func (t *ProgressTracker) markPercentState(partID, historyID int64, page, percent int, state ProgressState, msg string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now := time.Now().UnixMilli()
+	p := t.byPartID[partID]
+	if p == nil {
+		p = &Progress{
+			PartID:    partID,
+			HistoryID: historyID,
+		}
+	}
+
+	clampedPercent := min(max(percent, 0), 100)
+	p.Page = page
+	p.ChunkDone = clampedPercent
+	p.ChunkTotal = 100
+	p.Percent = clampedPercent
+	p.State = state
+	p.StateMsg = msg
+	p.UpdateAtMs = now
+
+	t.byPartID[partID] = p
+	t.cleanupExpired(now)
 }
 
 // MarkSuccessAndRemove 标记为成功并移除

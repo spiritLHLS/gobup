@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
-	"github.com/gobup/server/internal/services"
 	"github.com/gobup/server/internal/upload"
 )
 
@@ -24,21 +22,33 @@ func SetHistoryUploadService(svc *upload.Service) {
 	historyUploadService = svc
 }
 
+// ListHistories 查询历史记录。
+//
+// @Summary List histories
+// @Description Lists recording histories with pagination and filters.
+// @Tags histories
+// @Security BasicAuth
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /history/list [post]
 func ListHistories(c *gin.Context) {
 	db := database.GetDB()
 
 	// 支持 POST 请求体（新接口）
 	type ListRequest struct {
-		Page      int    `json:"page" form:"page"`
-		PageSize  int    `json:"pageSize" form:"pageSize"`
-		RoomId    string `json:"roomId" form:"roomId"`
-		BvId      string `json:"bvId" form:"bvId"`
-		ViewType  string `json:"viewType" form:"viewType"` // working | archived
-		From      string `json:"from" form:"from"`
-		To        string `json:"to" form:"to"`
-		Recording *bool  `json:"recording"`
-		Upload    *int   `json:"upload"`
-		Publish   *bool  `json:"publish"`
+		Page        int    `json:"page" form:"page"`
+		PageSize    int    `json:"pageSize" form:"pageSize"`
+		RoomId      string `json:"roomId" form:"roomId"`
+		BvId        string `json:"bvId" form:"bvId"`
+		SessionID   string `json:"sessionId" form:"sessionId"`
+		ViewType    string `json:"viewType" form:"viewType"` // working | archived
+		From        string `json:"from" form:"from"`
+		To          string `json:"to" form:"to"`
+		Recording   *bool  `json:"recording"`
+		Upload      *int   `json:"upload"`
+		Publish     *bool  `json:"publish"`
+		IsHighlight *bool  `json:"isHighlight" form:"isHighlight"`
 	}
 
 	var req ListRequest
@@ -69,8 +79,14 @@ func ListHistories(c *gin.Context) {
 	if req.BvId != "" {
 		query = query.Where("bv_id = ?", req.BvId)
 	}
+	if req.SessionID != "" {
+		query = query.Where("session_id = ?", req.SessionID)
+	}
 	if req.Recording != nil {
 		query = query.Where("recording = ?", *req.Recording)
+	}
+	if req.IsHighlight != nil {
+		query = query.Where("is_highlight = ?", *req.IsHighlight)
 	}
 	if req.Publish != nil {
 		if *req.Publish {
@@ -172,14 +188,16 @@ func ExportHistories(c *gin.Context) {
 	db := database.GetDB()
 
 	type ExportRequest struct {
-		RoomId    string `json:"roomId" form:"roomId"`
-		BvId      string `json:"bvId" form:"bvId"`
-		ViewType  string `json:"viewType" form:"viewType"`
-		From      string `json:"from" form:"from"`
-		To        string `json:"to" form:"to"`
-		Recording *bool  `json:"recording"`
-		Upload    *int   `json:"upload"`
-		Publish   *bool  `json:"publish"`
+		RoomId      string `json:"roomId" form:"roomId"`
+		BvId        string `json:"bvId" form:"bvId"`
+		SessionID   string `json:"sessionId" form:"sessionId"`
+		ViewType    string `json:"viewType" form:"viewType"`
+		From        string `json:"from" form:"from"`
+		To          string `json:"to" form:"to"`
+		Recording   *bool  `json:"recording"`
+		Upload      *int   `json:"upload"`
+		Publish     *bool  `json:"publish"`
+		IsHighlight *bool  `json:"isHighlight" form:"isHighlight"`
 	}
 
 	var req ExportRequest
@@ -193,8 +211,14 @@ func ExportHistories(c *gin.Context) {
 	if req.BvId != "" {
 		query = query.Where("bv_id = ?", req.BvId)
 	}
+	if req.SessionID != "" {
+		query = query.Where("session_id = ?", req.SessionID)
+	}
 	if req.Recording != nil {
 		query = query.Where("recording = ?", *req.Recording)
+	}
+	if req.IsHighlight != nil {
+		query = query.Where("is_highlight = ?", *req.IsHighlight)
 	}
 	if req.Publish != nil {
 		if *req.Publish {
@@ -231,11 +255,17 @@ func ExportHistories(c *gin.Context) {
 	_, _ = c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
 
 	writer := csv.NewWriter(c.Writer)
-	_ = writer.Write([]string{"ID", "房间ID", "主播", "标题", "开始时间", "结束时间", "BV号", "AV号", "上传状态", "投稿状态", "视频状态", "消息"})
+	_ = writer.Write([]string{"ID", "房间ID", "SessionID", "类型", "主播", "标题", "开始时间", "结束时间", "BV号", "AV号", "上传状态", "投稿状态", "视频状态", "消息"})
 	for _, history := range histories {
+		historyType := "完整录制"
+		if history.IsHighlight {
+			historyType = "高能剪辑"
+		}
 		_ = writer.Write([]string{
 			strconv.FormatUint(uint64(history.ID), 10),
 			history.RoomID,
+			history.SessionID,
+			historyType,
 			history.Uname,
 			history.Title,
 			history.StartTime.Format("2006-01-02 15:04:05"),
@@ -355,13 +385,20 @@ func BatchUpdateStatus(c *gin.Context) {
 	case "publish":
 		// 批量标记为已发布
 		db.Model(&models.RecordHistory{}).Where("id IN ?", req.IDs).Updates(map[string]interface{}{
-			"publish": true,
+			"publish":             true,
+			"publish_error_type":  "",
+			"publish_cooldown_at": nil,
 		})
 	case "unpublish":
 		// 批量取消发布状态
 		db.Model(&models.RecordHistory{}).Where("id IN ?", req.IDs).Updates(map[string]interface{}{
-			"publish": false,
-			"bv_id":   "",
+			"publish":              false,
+			"bv_id":                "",
+			"publish_error_type":   "",
+			"publish_cooldown_at":  nil,
+			"publish_retry_count":  0,
+			"guide_comment_rpid":   0,
+			"guide_comment_pinned": false,
 		})
 	case "upload":
 		// 批量标记为待上传
@@ -518,7 +555,7 @@ func UploadHistory(c *gin.Context) {
 	// 获取所有未上传且未正在上传中的分P
 	// 加上 uploading=false 过滤，防止用户重复手动触发导致同一分P入队两次
 	var parts []models.RecordHistoryPart
-	if err := db.Where("history_id = ? AND upload = ? AND recording = ? AND uploading = ?", historyID, false, false, false).
+	if err := db.Where("history_id = ? AND upload = ? AND recording = ? AND uploading = ? AND upload_paused = ? AND upload_cancelled = ?", historyID, false, false, false, false, false).
 		Order("start_time ASC").
 		Find(&parts).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "查询分P失败"})
@@ -624,7 +661,7 @@ func BatchUploadHistory(c *gin.Context) {
 		// 获取所有未上传且未正在上传中的分P
 		// 加上 uploading=false 过滤，防止批量操作导致重复入队
 		var parts []models.RecordHistoryPart
-		if err := db.Where("history_id = ? AND upload = ? AND recording = ? AND uploading = ?", history.ID, false, false, false).
+		if err := db.Where("history_id = ? AND upload = ? AND recording = ? AND uploading = ? AND upload_paused = ? AND upload_cancelled = ?", history.ID, false, false, false, false, false).
 			Order("start_time ASC").
 			Find(&parts).Error; err != nil {
 			log.Printf("[批量上传] 查询分P失败 history_id=%d", history.ID)
@@ -735,9 +772,10 @@ func BatchResetStatus(c *gin.Context) {
 		db.Model(&models.RecordHistoryPart{}).
 			Where("history_id IN ?", historyIDs).
 			Updates(map[string]interface{}{
-				"upload":           false,
-				"uploading":        false,
-				"upload_error_msg": "",
+				"upload":            false,
+				"uploading":         false,
+				"upload_error_msg":  "",
+				"upload_error_type": "",
 			})
 	}
 
@@ -751,6 +789,11 @@ func BatchResetStatus(c *gin.Context) {
 		historyUpdates["bv_id"] = ""
 		historyUpdates["video_state"] = -1
 		historyUpdates["video_state_desc"] = ""
+		historyUpdates["publish_error_type"] = ""
+		historyUpdates["publish_cooldown_at"] = nil
+		historyUpdates["publish_retry_count"] = 0
+		historyUpdates["guide_comment_rpid"] = 0
+		historyUpdates["guide_comment_pinned"] = false
 	}
 	if req.Danmaku {
 		historyUpdates["danmaku_sent"] = false
@@ -785,75 +828,6 @@ func BatchResetStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"type":    "success",
 		"msg":     fmt.Sprintf("重置完成：成功%d个", successCount),
-		"success": successCount,
-		"total":   len(req.HistoryIDs),
-	})
-}
-
-// BatchDeleteWithFiles 批量删除记录和文件
-func BatchDeleteWithFiles(c *gin.Context) {
-	type BatchDeleteReq struct {
-		HistoryIDs []uint `json:"historyIds" binding:"required"`
-	}
-
-	var req BatchDeleteReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
-		return
-	}
-
-	db := database.GetDB()
-	successCount := 0
-
-	for _, historyID := range req.HistoryIDs {
-		var history models.RecordHistory
-		if err := db.First(&history, historyID).Error; err != nil {
-			continue
-		}
-
-		// 删除文件（包括相关文件）
-		moverService := services.NewFileMoverService()
-		if history.FilePath != "" {
-			if _, err := os.Stat(history.FilePath); err == nil {
-				if err := os.Remove(history.FilePath); err != nil {
-					log.Printf("[批量删除] 删除文件失败: %s, error: %v", history.FilePath, err)
-				} else {
-					log.Printf("[批量删除] 已删除主文件: %s", history.FilePath)
-				}
-				// 删除相关文件
-				moverService.DeleteRelatedFiles(history.FilePath)
-			}
-		}
-
-		// 获取所有分P并删除文件
-		var parts []models.RecordHistoryPart
-		db.Where("history_id = ?", historyID).Find(&parts)
-		for _, part := range parts {
-			// 统一使用 FilePath 字段（与单个删除保持一致）
-			if part.FilePath != "" {
-				if _, err := os.Stat(part.FilePath); err == nil {
-					if err := os.Remove(part.FilePath); err != nil {
-						log.Printf("[批量删除] 删除分P文件失败: %s, error: %v", part.FilePath, err)
-					} else {
-						log.Printf("[批量删除] 已删除分P主文件: %s", part.FilePath)
-					}
-					// 删除相关文件（xml弹幕、jpg/jpeg封面、ass/srt字幕等）
-					moverService.DeleteRelatedFiles(part.FilePath)
-				}
-			}
-		}
-
-		// 删除数据库记录
-		db.Delete(&models.RecordHistoryPart{}, "history_id = ?", historyID)
-		db.Delete(&history)
-		successCount++
-	}
-
-	log.Printf("[批量重置] 重置完成 %d/%d", successCount, len(req.HistoryIDs))
-
-	c.JSON(http.StatusOK, gin.H{
-		"type":    "success",
-		"msg":     fmt.Sprintf("删除完成：成功%d个", successCount),
 		"success": successCount,
 		"total":   len(req.HistoryIDs),
 	})
@@ -912,9 +886,13 @@ func ManualSetPublishInfo(c *gin.Context) {
 
 	// 更新历史记录
 	updates := map[string]interface{}{
-		"bv_id":   req.BvID,
-		"publish": true,
-		"message": "手动设置投稿信息",
+		"bv_id":                req.BvID,
+		"publish":              true,
+		"message":              "手动设置投稿信息",
+		"publish_error_type":   "",
+		"publish_cooldown_at":  nil,
+		"guide_comment_rpid":   0,
+		"guide_comment_pinned": false,
 	}
 
 	if avID != "" {

@@ -12,7 +12,7 @@
       <Navbar 
         :is-collapse="isCollapse"
         @toggle-sidebar="handleToggleSidebar"
-        @update:privacy-mode="val => privacyMode.value = val"
+        @update:privacy-mode="handlePrivacyModeUpdate"
       />
       
       <!-- 主要内容 -->
@@ -53,6 +53,10 @@ const checkDevice = () => {
 // 切换侧边栏
 const handleToggleSidebar = () => {
   isCollapse.value = !isCollapse.value
+}
+
+const handlePrivacyModeUpdate = (val) => {
+  privacyMode.value = Boolean(val)
 }
 
 // 响应式监听

@@ -146,8 +146,12 @@ const handleLogin = async () => {
   } catch (error) {
     if (error.response?.status === 401) {
       errorMsg.value = '用户名或密码错误，请检查后重试'
+    } else if (error.response?.status === 429) {
+      const retryAfter = Number(error.response?.data?.retryAfter || error.response?.headers?.['retry-after'] || 0)
+      const minutes = retryAfter > 0 ? Math.ceil(retryAfter / 60) : 15
+      errorMsg.value = `登录失败次数过多，请约 ${minutes} 分钟后再试`
     } else {
-      errorMsg.value = error.message || '登录失败，请检查服务是否正常运行'
+      errorMsg.value = error.response?.data?.msg || error.message || '登录失败，请检查服务是否正常运行'
     }
   } finally {
     loading.value = false

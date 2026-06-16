@@ -2,6 +2,10 @@ package bili
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -140,8 +144,15 @@ func WithRetry(config RetryConfig, fn func() error) error {
 
 	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
 		if attempt > 0 {
+			retryDelay := delay
+			if hintedDelay := retryDelayFromError(lastErr); hintedDelay > 0 {
+				retryDelay = hintedDelay
+				if config.MaxDelay > 0 && retryDelay > config.MaxDelay {
+					retryDelay = config.MaxDelay
+				}
+			}
 			// 等待一段时间后重试
-			time.Sleep(delay)
+			time.Sleep(jitterDelay(retryDelay))
 
 			// 指数退避
 			delay = time.Duration(float64(delay) * config.BackoffFactor)
@@ -174,6 +185,84 @@ func WithRetry(config RetryConfig, fn func() error) error {
 	}
 
 	return lastErr
+}
+
+type retryAfterError struct {
+	err   error
+	delay time.Duration
+}
+
+func (e *retryAfterError) Error() string {
+	return e.err.Error()
+}
+
+func (e *retryAfterError) Unwrap() error {
+	return e.err
+}
+
+func (e *retryAfterError) RetryDelay() time.Duration {
+	return e.delay
+}
+
+func wrapRetryAfterError(err error, header string, now time.Time) error {
+	if err == nil {
+		return nil
+	}
+	delay, ok := parseRetryAfterDelay(header, now)
+	if !ok {
+		return err
+	}
+	return &retryAfterError{
+		err:   err,
+		delay: delay,
+	}
+}
+
+func retryDelayFromError(err error) time.Duration {
+	if err == nil {
+		return 0
+	}
+	var retryErr interface {
+		RetryDelay() time.Duration
+	}
+	if errors.As(err, &retryErr) {
+		return retryErr.RetryDelay()
+	}
+	return 0
+}
+
+func parseRetryAfterDelay(header string, now time.Time) (time.Duration, bool) {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.ParseInt(header, 10, 64); err == nil {
+		if seconds < 0 {
+			return 0, false
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	retryAt, err := http.ParseTime(header)
+	if err != nil {
+		return 0, false
+	}
+	delay := retryAt.Sub(now)
+	if delay < 0 {
+		delay = 0
+	}
+	return delay, true
+}
+
+func jitterDelay(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return delay
+	}
+	jitterRange := delay / 5
+	if jitterRange < time.Millisecond {
+		return delay
+	}
+	offset := time.Duration(time.Now().UnixNano()%int64(2*jitterRange)) - jitterRange
+	return delay + offset
 }
 
 func contains(s, substr string) bool {

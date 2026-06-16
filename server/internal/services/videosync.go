@@ -51,7 +51,7 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 			var room models.RecordRoom
 			if err := db.Where("room_id = ?", history.RoomID).First(&room).Error; err == nil {
 				var user models.BiliBiliUser
-				if err := db.First(&user, room.UploadUserID).Error; err == nil && user.Login && user.UID > 0 {
+				if err := db.First(&user, room.UploadUserID).Error; err == nil && user.Login && user.Enabled && user.UID > 0 {
 					client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
 
 					// 通过API查找正确的BV号
@@ -82,6 +82,9 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 
 	if !user.Login {
 		return fmt.Errorf("用户未登录")
+	}
+	if !user.Enabled {
+		return fmt.Errorf("用户已禁用")
 	}
 
 	// 创建客户端
@@ -200,6 +203,14 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 			history.ApprovedAt = &approvedTime
 			log.Printf("[ApprovedAt] 记录审核通过时间: history_id=%d, approved_at=%s", historyID, approvedTime.Format("2006-01-02 15:04:05"))
 		}
+
+		aidForComment := videoInfo.Aid
+		if aidForComment <= 0 && history.AvID != "" {
+			if parsedAid, parseErr := strconv.ParseInt(history.AvID, 10, 64); parseErr == nil {
+				aidForComment = parsedAid
+			}
+		}
+		EnsureSessionGuideComment(db, client, &history, aidForComment, history.BvID)
 
 		// 1. 处理文件（删除/移动/复制）
 		{

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -12,17 +13,9 @@ import (
 	"github.com/imroc/req/v3"
 )
 
-// min 辅助函数
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 const (
-	AppKey    = "4409e2ce8ffd12b8"
-	AppSecret = "59b43e04ad6965f34319062b478f83dd"
+	biliAppKeyEnv    = "BILI_APP_KEY"
+	biliAppSecretEnv = "BILI_APP_SECRET"
 )
 
 // QRCodeResponse 二维码响应（通用）
@@ -93,9 +86,7 @@ func GenerateWebQRCode() (*QRCodeResponse, error) {
 		return nil, fmt.Errorf("请求二维码失败: %w", err)
 	}
 
-	// 打印原始响应用于调试
-	rawBody := resp.String()
-	fmt.Printf("[WEB_QR_DEBUG] 原始响应: %s\n", rawBody)
+	fmt.Printf("[WEB_QR_DEBUG] 已收到二维码响应，准备解析\n")
 
 	// 解析JSON
 	if err := resp.UnmarshalJson(&qrResp); err != nil {
@@ -109,27 +100,32 @@ func GenerateWebQRCode() (*QRCodeResponse, error) {
 	// Web端使用oauthKey作为authCode用于轮询
 	qrResp.Data.AuthCode = qrResp.Data.OauthKey
 
-	fmt.Printf("[WEB_QR] 生成成功 - url: %s, oauthKey: %s\n", qrResp.Data.URL, qrResp.Data.OauthKey)
+	fmt.Printf("[WEB_QR] 生成成功 - url长度: %d, oauthKey长度: %d\n", len(qrResp.Data.URL), len(qrResp.Data.OauthKey))
 
 	return &qrResp, nil
 }
 
 // GenerateTVQRCode 生成TV端二维码（参考Java项目BiliApi.generateQRUrlTV()）
 func GenerateTVQRCode() (*QRCodeResponse, error) {
+	appKey, appSecret, err := getBiliAppCredentials()
+	if err != nil {
+		return nil, err
+	}
+
 	// 参考: BiliApi.java generateQRUrlTV()
 	// 使用完全相同的参数和签名方式
 	params := map[string]string{
-		"appkey":   AppKey,
+		"appkey":   appKey,
 		"local_id": "0",
 		"ts":       "0", // 注意：参考项目使用"0"而不是当前时间戳
 	}
 
-	params = signParams(params)
+	params = signParams(params, appSecret)
 	apiURL := "https://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code"
 
 	fmt.Printf("[TV_QR] 请求URL: %s\n", apiURL)
-	fmt.Printf("[TV_QR] 请求参数: appkey=%s, local_id=%s, ts=%s, sign=%s\n",
-		params["appkey"], params["local_id"], params["ts"], params["sign"])
+	fmt.Printf("[TV_QR] 请求参数: appkey长度=%d, local_id=%s, ts=%s（签名已隐藏）\n",
+		len(params["appkey"]), params["local_id"], params["ts"])
 
 	var qrResp QRCodeResponse
 	client := req.C().ImpersonateChrome()
@@ -145,9 +141,7 @@ func GenerateTVQRCode() (*QRCodeResponse, error) {
 		return nil, fmt.Errorf("请求二维码失败: %w", err)
 	}
 
-	// 打印原始响应用于调试
-	rawBody := resp.String()
-	fmt.Printf("[TV_QR_DEBUG] 原始响应: %s\n", rawBody)
+	fmt.Printf("[TV_QR_DEBUG] 已收到二维码响应，准备解析\n")
 
 	// 解析JSON
 	if err := resp.UnmarshalJson(&qrResp); err != nil {
@@ -158,7 +152,7 @@ func GenerateTVQRCode() (*QRCodeResponse, error) {
 		return nil, fmt.Errorf("生成TV端二维码失败 code=%d msg=%s", qrResp.Code, qrResp.Message)
 	}
 
-	fmt.Printf("[TV_QR] 生成成功 - url: %s, auth_code: %s\n", qrResp.Data.URL, qrResp.Data.AuthCode)
+	fmt.Printf("[TV_QR] 生成成功 - url长度: %d, auth_code长度: %d\n", len(qrResp.Data.URL), len(qrResp.Data.AuthCode))
 
 	return &qrResp, nil
 }
@@ -186,9 +180,7 @@ func PollWebQRCodeStatus(oauthKey string) (*QRCodePollResponse, error) {
 		return nil, fmt.Errorf("轮询状态失败: %w", err)
 	}
 
-	// 打印原始响应用于调试
-	rawBody := resp.String()
-	fmt.Printf("[WEB_POLL_DEBUG] 原始响应: %s\n", rawBody)
+	fmt.Printf("[WEB_POLL_DEBUG] 已收到轮询响应，准备解析\n")
 
 	// 解析JSON
 	if err := resp.UnmarshalJson(&pollResp); err != nil {
@@ -200,14 +192,14 @@ func PollWebQRCodeStatus(oauthKey string) (*QRCodePollResponse, error) {
 	// '-5' in str(qrcodedata['data']): 已扫码，请确认
 	// '-2' in str(qrcodedata['data']): 二维码已失效
 	// 'True' in str(qrcodedata['status']): 已确认，登入成功
-	fmt.Printf("[WEB_POLL] 原始响应 - status: %v, data.code: %d, data.message: %s\n",
+	fmt.Printf("[WEB_POLL] 状态摘要 - status: %v, data.code: %d, data.message: %s\n",
 		pollResp.Status, pollResp.Data.Code, pollResp.Data.Message)
 
 	// 优先判断status字段（Python项目用'True' in str(qrcodedata['status'])）
 	if pollResp.Status {
 		// 登录成功
 		pollResp.Data.Code = 0
-		fmt.Printf("[WEB_POLL] 登录成功 - url=%s\n", pollResp.Data.URL)
+		fmt.Printf("[WEB_POLL] 登录成功 - URL长度=%d（敏感查询参数已隐藏）\n", len(pollResp.Data.URL))
 	} else {
 		// 根据data.code字段判断状态
 		switch pollResp.Data.Code {
@@ -235,21 +227,26 @@ func PollWebQRCodeStatus(oauthKey string) (*QRCodePollResponse, error) {
 
 // PollTVQRCodeStatus 轮询TV端二维码状态（参考Java项目BiliApi.loginOnTV()）
 func PollTVQRCodeStatus(authCode string) (*QRCodePollResponse, error) {
+	appKey, appSecret, err := getBiliAppCredentials()
+	if err != nil {
+		return nil, err
+	}
+
 	// 参考: BiliApi.java loginOnTV()
 	// 使用完全相同的参数和签名方式
 	params := map[string]string{
-		"appkey":    AppKey,
+		"appkey":    appKey,
 		"auth_code": authCode,
 		"local_id":  "0",
 		"ts":        "0", // 注意：参考项目使用"0"而不是当前时间戳
 	}
 
-	params = signParams(params)
+	params = signParams(params, appSecret)
 	apiURL := "https://passport.bilibili.com/x/passport-tv-login/qrcode/poll"
 
 	fmt.Printf("[TV_POLL] 请求URL: %s\n", apiURL)
-	fmt.Printf("[TV_POLL] 请求参数: appkey=%s, auth_code=%s, local_id=%s, ts=%s, sign=%s\n",
-		params["appkey"], params["auth_code"], params["local_id"], params["ts"], params["sign"])
+	fmt.Printf("[TV_POLL] 请求参数: appkey长度=%d, auth_code长度=%d, local_id=%s, ts=%s（签名已隐藏）\n",
+		len(params["appkey"]), len(params["auth_code"]), params["local_id"], params["ts"])
 
 	var pollResp QRCodePollResponse
 	client := req.C().ImpersonateChrome()
@@ -266,9 +263,7 @@ func PollTVQRCodeStatus(authCode string) (*QRCodePollResponse, error) {
 		return nil, fmt.Errorf("轮询状态失败: %w", err)
 	}
 
-	// 打印原始响应用于调试
-	rawBody := resp.String()
-	fmt.Printf("[TV_POLL_DEBUG] 原始响应: %s\n", rawBody)
+	fmt.Printf("[TV_POLL_DEBUG] 已收到轮询响应，准备解析\n")
 
 	// 解析JSON
 	if err := resp.UnmarshalJson(&pollResp); err != nil {
@@ -280,8 +275,8 @@ func PollTVQRCodeStatus(authCode string) (*QRCodePollResponse, error) {
 	// code=86038: 二维码已失效
 	// code=86090: 已扫码未确认
 	// code=86101: 未扫码
-	fmt.Printf("[TV_POLL] 原始响应 - code=%d, message=%s, data.code=%d, url=%s, hasRefreshToken=%v\n",
-		pollResp.Code, pollResp.Message, pollResp.Data.Code, pollResp.Data.URL, pollResp.Data.RefreshToken != "")
+	fmt.Printf("[TV_POLL] 状态摘要 - code=%d, message=%s, data.code=%d, URL长度=%d, hasRefreshToken=%v\n",
+		pollResp.Code, pollResp.Message, pollResp.Data.Code, len(pollResp.Data.URL), pollResp.Data.RefreshToken != "")
 
 	// TV端的状态码在顶层code字段，不是data.code
 	if pollResp.Code == 0 {
@@ -323,9 +318,7 @@ func GetUserInfo(cookies string) (*UserInfoResponse, error) {
 		return nil, err
 	}
 
-	// 打印原始响应用于调试
-	rawBody := resp.String()
-	fmt.Printf("[USER_INFO_DEBUG] 原始响应: %s\n", rawBody)
+	fmt.Printf("[USER_INFO_DEBUG] 已收到用户信息响应，准备解析\n")
 
 	// 解析JSON
 	if err := resp.UnmarshalJson(&userInfo); err != nil {
@@ -365,7 +358,11 @@ func ExtractCookiesFromWebPollResponse(pollResp *QRCodePollResponse, client *req
 	// String DedeUserID__ckMd5 = getParameterValueFromUrl(url2, "DedeUserID__ckMd5");
 	// String sid = getParameterValueFromUrl(url2, "sid");
 
-	if pollResp == nil || pollResp.Data.Code != 0 {
+	if pollResp == nil {
+		fmt.Printf("[WEB_COOKIE] 登录响应为空，跳过Cookie提取\n")
+		return ""
+	}
+	if pollResp.Data.Code != 0 {
 		fmt.Printf("[WEB_COOKIE] 登录未完成，跳过Cookie提取 - code=%d\n", pollResp.Data.Code)
 		return ""
 	}
@@ -375,9 +372,8 @@ func ExtractCookiesFromWebPollResponse(pollResp *QRCodePollResponse, client *req
 		return ""
 	}
 
-	// Web端登录成功后，URL中包含Cookie参数
-	// 格式: https://passport.biligame.com/crossDomain?...&DedeUserID=xxx&SESSDATA=xxx&bili_jct=xxx&...
-	fmt.Printf("[WEB_COOKIE] 解析登录URL: %s\n", pollResp.Data.URL[:min(100, len(pollResp.Data.URL))])
+	// Web端登录成功后，URL中包含Cookie参数，禁止将 URL 原文写入日志。
+	fmt.Printf("[WEB_COOKIE] 开始解析登录URL（已隐藏敏感查询参数，长度=%d）\n", len(pollResp.Data.URL))
 
 	parsedURL, err := url.Parse(pollResp.Data.URL)
 	if err != nil {
@@ -423,7 +419,11 @@ func ExtractCookiesFromWebPollResponse(pollResp *QRCodePollResponse, client *req
 
 // ExtractCookiesFromTVPollResponse 从TV端轮询响应中提取Cookie
 func ExtractCookiesFromTVPollResponse(pollResp *QRCodePollResponse) string {
-	if pollResp == nil || pollResp.Data.Code != 0 {
+	if pollResp == nil {
+		fmt.Printf("[TV_COOKIE] 登录响应为空，跳过Cookie提取\n")
+		return ""
+	}
+	if pollResp.Data.Code != 0 {
 		fmt.Printf("[TV_COOKIE] 登录未完成，跳过Cookie提取 - code=%d\n", pollResp.Data.Code)
 		return ""
 	}
@@ -455,8 +455,8 @@ func ExtractCookiesFromTVPollResponse(pollResp *QRCodePollResponse) string {
 	}
 
 	result := strings.Join(cookieStrs, "; ")
-	fmt.Printf("[TV_COOKIE] 提取成功 - length: %d, DedeUserID: %s, SESSDATA: %s\n",
-		len(result), cookieMap["DedeUserID"], cookieMap["SESSDATA"][:min(20, len(cookieMap["SESSDATA"]))])
+	fmt.Printf("[TV_COOKIE] 提取成功 - length: %d, DedeUserID长度: %d, SESSDATA长度: %d\n",
+		len(result), len(cookieMap["DedeUserID"]), len(cookieMap["SESSDATA"]))
 	return result
 }
 
@@ -481,8 +481,17 @@ func GetCookieValue(cookieStr, key string) string {
 	return cookies[key]
 }
 
+func getBiliAppCredentials() (string, string, error) {
+	appKey := strings.TrimSpace(os.Getenv(biliAppKeyEnv))
+	appSecret := strings.TrimSpace(os.Getenv(biliAppSecretEnv))
+	if appKey == "" || appSecret == "" {
+		return "", "", fmt.Errorf("%s 和 %s 未配置，无法使用TV二维码登录或刷新Token", biliAppKeyEnv, biliAppSecretEnv)
+	}
+	return appKey, appSecret, nil
+}
+
 // signParams 签名参数，返回包含sign的params map
-func signParams(params map[string]string) map[string]string {
+func signParams(params map[string]string, appSecret string) map[string]string {
 	keys := make([]string, 0, len(params))
 	for k := range params {
 		keys = append(keys, k)
@@ -495,7 +504,7 @@ func signParams(params map[string]string) map[string]string {
 	}
 	queryString := strings.Join(query, "&")
 
-	sign := md5Sign(queryString + AppSecret)
+	sign := md5Sign(queryString + appSecret)
 	params["sign"] = sign
 	return params
 }
@@ -532,17 +541,22 @@ type RefreshTokenResponse struct {
 
 // RefreshToken 刷新用户Token（参考Java项目 BiliApi.refreshToken）
 func RefreshToken(accessToken, refreshToken, cookies string) (*RefreshTokenResponse, error) {
+	appKey, appSecret, err := getBiliAppCredentials()
+	if err != nil {
+		return nil, err
+	}
+
 	apiURL := "https://passport.bilibili.com/api/v2/oauth2/refresh_token"
 
 	params := map[string]string{
-		"appkey":        AppKey,
+		"appkey":        appKey,
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
 		"ts":            fmt.Sprintf("%d", time.Now().Unix()),
 	}
 
 	// 添加签名
-	params = signParams(params)
+	params = signParams(params, appSecret)
 
 	fmt.Printf("[REFRESH_TOKEN] 开始刷新Token - mid从cookies中提取\n")
 
@@ -559,9 +573,7 @@ func RefreshToken(accessToken, refreshToken, cookies string) (*RefreshTokenRespo
 		return nil, fmt.Errorf("刷新Token请求失败: %w", err)
 	}
 
-	// 打印原始响应用于调试
-	rawBody := resp.String()
-	fmt.Printf("[REFRESH_TOKEN_DEBUG] 原始响应: %s\n", rawBody)
+	fmt.Printf("[REFRESH_TOKEN_DEBUG] 已收到刷新响应，准备解析\n")
 
 	var refreshResp RefreshTokenResponse
 	if err := resp.UnmarshalJson(&refreshResp); err != nil {

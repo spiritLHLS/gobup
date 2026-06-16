@@ -10,13 +10,13 @@ GoBup is a Go + Vue web application for managing local Bilibili livestream recor
 ## Features
 
 - Automatic recording directory scan with fsnotify event triggers and scheduled fallback scans.
-- Multiple Bilibili accounts with Cookie expiry display.
-- Per-account upload queues with fixed account, round-robin, and shortest-queue strategies.
+- Multiple Bilibili accounts with Cookie expiry display and enable/disable controls.
+- Per-account upload queues with fixed account, round-robin, shortest-queue, and daily remaining-quota strategies.
 - Upload time windows, retry, rate-limit backoff, and restart recovery.
-- Optional FFmpeg pre-upload transcoding with preset, CRF, max width, and audio bitrate settings.
+- Optional FFmpeg pre-upload transcoding with H.264/H.265, preset, CRF, max width, audio bitrate settings, and History-page progress.
 - Cover extraction from the Nth second of a video.
-- Auto-publish, history filters, CSV export, and WebSocket upload progress.
-- DanmakuFactory + FFmpeg danmaku burn-in with default, compact, and large styles. Burn failures do not block the original upload.
+- Auto-publish, history filters, CSV export, and reconnecting WebSocket upload progress.
+- DanmakuFactory + FFmpeg danmaku burn-in with default, compact, and large styles, font size/color/display-area settings, and stage progress. Burn failures do not block the original upload.
 - File operation policies after part upload, before publish, after publish, or after review: delete, move, or copy videos, danmaku files, and covers.
 - Docker deployment for amd64 and arm64 with embedded frontend assets.
 
@@ -42,6 +42,7 @@ Docker Compose:
 
 ```bash
 cp .env.example .env
+$EDITOR .env  # set GOBUP_PASSWORD to a strong password
 docker compose up -d
 ```
 
@@ -54,7 +55,7 @@ Mounts:
 
 Requirements:
 
-- Go 1.24+
+- Go 1.25+
 - Node.js 24+
 - FFmpeg and ffprobe
 - Optional: DanmakuFactory
@@ -95,16 +96,26 @@ make dev-frontend
 - Custom scan paths accept comma-separated paths.
 - File watcher events trigger a scan but do not bypass minimum file age checks.
 - Upload windows support overnight ranges, for example `23:00` to `06:00`.
-- Load-balancing chooses the upload account when a task is queued. The upload itself always uses the chosen account's own Cookie.
+- Upload queue tasks can be paused, resumed, cancelled, retried, and inspected from the details dialog. Paused or cancelled states are persisted and skipped by automatic scheduling; failures are classified as network, rate-limit, auth, file, transcode, window, user, or unknown errors.
+- Upload request timeouts are configurable through environment variables. When Bilibili returns 429, retries prefer the server's `Retry-After` hint.
+- Load-balancing chooses the upload account when a task is queued. The upload itself always uses the chosen account's own Cookie; the daily quota strategy estimates remaining quota from today's uploaded parts and current queue length.
 - For auto-publish, configure a fixed publishing account for the room to avoid account ownership mismatches.
 - Danmaku burn-in requires `DANMAKU_FACTORY_PATH`, `ffmpeg`, and a usable font directory.
+- Config export redacts account Cookies, access keys, refresh tokens, and WxPusher tokens by default; include account secrets only when creating a full account backup.
 
 ## Environment
 
 ```bash
 USERNAME=admin
 PASSWORD=your_secure_password
+GOBUP_USERNAME=admin
+GOBUP_PASSWORD=your_secure_password
 TZ=Asia/Shanghai
+GOBUP_UPLOAD_TIMEOUT_MINUTES=30
+GOBUP_TLS_HANDSHAKE_TIMEOUT_SECONDS=30
+GOBUP_ALLOWED_ORIGINS=https://panel.example.com
+BILI_APP_KEY=replace_with_bilibili_app_key
+BILI_APP_SECRET=replace_with_bilibili_app_secret
 DANMAKU_FACTORY_PATH=/usr/local/bin/danmakufactory/DanmakuFactory
 DANMAKU_FONT_NAME="WenQuanYi Zen Hei"
 DANMAKU_FONTS_DIR=/usr/share/fonts
@@ -115,16 +126,33 @@ See [.env.example](.env.example) for a fuller template.
 ## Import Existing History
 
 ```bash
-python3 import_brec_history_db.py /path/to/brec.db /app/data/gobup.db
+python3 import_brec_history_db.py --dir /path/to/bilirecord --db /app/data/gobup.db --container-prefix /rec
 ```
 
-The script is aligned with the current Go service schema and uses the `c_id` column.
+The script is aligned with the current Go service schema, including `duration`, `c_id`, upload pause/cancel fields, and host-to-container path mapping.
 
 ## More Docs
 
 - [Architecture](docs/architecture.en.md)
 - [中文架构文档](docs/architecture.md)
 - [中文 README](README.md)
+
+## FAQ
+
+**How do I get Cookies?**
+Prefer QR login on the Users page. Manual Cookie login is for existing Cookies; the server validates them before saving.
+
+**What should I do when upload fails?**
+Check the latest error in the Dashboard upload queue details. Network errors, 429 rate limits, and upload-window closures are retried or delayed automatically; expired Cookies require refresh or re-login on the Users page.
+
+**Why does a queued task not upload outside the upload window?**
+When upload windows are enabled, tasks submitted outside the window stay in the queue flow and are retried when the next window starts.
+
+**Does danmaku burn failure block the original video?**
+No. Burn failures only record error and progress state; the original video upload continues.
+
+**Does config export include account secrets?**
+Not by default. User exports redact Cookies, access keys, refresh tokens, and WxPusher tokens unless account secrets are explicitly included for a full account backup.
 
 ## Credits
 

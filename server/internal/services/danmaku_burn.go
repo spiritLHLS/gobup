@@ -14,6 +14,7 @@ import (
 
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
+	danmakuprogress "github.com/gobup/server/internal/progress"
 )
 
 const (
@@ -35,6 +36,14 @@ var burningSourceParts sync.Map
 // DanmakuBurnService 弹幕烧录服务
 type DanmakuBurnService struct{}
 
+type danmakuBurnOptions struct {
+	FontSize        int
+	FontColor       string
+	PrimaryColorASS string
+	ScrollArea      float64
+	DisplayArea     float64
+}
+
 func NewDanmakuBurnService() *DanmakuBurnService {
 	return &DanmakuBurnService{}
 }
@@ -47,6 +56,15 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 		return "", fmt.Errorf("[弹幕烧录] 源分P %d 正在烧录中，本次调用跳过（已有并发任务持有锁）", part.ID)
 	}
 	defer burningSourceParts.Delete(part.ID)
+
+	historyID := int64(part.HistoryID)
+	burnCompleted := false
+	setDanmakuBurnProgress(historyID, 0, 5, "burn_check", "检查弹幕文件")
+	defer func() {
+		if !burnCompleted {
+			setDanmakuBurnFailed(historyID, "弹幕烧录失败")
+		}
+	}()
 
 	db := database.GetDB()
 
@@ -90,10 +108,14 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 	).First(&existingBurnedPart).Error; err == nil {
 		if existingBurnedPart.Upload {
 			log.Printf("[弹幕烧录] 烧录版已上传，跳过重复烧录: source_part_id=%d, burned_part_id=%d", part.ID, existingBurnedPart.ID)
+			burnCompleted = true
+			setDanmakuBurnCompleted(historyID, "弹幕烧录版已存在")
 			return existingBurnedPart.FilePath, nil
 		}
 		if _, statErr := os.Stat(existingBurnedPart.FilePath); statErr == nil {
 			log.Printf("[弹幕烧录] 烧录版文件已存在，跳过重复烧录: source_part_id=%d, file=%s", part.ID, existingBurnedPart.FilePath)
+			burnCompleted = true
+			setDanmakuBurnCompleted(historyID, "弹幕烧录版已存在")
 			return existingBurnedPart.FilePath, nil
 		}
 		// 文件已不存在，清理孤立DB记录，继续重新烧录
@@ -106,6 +128,7 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 
 	// 1. 将XML转换为ASS字幕文件（输出到临时目录，避免中文路径问题）
 	// 严格只使用 DanmakuFactory 二进制，不使用任何自实现的转换逻辑
+	setDanmakuBurnProgress(historyID, 1, 5, "burn_convert", "转换弹幕为ASS")
 	assPath, err := s.convertXMLToASSWithFactory(xmlPath, history, room, part.FilePath)
 	if err != nil {
 		return "", fmt.Errorf("DanmakuFactory 转换弹幕为ASS失败（仅支持DanmakuFactory，不启用内置转换）: %w", err)
@@ -123,12 +146,14 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 	log.Printf("[弹幕烧录] ASS字幕文件生成: %s", assPath)
 
 	// 2. 使用ffmpeg烧录弹幕
+	setDanmakuBurnProgress(historyID, 2, 5, "burn_encode", "烧录弹幕到视频")
 	outputPath := s.generateOutputPath(part.FilePath)
 	if err := s.burnWithFFmpeg(part.FilePath, assPath, outputPath); err != nil {
 		return "", fmt.Errorf("ffmpeg烧录失败: %w", err)
 	}
 
 	// 3. 获取生成文件的信息
+	setDanmakuBurnProgress(historyID, 4, 5, "burn_verify", "校验烧录输出")
 	outputFileInfo, err := os.Stat(outputPath)
 	if err != nil {
 		return "", fmt.Errorf("获取输出文件信息失败: %w", err)
@@ -137,6 +162,7 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 	log.Printf("[弹幕烧录] 烧录完成: %s (大小: %d MB)", outputPath, outputFileInfo.Size()/1024/1024)
 
 	// 4. 创建新的Part记录（标记为临时文件）
+	setDanmakuBurnProgress(historyID, 5, 5, "burn_record", "创建弹幕版分P")
 	burnedPart := &models.RecordHistoryPart{
 		HistoryID:    part.HistoryID,
 		RoomID:       part.RoomID,
@@ -165,7 +191,30 @@ func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, 
 
 	log.Printf("[弹幕烧录] 弹幕版Part创建成功: ID=%d", burnedPart.ID)
 
+	burnCompleted = true
+	setDanmakuBurnCompleted(historyID, "弹幕烧录完成")
 	return outputPath, nil
+}
+
+func setDanmakuBurnProgress(historyID int64, current, total int, stage, message string) {
+	if historyID <= 0 {
+		return
+	}
+	danmakuprogress.SetDanmakuTaskProgress(historyID, current, total, true, false, false, stage, message)
+}
+
+func setDanmakuBurnCompleted(historyID int64, message string) {
+	if historyID <= 0 {
+		return
+	}
+	danmakuprogress.SetDanmakuTaskProgress(historyID, 5, 5, false, true, false, "burn_completed", message)
+}
+
+func setDanmakuBurnFailed(historyID int64, message string) {
+	if historyID <= 0 {
+		return
+	}
+	danmakuprogress.SetDanmakuTaskProgress(historyID, 0, 5, false, false, true, "burn_failed", message)
 }
 
 // findDanmakuXML 查找对应的弹幕XML文件
@@ -258,14 +307,7 @@ func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history 
 	// 探测源视频分辨率，为弹幕定位提供正确的画布尺寸
 	resolution := s.probeVideoResolution(videoPath)
 
-	// 确定字号
-	fontSize := "38"
-	switch room.DanmakuBurnStyle {
-	case "compact":
-		fontSize = "32"
-	case "large":
-		fontSize = "48"
-	}
+	options := resolveDanmakuBurnOptions(room)
 
 	// 构建命令参数
 	// -d 0  ：弹幕密度0（不过滤重叠），保留所有弹幕；-d N(>0) 会丢弃重叠弹幕
@@ -275,9 +317,9 @@ func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history 
 		"-o", assPath,
 		"-r", resolution,
 		"-d", "-1",
-		"-S", fontSize,
-		"--scrollarea", "0.75",
-		"--displayarea", "0.8",
+		"-S", strconv.Itoa(options.FontSize),
+		"--scrollarea", formatDanmakuFactoryFloat(options.ScrollArea),
+		"--displayarea", formatDanmakuFactoryFloat(options.DisplayArea),
 	}
 
 	log.Printf("[弹幕烧录] DanmakuFactory 命令: %s %s", factoryPath, strings.Join(args, " "))
@@ -302,9 +344,199 @@ func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history 
 		os.Remove(assPath)
 		return "", fmt.Errorf("ASS文件未生成或为空: %s", assPath)
 	}
+	if err := applyASSStyleOverrides(assPath, options); err != nil {
+		os.Remove(assPath)
+		return "", err
+	}
 
 	log.Printf("[弹幕烧录] DanmakuFactory 转换成功: %s (大小: %d bytes)", assPath, fi.Size())
 	return assPath, nil
+}
+
+func resolveDanmakuBurnOptions(room *models.RecordRoom) danmakuBurnOptions {
+	fontSize := 38
+	scrollArea := 0.75
+	displayArea := 0.8
+	fontColor := ""
+
+	var config models.SystemConfig
+	if db := database.GetDB(); db != nil {
+		if err := db.First(&config).Error; err == nil {
+			switch strings.TrimSpace(config.DanmakuBurnStyle) {
+			case "compact":
+				fontSize = 32
+			case "large":
+				fontSize = 48
+			}
+			if config.DanmakuFontSize > 0 {
+				fontSize = config.DanmakuFontSize
+			}
+			if config.DanmakuScrollArea > 0 {
+				scrollArea = config.DanmakuScrollArea
+			}
+			if config.DanmakuDisplayArea > 0 {
+				displayArea = config.DanmakuDisplayArea
+			}
+			fontColor = strings.TrimSpace(config.DanmakuFontColor)
+		}
+	}
+
+	if room != nil {
+		switch strings.TrimSpace(room.DanmakuBurnStyle) {
+		case "compact":
+			fontSize = 32
+		case "large":
+			fontSize = 48
+		}
+		if room.DanmakuFontSize > 0 {
+			fontSize = room.DanmakuFontSize
+		}
+		if fontSize < 12 {
+			fontSize = 12
+		}
+		if fontSize > 72 {
+			fontSize = 72
+		}
+		if room.DanmakuScrollArea > 0 && !isLegacyDefaultFloat(room.DanmakuScrollArea, 0.75) {
+			scrollArea = room.DanmakuScrollArea
+		}
+		if room.DanmakuDisplayArea > 0 && !isLegacyDefaultFloat(room.DanmakuDisplayArea, 0.8) {
+			displayArea = room.DanmakuDisplayArea
+		}
+		if strings.TrimSpace(room.DanmakuFontColor) != "" {
+			fontColor = strings.TrimSpace(room.DanmakuFontColor)
+		}
+	}
+
+	scrollArea = clampFloat(scrollArea, 0.1, 1)
+	displayArea = clampFloat(displayArea, 0.1, 1)
+	return danmakuBurnOptions{
+		FontSize:        fontSize,
+		FontColor:       fontColor,
+		PrimaryColorASS: normalizeASSPrimaryColor(fontColor),
+		ScrollArea:      scrollArea,
+		DisplayArea:     displayArea,
+	}
+}
+
+func isLegacyDefaultFloat(value, defaultValue float64) bool {
+	diff := value - defaultValue
+	return diff > -0.000001 && diff < 0.000001
+}
+
+func formatDanmakuFactoryFloat(value float64) string {
+	text := strconv.FormatFloat(value, 'f', 2, 64)
+	text = strings.TrimRight(text, "0")
+	text = strings.TrimRight(text, ".")
+	if text == "" {
+		return "0"
+	}
+	return text
+}
+
+func normalizeASSPrimaryColor(color string) string {
+	trimmed := strings.TrimSpace(color)
+	if trimmed == "" {
+		return ""
+	}
+	upper := strings.ToUpper(trimmed)
+	if strings.HasPrefix(upper, "&H") && len(upper) == 10 && isHexString(upper[2:]) {
+		return upper
+	}
+	hex := strings.TrimPrefix(upper, "#")
+	if len(hex) != 6 || !isHexString(hex) {
+		return ""
+	}
+	red := hex[0:2]
+	green := hex[2:4]
+	blue := hex[4:6]
+	return "&H00" + blue + green + red
+}
+
+func applyASSStyleOverrides(assPath string, options danmakuBurnOptions) error {
+	if options.PrimaryColorASS == "" && options.FontSize <= 0 {
+		return nil
+	}
+	data, err := os.ReadFile(assPath)
+	if err != nil {
+		return fmt.Errorf("读取ASS样式失败: %w", err)
+	}
+	text := string(data)
+	lines := strings.Split(text, "\n")
+	inStyles := false
+	var fields []string
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.EqualFold(trimmed, "[V4+ Styles]") {
+			inStyles = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") && !strings.EqualFold(trimmed, "[V4+ Styles]") {
+			inStyles = false
+			continue
+		}
+		if !inStyles {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(trimmed), "format:") {
+			fields = parseASSFields(strings.TrimSpace(trimmed[len("format:"):]))
+			continue
+		}
+		if len(fields) == 0 || !strings.HasPrefix(strings.ToLower(trimmed), "style:") {
+			continue
+		}
+		values := strings.Split(strings.TrimSpace(trimmed[len("style:"):]), ",")
+		if len(values) < len(fields) {
+			continue
+		}
+		for idx, field := range fields {
+			switch strings.ToLower(field) {
+			case "fontsize":
+				values[idx] = strconv.Itoa(options.FontSize)
+			case "primarycolour":
+				if options.PrimaryColorASS != "" {
+					values[idx] = options.PrimaryColorASS
+				}
+			}
+		}
+		lines[i] = "Style: " + strings.Join(values, ",")
+	}
+	updated := strings.Join(lines, "\n")
+	if strings.HasSuffix(text, "\n") && !strings.HasSuffix(updated, "\n") {
+		updated += "\n"
+	}
+	if err := os.WriteFile(assPath, []byte(updated), 0o644); err != nil {
+		return fmt.Errorf("写入ASS样式失败: %w", err)
+	}
+	return nil
+}
+
+func parseASSFields(format string) []string {
+	raw := strings.Split(format, ",")
+	fields := make([]string, 0, len(raw))
+	for _, item := range raw {
+		fields = append(fields, strings.TrimSpace(item))
+	}
+	return fields
+}
+
+func isHexString(value string) bool {
+	for _, ch := range value {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F') || (ch >= 'a' && ch <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+func clampFloat(value, minValue, maxValue float64) float64 {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
 }
 
 // burnWithFFmpeg 使用ffmpeg将ASS字幕烧录进视频

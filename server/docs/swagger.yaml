@@ -1,0 +1,2203 @@
+basePath: /api
+definitions:
+  controllers.HistoryProgressResponse:
+    properties:
+      activeCount:
+        type: integer
+      historyId:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/upload.Progress'
+        type: array
+      overallPercent:
+        type: integer
+    type: object
+  models.RecordRoom:
+    properties:
+      areaName:
+        type: string
+      areaNameChild:
+        type: string
+      areaNameParent:
+        type: string
+      autoExtractCover:
+        type: boolean
+      autoParseDanmaku:
+        description: 自动解析弹幕
+        type: boolean
+      autoPublish:
+        description: 所有分P上传完成后自动投稿
+        type: boolean
+      autoSyncInfo:
+        description: 定时同步视频信息（每30分钟）
+        type: boolean
+      autoUpdatePublished:
+        description: 弹幕版上传后自动更新已投稿视频
+        type: boolean
+      autoUpload:
+        description: 录制完成后自动上传分P
+        type: boolean
+      availableLines:
+        description: 可用线路列表，逗号分隔，用于自动切换
+        type: string
+      copyright:
+        type: integer
+      coverFrameSecond:
+        type: integer
+      coverType:
+        description: default, live, frame, diy
+        type: string
+      coverUrl:
+        type: string
+      createdAt:
+        type: string
+      danmakuBurnStyle:
+        description: 弹幕样式：default, compact, large
+        type: string
+      danmakuDisplayArea:
+        description: 弹幕显示区域比例
+        type: number
+      danmakuFontColor:
+        description: '弹幕统一颜色，空=保留原色，支持 #RRGGBB'
+        type: string
+      danmakuFontSize:
+        description: 弹幕字号，0=跟随样式预设
+        type: integer
+      danmakuScrollArea:
+        description: 滚动弹幕区域比例
+        type: number
+      descTemplate:
+        type: string
+      dmDistinct:
+        description: 弹幕去重
+        type: boolean
+      dmKeywordBlacklist:
+        description: 关键词屏蔽，一行一个
+        type: string
+      dmMedalLevel:
+        description: 粉丝勋章过滤 0-不过滤 1-佩戴粉丝勋章 2-佩戴主播粉丝勋章
+        type: integer
+      dmUlLevel:
+        description: 用户等级过滤
+        type: integer
+      durationLimit:
+        type: integer
+      dynamicTemplate:
+        type: string
+      enableDanmakuBurn:
+        description: 启用弹幕烧录（生成带弹幕版本）
+        type: boolean
+      enablePreTranscode:
+        description: 上传前使用 FFmpeg 转码/压缩
+        type: boolean
+      fileOpAction:
+        description: 'FileOpAction: 0=不处理, 1=删除, 2=移动, 3=复制'
+        type: integer
+      fileOpDelay:
+        description: 'FileOpDelay: 0=立即执行, N=N天后执行'
+        type: integer
+      fileOpScope:
+        description: 'FileOpScope bitmask: 1=视频文件, 2=弹幕(.xml), 4=封面(.jpg/.png)'
+        type: integer
+      fileOpTrigger:
+        description: |-
+          文件操作配置（替代旧版 DeleteType/DeleteDay）
+          FileOpTrigger: 0=不处理, 1=分P上传完成后, 2=全部分P上传完成后（投稿前）, 3=投稿成功后, 4=审核通过后
+        type: integer
+      fileSizeLimit:
+        type: integer
+      highEnergyCut:
+        type: boolean
+      historyId:
+        type: integer
+      id:
+        type: integer
+      isOnlySelf:
+        type: boolean
+      lastCheckTime:
+        description: 最后检查时间
+        type: string
+      lastSyncTime:
+        description: 最后同步时间
+        type: string
+      line:
+        type: string
+      liveStatus:
+        description: '直播状态: 0未开播 1正在直播 2轮播中'
+        type: integer
+      mergeBySession:
+        description: 同SessionID合并到一个投稿
+        type: boolean
+      minSegmentDuration:
+        description: 最小片段时长(秒)
+        type: integer
+      moveDir:
+        type: string
+      noDisturbance:
+        type: boolean
+      partTitleTemplate:
+        type: string
+      percentileRank:
+        type: number
+      pushMsgTags:
+        type: string
+      recording:
+        type: boolean
+      roomId:
+        type: string
+      seasonId:
+        type: integer
+      sendDm:
+        type: boolean
+      sessionId:
+        type: string
+      sourceTemplate:
+        description: 转载来源模板，支持变量替换
+        type: string
+      streaming:
+        type: boolean
+      tags:
+        type: string
+      tid:
+        type: integer
+      title:
+        type: string
+      titleTemplate:
+        type: string
+      transcodeAudioBitrate:
+        type: string
+      transcodeCrf:
+        type: integer
+      transcodeMaxWidth:
+        description: 0=保持原宽度
+        type: integer
+      transcodePreset:
+        type: string
+      transcodeVideoCodec:
+        description: h264, h265
+        type: string
+      uname:
+        type: string
+      updatedAt:
+        type: string
+      upload:
+        description: 启用上传功能（总开关）
+        type: boolean
+      uploadUserId:
+        type: integer
+      uploadUserStrategy:
+        description: fixed, round_robin, least_queue
+        type: string
+      uploadWindowEnabled:
+        type: boolean
+      uploadWindowEnd:
+        description: HH:MM
+        type: string
+      uploadWindowStart:
+        description: HH:MM
+        type: string
+      windowSize:
+        description: 高能剪辑窗口大小(秒)
+        type: integer
+      wxuid:
+        type: string
+    type: object
+  upload.Progress:
+    properties:
+      chunkDone:
+        type: integer
+      chunkTotal:
+        type: integer
+      historyId:
+        type: integer
+      page:
+        type: integer
+      partId:
+        type: integer
+      percent:
+        type: integer
+      state:
+        $ref: '#/definitions/upload.ProgressState'
+      stateMsg:
+        type: string
+      updateAtMs:
+        type: integer
+    type: object
+  upload.ProgressState:
+    enum:
+    - TRANSCODING
+    - PROCESSING
+    - UPLOADING
+    - RETRY_WAIT
+    - SUCCESS
+    - FAILED
+    type: string
+    x-enum-varnames:
+    - StateTranscoding
+    - StateProcessing
+    - StateUploading
+    - StateRetryWait
+    - StateSuccess
+    - StateFailed
+info:
+  contact: {}
+  description: GoBup backend API for recording import, upload queues, publishing,
+    danmaku processing, and system operations.
+  title: GoBup API
+  version: "1.0"
+paths:
+  /biliUser/checkStatus/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Lists users and manages login, refresh, status checks, deletion,
+        updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Bilibili user APIs
+      tags:
+      - users
+  /biliUser/delete/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Lists users and manages login, refresh, status checks, deletion,
+        updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Bilibili user APIs
+      tags:
+      - users
+  /biliUser/enabled/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Lists users and manages login, refresh, status checks, deletion,
+        updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Bilibili user APIs
+      tags:
+      - users
+  /biliUser/list:
+    get:
+      consumes:
+      - application/json
+      description: Lists users and manages login, refresh, status checks, deletion,
+        updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Bilibili user APIs
+      tags:
+      - users
+  /biliUser/login:
+    get:
+      consumes:
+      - application/json
+      description: Lists users and manages login, refresh, status checks, deletion,
+        updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Bilibili user APIs
+      tags:
+      - users
+  /biliUser/loginByCookie:
+    post:
+      consumes:
+      - application/json
+      description: Lists users and manages login, refresh, status checks, deletion,
+        updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Bilibili user APIs
+      tags:
+      - users
+  /biliUser/loginCancel:
+    get:
+      consumes:
+      - application/json
+      description: Lists users and manages login, refresh, status checks, deletion,
+        updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Bilibili user APIs
+      tags:
+      - users
+  /biliUser/loginCheck:
+    get:
+      consumes:
+      - application/json
+      description: Lists users and manages login, refresh, status checks, deletion,
+        updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Bilibili user APIs
+      tags:
+      - users
+  /biliUser/refresh/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Lists users and manages login, refresh, status checks, deletion,
+        updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Bilibili user APIs
+      tags:
+      - users
+  /biliUser/update:
+    post:
+      consumes:
+      - application/json
+      description: Lists users and manages login, refresh, status checks, deletion,
+        updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Bilibili user APIs
+      tags:
+      - users
+  /captcha/clear:
+    post:
+      consumes:
+      - application/json
+      description: Reads, submits, and clears captcha state.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Captcha APIs
+      tags:
+      - captcha
+  /captcha/status:
+    get:
+      consumes:
+      - application/json
+      description: Reads, submits, and clears captcha state.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Captcha APIs
+      tags:
+      - captcha
+  /captcha/submit:
+    post:
+      consumes:
+      - application/json
+      description: Reads, submits, and clears captcha state.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Captcha APIs
+      tags:
+      - captcha
+  /config/cleanup:
+    post:
+      consumes:
+      - application/json
+      description: Exports, imports, reads, updates, toggles, summarizes, and cleans
+        up system configuration.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Config APIs
+      tags:
+      - config
+  /config/export:
+    post:
+      consumes:
+      - application/json
+      description: Exports, imports, reads, updates, toggles, summarizes, and cleans
+        up system configuration.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Config APIs
+      tags:
+      - config
+  /config/import:
+    post:
+      consumes:
+      - application/json
+      description: Exports, imports, reads, updates, toggles, summarizes, and cleans
+        up system configuration.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Config APIs
+      tags:
+      - config
+  /config/stats:
+    get:
+      consumes:
+      - application/json
+      description: Exports, imports, reads, updates, toggles, summarizes, and cleans
+        up system configuration.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Config APIs
+      tags:
+      - config
+  /config/system:
+    get:
+      consumes:
+      - application/json
+      description: Exports, imports, reads, updates, toggles, summarizes, and cleans
+        up system configuration.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Config APIs
+      tags:
+      - config
+    put:
+      consumes:
+      - application/json
+      description: Exports, imports, reads, updates, toggles, summarizes, and cleans
+        up system configuration.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Config APIs
+      tags:
+      - config
+  /config/toggle:
+    post:
+      consumes:
+      - application/json
+      description: Exports, imports, reads, updates, toggles, summarizes, and cleans
+        up system configuration.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Config APIs
+      tags:
+      - config
+  /datarepair/check:
+    get:
+      consumes:
+      - application/json
+      description: Checks and repairs database consistency.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Data repair APIs
+      tags:
+      - datarepair
+  /datarepair/repair:
+    post:
+      consumes:
+      - application/json
+      description: Checks and repairs database consistency.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Data repair APIs
+      tags:
+      - datarepair
+  /filescan/cleanCompleted:
+    post:
+      consumes:
+      - application/json
+      description: Triggers scan, previews importable files, imports selected files,
+        and cleans completed files.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: File scan APIs
+      tags:
+      - filescan
+  /filescan/cleanPreview:
+    get:
+      consumes:
+      - application/json
+      description: Triggers scan, previews importable files, imports selected files,
+        and cleans completed files.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: File scan APIs
+      tags:
+      - filescan
+  /filescan/cleanSelected:
+    post:
+      consumes:
+      - application/json
+      description: Triggers scan, previews importable files, imports selected files,
+        and cleans completed files.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: File scan APIs
+      tags:
+      - filescan
+  /filescan/import:
+    post:
+      consumes:
+      - application/json
+      description: Triggers scan, previews importable files, imports selected files,
+        and cleans completed files.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: File scan APIs
+      tags:
+      - filescan
+  /filescan/preview:
+    get:
+      consumes:
+      - application/json
+      description: Triggers scan, previews importable files, imports selected files,
+        and cleans completed files.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: File scan APIs
+      tags:
+      - filescan
+  /filescan/trigger:
+    post:
+      consumes:
+      - application/json
+      description: Triggers scan, previews importable files, imports selected files,
+        and cleans completed files.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: File scan APIs
+      tags:
+      - filescan
+  /health:
+    get:
+      description: Returns a lightweight service health status.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - system
+  /history/batchDelete:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/batchDeleteWithFiles:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/batchMoveFiles:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/batchParseDanmaku:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/batchPublish:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/batchResetStatus:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/batchSendDanmaku:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/batchSyncVideo:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/batchUpdate:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/batchUpload:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/candidateFiles/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/cleanOld:
+    post:
+      consumes:
+      - application/json
+      description: Runs batch status, upload, publish, danmaku, move, sync, delete,
+        and cleanup operations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History batch APIs
+      tags:
+      - histories
+  /history/createSyncTask/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/danmakuStats/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/delete/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/deleteWithFiles/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/export:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/forceArchive/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/list:
+    post:
+      consumes:
+      - application/json
+      description: Lists recording histories with pagination and filters.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: List histories
+      tags:
+      - histories
+  /history/manualSetPublish/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/moveFiles/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/parseDanmaku/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/part/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/publish/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/resetStatus/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/sendDanmaku/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/syncVideo/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/update:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/updatePublishStatus/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /history/upload/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Updates, deletes, uploads, publishes, syncs, and inspects a single
+        recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: History entity APIs
+      tags:
+      - histories
+  /logs:
+    get:
+      consumes:
+      - application/json
+      description: Reads and clears server logs.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Log APIs
+      tags:
+      - logs
+  /logs/clear:
+    post:
+      consumes:
+      - application/json
+      description: Reads and clears server logs.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Log APIs
+      tags:
+      - logs
+  /part/list/{id}:
+    post:
+      consumes:
+      - application/json
+      description: Lists parts and uploads a part to editor.
+      parameters:
+      - description: History or part ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Part APIs
+      tags:
+      - parts
+  /part/uploadEditor/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Lists parts and uploads a part to editor.
+      parameters:
+      - description: History or part ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Part APIs
+      tags:
+      - parts
+  /progress/danmaku/{historyId}:
+    get:
+      description: Returns danmaku sending or burn-in progress for a history.
+      parameters:
+      - description: History ID
+        in: path
+        name: historyId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Get danmaku progress
+      tags:
+      - progress
+  /progress/history/{historyId}:
+    get:
+      description: Returns active part progress and an aggregate percentage for one
+        history.
+      parameters:
+      - description: History ID
+        in: path
+        name: historyId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/controllers.HistoryProgressResponse'
+      security:
+      - BasicAuth: []
+      summary: Get history upload progress
+      tags:
+      - progress
+  /progress/part/{partId}:
+    get:
+      description: Returns current upload/transcoding progress for one part.
+      parameters:
+      - description: Part ID
+        in: path
+        name: partId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Get part upload progress
+      tags:
+      - progress
+  /progress/ws-token:
+    get:
+      description: Issues a short-lived token for connecting to /ws/progress after
+        BasicAuth succeeds.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Issue WebSocket progress token
+      tags:
+      - progress
+  /queue/danmaku/status:
+    get:
+      description: Returns danmaku and parse queue status.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Queue status APIs
+      tags:
+      - queue
+  /queue/parse/status:
+    get:
+      description: Returns danmaku and parse queue status.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Queue status APIs
+      tags:
+      - queue
+  /queue/upload/cancelAll:
+    post:
+      consumes:
+      - application/json
+      description: Pauses, resumes, cancels, and retries individual or pending upload
+        tasks.
+      parameters:
+      - description: Part ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Upload queue controls
+      tags:
+      - queue
+  /queue/upload/part/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      description: Pauses, resumes, cancels, and retries individual or pending upload
+        tasks.
+      parameters:
+      - description: Part ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Upload queue controls
+      tags:
+      - queue
+  /queue/upload/part/{id}/pause:
+    post:
+      consumes:
+      - application/json
+      description: Pauses, resumes, cancels, and retries individual or pending upload
+        tasks.
+      parameters:
+      - description: Part ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Upload queue controls
+      tags:
+      - queue
+  /queue/upload/part/{id}/resume:
+    post:
+      consumes:
+      - application/json
+      description: Pauses, resumes, cancels, and retries individual or pending upload
+        tasks.
+      parameters:
+      - description: Part ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Upload queue controls
+      tags:
+      - queue
+  /queue/upload/part/{id}/retry:
+    post:
+      consumes:
+      - application/json
+      description: Pauses, resumes, cancels, and retries individual or pending upload
+        tasks.
+      parameters:
+      - description: Part ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Upload queue controls
+      tags:
+      - queue
+  /queue/upload/pauseAll:
+    post:
+      consumes:
+      - application/json
+      description: Pauses, resumes, cancels, and retries individual or pending upload
+        tasks.
+      parameters:
+      - description: Part ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Upload queue controls
+      tags:
+      - queue
+  /queue/upload/resumeAll:
+    post:
+      consumes:
+      - application/json
+      description: Pauses, resumes, cancels, and retries individual or pending upload
+        tasks.
+      parameters:
+      - description: Part ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Upload queue controls
+      tags:
+      - queue
+  /queue/upload/status:
+    get:
+      description: Returns queue snapshots, counts, and representative pending/running/paused/cancelled/completed
+        tasks.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Get upload queue status
+      tags:
+      - queue
+  /ratelimit/config:
+    get:
+      consumes:
+      - application/json
+      description: Reads and updates upload rate limit settings.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Rate limit APIs
+      tags:
+      - ratelimit
+    post:
+      consumes:
+      - application/json
+      description: Reads and updates upload rate limit settings.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Rate limit APIs
+      tags:
+      - ratelimit
+  /room:
+    post:
+      consumes:
+      - application/json
+      description: Lists recording rooms and their upload settings.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.RecordRoom'
+            type: array
+      security:
+      - BasicAuth: []
+      summary: List rooms
+      tags:
+      - rooms
+  /room/add:
+    post:
+      consumes:
+      - application/json
+      description: Adds a recording room.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Add room
+      tags:
+      - rooms
+  /room/delete/{id}:
+    get:
+      description: Deletes a room by internal ID.
+      parameters:
+      - description: Room ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Delete room
+      tags:
+      - rooms
+  /room/lines:
+    get:
+      consumes:
+      - application/json
+      description: Lists upload lines, recommended lines, line tests, seasons, and
+        template verification results.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Room helper APIs
+      tags:
+      - rooms
+  /room/recommendedLines:
+    get:
+      consumes:
+      - application/json
+      description: Lists upload lines, recommended lines, line tests, seasons, and
+        template verification results.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Room helper APIs
+      tags:
+      - rooms
+  /room/seasons:
+    get:
+      consumes:
+      - application/json
+      description: Lists upload lines, recommended lines, line tests, seasons, and
+        template verification results.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Room helper APIs
+      tags:
+      - rooms
+  /room/testLines:
+    get:
+      consumes:
+      - application/json
+      description: Lists upload lines, recommended lines, line tests, seasons, and
+        template verification results.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Room helper APIs
+      tags:
+      - rooms
+  /room/testSpeed:
+    get:
+      consumes:
+      - application/json
+      description: Lists upload lines, recommended lines, line tests, seasons, and
+        template verification results.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Room helper APIs
+      tags:
+      - rooms
+  /room/update:
+    post:
+      consumes:
+      - application/json
+      description: Updates room settings.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Update room
+      tags:
+      - rooms
+  /room/verification:
+    get:
+      consumes:
+      - application/json
+      description: Lists upload lines, recommended lines, line tests, seasons, and
+        template verification results.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Room helper APIs
+      tags:
+      - rooms
+  /room/verifyTemplate:
+    post:
+      consumes:
+      - application/json
+      description: Lists upload lines, recommended lines, line tests, seasons, and
+        template verification results.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Room helper APIs
+      tags:
+      - rooms
+  /syncTasks/list:
+    get:
+      consumes:
+      - application/json
+      description: Lists sync tasks and retries failed tasks.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Sync task APIs
+      tags:
+      - sync
+  /syncTasks/retryFailed:
+    post:
+      consumes:
+      - application/json
+      description: Lists sync tasks and retries failed tasks.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Sync task APIs
+      tags:
+      - sync
+securityDefinitions:
+  BasicAuth:
+    type: basic
+swagger: "2.0"

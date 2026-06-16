@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gobup/server/internal/database"
+	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/ratelimit"
 )
 
@@ -38,6 +40,14 @@ func SetRateLimitConfig(c *gin.Context) {
 		ratelimit.SetGlobalRateLimit(req.SpeedMBps)
 	} else {
 		ratelimit.SetGlobalRateLimit(0) // 禁用限速
+		req.SpeedMBps = 0
+	}
+
+	db := database.GetDB()
+	var config models.SystemConfig
+	if err := db.First(&config).Error; err == nil {
+		config.UploadSpeedLimitMBps = req.SpeedMBps
+		_ = db.Save(&config).Error
 	}
 
 	c.JSON(http.StatusOK, gin.H{

@@ -5,17 +5,20 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
+	"github.com/gobup/server/internal/ratelimit"
 )
 
 type ExportConfigParams struct {
-	ExportRoom    bool `json:"rooms"`
-	ExportUser    bool `json:"users"`
-	ExportHistory bool `json:"histories"`
+	ExportRoom     bool `json:"rooms"`
+	ExportUser     bool `json:"users"`
+	ExportHistory  bool `json:"histories"`
+	IncludeSecrets bool `json:"includeSecrets"`
 }
 
 // ExportConfig 导出配置
@@ -40,7 +43,12 @@ func ExportConfig(c *gin.Context) {
 	if params.ExportUser {
 		var users []models.BiliBiliUser
 		db.Find(&users)
-		configData["userList"] = users
+		if params.IncludeSecrets {
+			configData["userList"] = users
+		} else {
+			configData["userList"] = safeBiliUserResponses(users)
+			configData["userListRedacted"] = true
+		}
 	}
 
 	// 导出历史记录
@@ -107,6 +115,12 @@ func ImportConfig(c *gin.Context) {
 			for _, user := range userList {
 				oldID := user.ID
 				user.ID = 0 // 清空ID，让数据库自动生成
+				if user.Cookies == "" {
+					user.Login = false
+					user.AccessKey = ""
+					user.RefreshToken = ""
+					user.CookieInfo = ""
+				}
 
 				// 检查是否已存在
 				var existing models.BiliBiliUser
@@ -252,6 +266,12 @@ func UpdateSystemConfig(c *gin.Context) {
 	config.EnableDanmakuProxy = req.EnableDanmakuProxy
 	config.DanmakuProxyList = req.DanmakuProxyList
 	config.AutoDataRepair = req.AutoDataRepair
+	config.UploadSpeedLimitMBps = req.UploadSpeedLimitMBps
+	config.DanmakuBurnStyle = strings.TrimSpace(req.DanmakuBurnStyle)
+	config.DanmakuFontSize = req.DanmakuFontSize
+	config.DanmakuFontColor = strings.TrimSpace(req.DanmakuFontColor)
+	config.DanmakuScrollArea = req.DanmakuScrollArea
+	config.DanmakuDisplayArea = req.DanmakuDisplayArea
 
 	// 参数验证
 	if config.FileScanInterval < 10 {
@@ -260,11 +280,47 @@ func UpdateSystemConfig(c *gin.Context) {
 	if config.FileScanMinAge < 1 {
 		config.FileScanMinAge = 1
 	}
+	if config.UploadSpeedLimitMBps < 0 {
+		config.UploadSpeedLimitMBps = 0
+	}
+	switch config.DanmakuBurnStyle {
+	case "compact", "large":
+	default:
+		config.DanmakuBurnStyle = "default"
+	}
+	if config.DanmakuFontSize < 0 {
+		config.DanmakuFontSize = 0
+	}
+	if config.DanmakuFontSize > 0 && config.DanmakuFontSize < 12 {
+		config.DanmakuFontSize = 12
+	}
+	if config.DanmakuFontSize > 72 {
+		config.DanmakuFontSize = 72
+	}
+	if config.DanmakuScrollArea <= 0 {
+		config.DanmakuScrollArea = 0.75
+	}
+	if config.DanmakuScrollArea < 0.1 {
+		config.DanmakuScrollArea = 0.1
+	}
+	if config.DanmakuScrollArea > 1 {
+		config.DanmakuScrollArea = 1
+	}
+	if config.DanmakuDisplayArea <= 0 {
+		config.DanmakuDisplayArea = 0.8
+	}
+	if config.DanmakuDisplayArea < 0.1 {
+		config.DanmakuDisplayArea = 0.1
+	}
+	if config.DanmakuDisplayArea > 1 {
+		config.DanmakuDisplayArea = 1
+	}
 
 	if err := db.Save(&config).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "保存失败"})
 		return
 	}
+	ratelimit.SetGlobalRateLimit(config.UploadSpeedLimitMBps)
 
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "配置更新成功", "data": config})
 }

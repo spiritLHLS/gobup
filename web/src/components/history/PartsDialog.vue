@@ -41,6 +41,9 @@
               </template>
               <div>
                 <div style="font-weight: bold; margin-bottom: 8px;">上传错误信息：</div>
+                <el-tag v-if="row.uploadErrorType" size="small" :type="errorTagType(row.uploadErrorType)" style="margin-bottom: 8px;">
+                  {{ errorTypeLabel(row.uploadErrorType) }}
+                </el-tag>
                 <div style="color: #e6a23c;">{{ row.uploadErrorMsg }}</div>
                 <div v-if="row.uploadRetryCount" style="margin-top: 8px; font-size: 12px; color: #999;">
                   已重试: {{ row.uploadRetryCount }} 次
@@ -106,6 +109,31 @@ const props = defineProps({
 })
 
 defineEmits(['update:visible'])
+
+const errorTypeLabel = (type) => {
+  const labels = {
+    network: '网络',
+    rate_limit: '限流',
+    auth: '鉴权',
+    file: '文件',
+    transcode: '转码',
+    window: '窗口',
+    user: '用户',
+    unknown: '未知'
+  }
+  return labels[type] || type || '-'
+}
+
+const errorTagType = (type) => {
+  const types = {
+    rate_limit: 'danger',
+    auth: 'danger',
+    file: 'warning',
+    transcode: 'warning',
+    window: 'warning'
+  }
+  return types[type] || 'info'
+}
 
 const getPartProgress = (partId) => {
   if (!props.uploadProgress || !props.uploadProgress.items) return null

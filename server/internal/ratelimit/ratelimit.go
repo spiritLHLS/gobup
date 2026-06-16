@@ -19,22 +19,42 @@ var globalRateLimiter = &RateLimiter{
 	enabled: false,
 }
 
+// NewRateLimiter 创建一个独立上传速率限制器。
+// speedMBps: 速度限制（MB/s），0表示无限制。
+func NewRateLimiter(speedMBps float64) *RateLimiter {
+	rl := &RateLimiter{
+		limiter: rate.NewLimiter(rate.Inf, 0),
+		enabled: false,
+	}
+	rl.SetLimit(speedMBps)
+	return rl
+}
+
 // SetGlobalRateLimit 设置全局上传速率限制
 // speedMBps: 速度限制（MB/s），0表示无限制
 func SetGlobalRateLimit(speedMBps float64) {
-	globalRateLimiter.mu.Lock()
-	defer globalRateLimiter.mu.Unlock()
+	globalRateLimiter.SetLimit(speedMBps)
+}
+
+// SetLimit 设置当前限制器的速率。
+func (rl *RateLimiter) SetLimit(speedMBps float64) {
+	if rl == nil {
+		return
+	}
+
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
 
 	if speedMBps <= 0 {
 		// 禁用限速
-		globalRateLimiter.enabled = false
-		globalRateLimiter.limiter = rate.NewLimiter(rate.Inf, 0)
+		rl.enabled = false
+		rl.limiter = rate.NewLimiter(rate.Inf, 0)
 	} else {
 		// 启用限速：转换为每秒字节数
 		bytesPerSecond := speedMBps * 1024 * 1024
-		globalRateLimiter.enabled = true
+		rl.enabled = true
 		// burst设置为1秒的数据量，允许短时突发
-		globalRateLimiter.limiter = rate.NewLimiter(rate.Limit(bytesPerSecond), int(bytesPerSecond))
+		rl.limiter = rate.NewLimiter(rate.Limit(bytesPerSecond), int(bytesPerSecond))
 	}
 }
 

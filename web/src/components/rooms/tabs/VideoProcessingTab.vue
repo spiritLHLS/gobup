@@ -5,10 +5,18 @@
 
       <el-form-item label="启用预转码">
         <el-switch v-model="localForm.enablePreTranscode" />
-        <div class="help-text">上传前使用 FFmpeg 转为 H.264/AAC MP4 临时文件，可降低体积并提升 B 站兼容性</div>
+        <div class="help-text">上传前使用 FFmpeg 转为 MP4 临时文件，可降低体积并提升 B 站兼容性</div>
       </el-form-item>
 
       <template v-if="localForm.enablePreTranscode">
+        <el-form-item label="视频编码">
+          <el-select v-model="localForm.transcodeVideoCodec" style="width: 200px">
+            <el-option value="h264" label="H.264（兼容优先）" />
+            <el-option value="h265" label="H.265（体积优先）" />
+          </el-select>
+          <div class="help-text">H.264 默认兼容性最好；H.265 通常体积更小但转码更慢</div>
+        </el-form-item>
+
         <el-form-item label="编码预设">
           <el-select v-model="localForm.transcodePreset" style="width: 200px">
             <el-option value="ultrafast" label="ultrafast" />
@@ -114,12 +122,52 @@
 
       <el-form-item label="弹幕烧录样式" v-if="localForm.enableDanmakuBurn">
         <el-select v-model="localForm.danmakuBurnStyle" style="width: 200px">
-          <el-option value="default" label="默认样式" />
+          <el-option value="default" label="继承全局默认" />
           <el-option value="compact" label="紧凑样式" />
           <el-option value="large" label="大字样式" />
         </el-select>
-        <div class="help-text">控制烧录到视频中的弹幕字号和排列样式</div>
+        <div class="help-text">控制烧录到视频中的弹幕字号和排列样式；字号、颜色和区域设置后会覆盖全局默认值</div>
       </el-form-item>
+
+      <template v-if="localForm.enableDanmakuBurn">
+        <el-form-item label="弹幕字号">
+          <el-input-number
+            v-model="localForm.danmakuFontSize"
+            :min="0"
+            :max="72"
+            controls-position="right"
+            style="width: 200px"
+          />
+          <span style="margin-left: 10px;">0=跟随样式</span>
+        </el-form-item>
+
+        <el-form-item label="弹幕颜色">
+          <el-color-picker v-model="localForm.danmakuFontColor" />
+          <span style="margin-left: 10px;">留空保留原弹幕颜色</span>
+        </el-form-item>
+
+        <el-form-item label="滚动区域">
+          <el-slider
+            v-model="localForm.danmakuScrollArea"
+            :min="0.1"
+            :max="1"
+            :step="0.05"
+            show-input
+            style="width: 360px"
+          />
+        </el-form-item>
+
+        <el-form-item label="显示区域">
+          <el-slider
+            v-model="localForm.danmakuDisplayArea"
+            :min="0.1"
+            :max="1"
+            :step="0.05"
+            show-input
+            style="width: 360px"
+          />
+        </el-form-item>
+      </template>
       
       <el-divider content-position="left">弹幕过滤</el-divider>
       

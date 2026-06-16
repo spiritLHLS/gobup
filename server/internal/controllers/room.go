@@ -18,6 +18,16 @@ import (
 	"github.com/imroc/req/v3"
 )
 
+// ListRooms 列出全部房间配置。
+//
+// @Summary List rooms
+// @Description Lists recording rooms and their upload settings.
+// @Tags rooms
+// @Security BasicAuth
+// @Accept json
+// @Produce json
+// @Success 200 {array} models.RecordRoom
+// @Router /room [post]
 func ListRooms(c *gin.Context) {
 	db := database.GetDB()
 	var rooms []models.RecordRoom
@@ -75,8 +85,54 @@ func normalizeRoomConfig(room *models.RecordRoom) {
 	if room.UploadWindowEnd == "" {
 		room.UploadWindowEnd = "23:59"
 	}
+	if room.Priority < 0 {
+		room.Priority = 0
+	}
+	if room.ID == 0 && room.Priority == 0 {
+		room.Priority = 50
+	}
+	if room.Priority > 100 {
+		room.Priority = 100
+	}
+	if room.UploadSpeedLimitMBps < 0 {
+		room.UploadSpeedLimitMBps = 0
+	}
 	if room.CoverFrameSecond < 0 {
 		room.CoverFrameSecond = 5
+	}
+	switch strings.TrimSpace(room.DanmakuBurnStyle) {
+	case "compact", "large":
+		room.DanmakuBurnStyle = strings.TrimSpace(room.DanmakuBurnStyle)
+	default:
+		room.DanmakuBurnStyle = "default"
+	}
+	if room.DanmakuFontSize < 0 {
+		room.DanmakuFontSize = 0
+	}
+	if room.DanmakuFontSize > 0 && room.DanmakuFontSize < 12 {
+		room.DanmakuFontSize = 12
+	}
+	if room.DanmakuFontSize > 72 {
+		room.DanmakuFontSize = 72
+	}
+	room.DanmakuFontColor = strings.TrimSpace(room.DanmakuFontColor)
+	if room.DanmakuScrollArea <= 0 {
+		room.DanmakuScrollArea = 0.75
+	}
+	if room.DanmakuScrollArea < 0.1 {
+		room.DanmakuScrollArea = 0.1
+	}
+	if room.DanmakuScrollArea > 1 {
+		room.DanmakuScrollArea = 1
+	}
+	if room.DanmakuDisplayArea <= 0 {
+		room.DanmakuDisplayArea = 0.8
+	}
+	if room.DanmakuDisplayArea < 0.1 {
+		room.DanmakuDisplayArea = 0.1
+	}
+	if room.DanmakuDisplayArea > 1 {
+		room.DanmakuDisplayArea = 1
 	}
 	if room.TranscodePreset == "" {
 		room.TranscodePreset = "veryfast"
@@ -93,6 +149,7 @@ func normalizeRoomConfig(room *models.RecordRoom) {
 	if room.TranscodeAudioBitrate == "" {
 		room.TranscodeAudioBitrate = "160k"
 	}
+	room.TranscodeVideoCodec = models.NormalizeTranscodeVideoCodec(room.TranscodeVideoCodec)
 }
 
 func DeleteRoom(c *gin.Context) {
@@ -188,6 +245,10 @@ func GetSeasons(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户未登录"})
 		return
 	}
+	if !user.Enabled {
+		c.JSON(http.StatusForbidden, gin.H{"error": "用户已禁用"})
+		return
+	}
 
 	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
 	seasons, err := client.GetSeasons()
@@ -200,6 +261,54 @@ func GetSeasons(c *gin.Context) {
 		seasons = []bili.Season{}
 	}
 	c.JSON(http.StatusOK, seasons)
+}
+
+func CreateSeason(c *gin.Context) {
+	var req struct {
+		UserID uint   `json:"userId"`
+		Title  string `json:"title"`
+		Desc   string `json:"desc"`
+		Cover  string `json:"cover"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "参数错误"})
+		return
+	}
+	req.Title = strings.TrimSpace(req.Title)
+	req.Desc = strings.TrimSpace(req.Desc)
+	req.Cover = strings.TrimSpace(req.Cover)
+	if req.UserID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "缺少用户ID"})
+		return
+	}
+	if req.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "合集标题不能为空"})
+		return
+	}
+
+	db := database.GetDB()
+	var user models.BiliBiliUser
+	if err := db.First(&user, req.UserID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"type": "error", "msg": "用户不存在"})
+		return
+	}
+	if !user.Login {
+		c.JSON(http.StatusUnauthorized, gin.H{"type": "error", "msg": "用户未登录"})
+		return
+	}
+	if !user.Enabled {
+		c.JSON(http.StatusForbidden, gin.H{"type": "error", "msg": "用户已禁用"})
+		return
+	}
+
+	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+	season, err := client.CreateSeason(req.Title, req.Desc, req.Cover)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, season)
 }
 
 // GetRecommendedLines 获取推荐线路

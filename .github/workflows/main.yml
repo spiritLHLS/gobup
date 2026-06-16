@@ -9,9 +9,16 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
     
     steps:
     - name: Checkout code
@@ -20,7 +27,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.24'
+        go-version: '1.25'
         cache: true
         cache-dependency-path: server/go.sum
 
@@ -34,6 +41,14 @@ jobs:
     - name: Get current date
       id: date
       run: echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+    - name: Verify Swagger documentation
+      working-directory: ./server
+      run: |
+        go run github.com/swaggo/swag/cmd/swag@v1.8.12 init --parseDependency --parseInternal --output docs --quiet
+        git diff --exit-code docs
+        cd ..
+        node scripts/check_swagger_coverage.js
 
     - name: Create build directory
       run: mkdir -p build

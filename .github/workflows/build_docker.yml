@@ -14,9 +14,14 @@ env:
   GHCR_IMAGE: ghcr.io/spiritlhls/gobup
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   check-workflow-success:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Check trigger type and status
@@ -33,6 +38,7 @@ jobs:
   build-dockerhub:
     runs-on: ${{ matrix.runner }}
     needs: check-workflow-success
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
@@ -109,6 +115,7 @@ jobs:
   build-ghcr:
     runs-on: ${{ matrix.runner }}
     needs: check-workflow-success
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
@@ -182,6 +189,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-dockerhub
     if: always()
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -253,6 +261,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-ghcr
     if: always()
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write

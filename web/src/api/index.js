@@ -7,6 +7,30 @@ const request = axios.create({
   timeout: 30000
 })
 
+const getResponseMessage = (data, fallback = '请求失败') => {
+  if (!data) return fallback
+  if (typeof data === 'string') return data
+  return data.msg || data.message || data.error || fallback
+}
+
+const normalizeBusinessPayload = (data) => {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data
+
+  if (data.message && !data.msg) {
+    data.msg = data.message
+  }
+  if (data.error && !data.msg) {
+    data.msg = data.error
+  }
+  if (typeof data.code !== 'undefined' && typeof data.ok === 'undefined') {
+    data.ok = Number(data.code) === 0
+  }
+  if (data.type && typeof data.ok === 'undefined') {
+    data.ok = data.type === 'success'
+  }
+  return data
+}
+
 // 请求拦截器
 request.interceptors.request.use(
   config => {
@@ -26,7 +50,7 @@ request.interceptors.request.use(
 // 响应拦截器
 request.interceptors.response.use(
   response => {
-    return response.data
+    return normalizeBusinessPayload(response.data)
   },
   error => {
     // 处理 401 未授权错误
@@ -38,7 +62,7 @@ request.interceptors.response.use(
       return Promise.reject(error)
     }
     
-    ElMessage.error(error.response?.data?.message || error.message || '请求失败')
+    ElMessage.error(getResponseMessage(error.response?.data, error.message || '请求失败'))
     return Promise.reject(error)
   }
 )
@@ -52,7 +76,8 @@ export const roomAPI = {
   testLines: () => request.get('/room/testLines', { timeout: 60000 }),
   testSpeed: (line) => request.get('/room/testSpeed', { params: { line }, timeout: 30000 }),
   verifyTemplate: (data) => request.post('/room/verifyTemplate', data),
-  getSeasons: (userId) => request.get('/room/seasons', { params: { userId } })
+  getSeasons: (userId) => request.get('/room/seasons', { params: { userId } }),
+  createSeason: (data) => request.post('/room/seasons', data)
 }
 
 // 录制历史
@@ -61,6 +86,10 @@ export const historyAPI = {
   export: (params) => request.post('/history/export', params, { responseType: 'blob' }),
   publish: (id) => request.post(`/history/publish/${id}`),
   delete: (id) => request.get(`/history/delete/${id}`),
+  deleteWithFiles: (id) => request.post(`/history/deleteWithFiles/${id}`, {
+    confirmDeleteFiles: true,
+    confirmText: 'DELETE_FILES'
+  }),
   parts: (id) => request.get(`/history/part/${id}`),
   upload: (id) => request.post(`/history/upload/${id}`),
   syncVideo: (id) => request.post(`/history/syncVideo/${id}`),
@@ -72,7 +101,15 @@ export const historyAPI = {
 
 // 队列管理
 export const queueAPI = {
+  taskStatus: () => request.get('/queue/tasks/status'),
   uploadStatus: () => request.get('/queue/upload/status'),
+  pauseUploadPart: (id) => request.post(`/queue/upload/part/${id}/pause`),
+  resumeUploadPart: (id) => request.post(`/queue/upload/part/${id}/resume`),
+  cancelUploadPart: (id) => request.post(`/queue/upload/part/${id}/cancel`),
+  retryUploadPart: (id) => request.post(`/queue/upload/part/${id}/retry`),
+  pauseAllUploads: () => request.post('/queue/upload/pauseAll'),
+  resumeAllUploads: () => request.post('/queue/upload/resumeAll'),
+  cancelAllUploads: () => request.post('/queue/upload/cancelAll'),
   danmakuStatus: () => request.get('/queue/danmaku/status'),
   parseStatus: () => request.get('/queue/parse/status')
 }
@@ -87,7 +124,8 @@ export const userAPI = {
   update: (data) => request.post('/biliUser/update', data),
   refresh: (id) => request.get(`/biliUser/refresh/${id}`),
   checkStatus: (id) => request.get(`/biliUser/checkStatus/${id}`),
-  delete: (id) => request.get(`/biliUser/delete/${id}`)
+  delete: (id) => request.get(`/biliUser/delete/${id}`),
+  setEnabled: (id, enabled) => request.post(`/biliUser/enabled/${id}`, { enabled })
 }
 
 // 配置管理
@@ -108,8 +146,15 @@ export const filescanAPI = {
   preview: () => request.get('/filescan/preview'),
   import: (filePaths) => request.post('/filescan/import', { filePaths }),
   cleanPreview: () => request.get('/filescan/cleanPreview'),
-  cleanSelected: (filePaths) => request.post('/filescan/cleanSelected', { filePaths }),
-  cleanCompleted: () => request.post('/filescan/cleanCompleted')
+  cleanSelected: (filePaths) => request.post('/filescan/cleanSelected', {
+    filePaths,
+    confirmDeleteFiles: true,
+    confirmText: 'DELETE_FILES'
+  }),
+  cleanCompleted: () => request.post('/filescan/cleanCompleted', {
+    confirmDeleteFiles: true,
+    confirmText: 'DELETE_FILES'
+  })
 }
 
 // 数据修复

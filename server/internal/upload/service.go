@@ -12,6 +12,7 @@ import (
 	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
+	"github.com/gobup/server/internal/ratelimit"
 	"github.com/gobup/server/internal/services"
 )
 
@@ -57,9 +58,14 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 	if room == nil {
 		return fmt.Errorf("房间配置为空")
 	}
-
-	if ok, window := isWithinUploadWindow(room, time.Now()); !ok {
-		return fmt.Errorf("当前不在上传时间窗口(%s)，自动调度会在窗口内重试", window)
+	if part == nil {
+		return fmt.Errorf("分P为空")
+	}
+	if part.UploadPaused {
+		return fmt.Errorf("分P %d 已暂停上传", part.ID)
+	}
+	if part.UploadCancelled {
+		return fmt.Errorf("分P %d 已取消上传", part.ID)
 	}
 
 	selectedUserID, err := s.selectUploadUserID(room)
@@ -69,6 +75,10 @@ func (s *Service) UploadPart(part *models.RecordHistoryPart, history *models.Rec
 
 	taskRoom := *room
 	taskRoom.UploadUserID = selectedUserID
+	if windowErr := newUploadWindowClosedError(&taskRoom, time.Now()); windowErr != nil {
+		log.Printf("[队列] 分P %d 当前不在上传时间窗口(%s)，已入队等待约 %s 后重试",
+			part.ID, windowErr.Window, formatDurationForLog(windowErr.RetryAfter))
+	}
 
 	return s.queueManager.AddTask(selectedUserID, part, history, &taskRoom)
 }
@@ -82,8 +92,8 @@ func (s *Service) RequeueStuckTempParts() {
 
 	var stuckParts []models.RecordHistoryPart
 	if err := db.Where(
-		"is_temp_file = ? AND upload = ? AND uploading = ? AND file_delete = ?",
-		true, false, false, false,
+		"is_temp_file = ? AND upload = ? AND uploading = ? AND file_delete = ? AND upload_paused = ? AND upload_cancelled = ?",
+		true, false, false, false, false, false,
 	).Find(&stuckParts).Error; err != nil {
 		log.Printf("[重启恢复] 查询滞留临时分P失败: %v", err)
 		return
@@ -105,6 +115,7 @@ func (s *Service) RequeueStuckTempParts() {
 			log.Printf("[重启恢复] 临时分P文件不存在，标记为已删除: part_id=%d, file=%s", part.ID, part.FilePath)
 			part.FileDelete = true
 			part.UploadErrorMsg = "临时文件不存在，已自动清理"
+			part.UploadErrorType = UploadErrorTypeFile
 			db.Save(&part)
 			continue
 		}
@@ -153,7 +164,7 @@ func (s *Service) RequeueStuckTempParts() {
 func (s *Service) ResetStuckUploadingParts() {
 	db := database.GetDB()
 	result := db.Model(&models.RecordHistoryPart{}).
-		Where("uploading = ? AND upload = ?", true, false).
+		Where("uploading = ? AND upload = ? AND upload_cancelled = ?", true, false, false).
 		Updates(map[string]interface{}{"uploading": false})
 	if result.Error != nil {
 		log.Printf("[启动恢复] 重置滞留 uploading 状态失败: %v", result.Error)
@@ -369,6 +380,7 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		part.RateLimitCooldownAt = nil
 		part.RateLimitRetryCount = 0
 		part.UploadErrorMsg = ""
+		part.UploadErrorType = ""
 		db.Save(part)
 	}
 
@@ -385,6 +397,14 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 			log.Printf("[Upload] 分P %d 已经上传过（DB最新状态），跳过: CID=%d, FileName=%s", part.ID, freshPart.CID, freshPart.FileName)
 			return nil
 		}
+		if freshPart.UploadCancelled {
+			log.Printf("[Upload] 分P %d 已取消上传，跳过: FileName=%s", part.ID, freshPart.FileName)
+			return fmt.Errorf("分P %d 已取消上传", part.ID)
+		}
+		if freshPart.UploadPaused {
+			log.Printf("[Upload] 分P %d 已暂停上传，跳过: FileName=%s", part.ID, freshPart.FileName)
+			return fmt.Errorf("分P %d 已暂停上传", part.ID)
+		}
 		// 注意：不在此处因 freshPart.Uploading==true 而跳过。
 		// RequeueStuckTempParts 会在入队前将 Uploading 置为 true 作为防重入队标记，
 		// 但入队后由此处（已持有 uploadingParts 内存锁）负责实际上传。
@@ -395,12 +415,13 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		log.Printf("[Upload] 无法从DB读取分P %d 的最新状态，使用传入数据继续: %v", part.ID, err)
 	}
 
-	if ok, window := isWithinUploadWindow(room, time.Now()); !ok {
-		return fmt.Errorf("当前不在上传时间窗口(%s)，自动调度会在窗口内重试", window)
+	if windowErr := newUploadWindowClosedError(room, time.Now()); windowErr != nil {
+		return windowErr
 	}
 
 	// 标记为上传中
 	part.Uploading = true
+	part.UploadUserID = room.UploadUserID
 	db.Save(part)
 
 	// 更新历史记录的上传状态为“上传中”
@@ -424,6 +445,9 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	if !user.Login {
 		return fmt.Errorf("用户未登录")
 	}
+	if !user.Enabled {
+		return fmt.Errorf("用户已禁用")
+	}
 
 	// 验证Cookie
 	valid, err := bili.ValidateCookie(user.Cookies)
@@ -436,6 +460,9 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	// 检查文件是否存在
 	if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
 		return fmt.Errorf("文件不存在: %s", part.FilePath)
+	}
+	if err := validateUploadVideoPath(part.FilePath); err != nil {
+		return err
 	}
 
 	// 检查文件是否需要分割（分片数超过10000）
@@ -466,12 +493,22 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		return nil
 	}
 
+	page := part.Page
+	if page <= 0 {
+		page = 1
+	}
+
 	uploadPath := part.FilePath
 	cleanupUploadFile := func() {}
 	if room.EnablePreTranscode && !part.IsTempFile {
-		processedPath, cleanup, err := services.NewVideoProcessingService().TranscodeForUpload(part.FilePath, room)
+		s.progressTracker.MarkTranscoding(int64(part.ID), int64(history.ID), page, 0, "准备转码")
+		processedPath, cleanup, err := services.NewVideoProcessingService().TranscodeForUploadWithProgress(part.FilePath, room, func(percent int, msg string) {
+			s.progressTracker.MarkTranscoding(int64(part.ID), int64(history.ID), page, percent, msg)
+		})
 		if err != nil {
 			part.UploadErrorMsg = fmt.Sprintf("上传前转码失败: %v", err)
+			part.UploadErrorType = UploadErrorTypeTranscode
+			s.progressTracker.MarkFailed(int64(part.ID), part.UploadErrorMsg)
 			db.Save(part)
 			return fmt.Errorf("上传前转码失败: %w", err)
 		}
@@ -495,6 +532,9 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	// 创建客户端
 	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
 	client.Line = room.Line // 设置上传线路
+	if room.UploadSpeedLimitMBps > 0 {
+		client.UploadRateLimiter = ratelimit.NewRateLimiter(room.UploadSpeedLimitMBps)
+	}
 
 	// 根据线路选择上传器
 	var uploader interface {
@@ -514,13 +554,20 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	}
 
 	// 开始进度跟踪
-	page := 1 // 默认第一页
 	s.progressTracker.Start(int64(part.ID), int64(history.ID), page, chunkTotal)
 
 	// 设置进度回调
 	uploader.SetProgressCallback(func(chunkDone, chunkTotal int) {
 		s.progressTracker.UpdateChunkDone(int64(part.ID), int64(history.ID), page, chunkDone, chunkTotal)
 	})
+	if retryAware, ok := uploader.(interface{ SetRetryCallback(bili.RetryCallback) }); ok {
+		retryAware.SetRetryCallback(func(attempt, maxAttempts int, delay time.Duration, chunkDone, chunkTotal int) {
+			s.progressTracker.MarkRetryWait(
+				int64(part.ID),
+				formatUploadRetryWaitMessage(attempt, maxAttempts, delay, chunkDone, chunkTotal),
+			)
+		})
+	}
 
 	// 执行上传（upload_upos.go内部已经有断点续传和重试机制）
 	var uploadResult *bili.UploadResult
@@ -543,16 +590,20 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 
 	if uploadErr != nil {
 		// 如果是406速率限制，并且所有重试都失败，设置24小时冷却期
+		rateLimitCooldownText := ""
 		if is406RateLimit {
 			cooldownTime := time.Now().Add(24 * time.Hour)
 			part.RateLimitCooldownAt = &cooldownTime
 			part.RateLimitRetryCount++
-			part.UploadErrorMsg = fmt.Sprintf("速率限制(406)，已设置24小时冷却期至 %s", cooldownTime.Format("2006-01-02 15:04:05"))
+			rateLimitCooldownText = cooldownTime.Format("2006-01-02 15:04:05")
+			part.UploadErrorMsg = fmt.Sprintf("速率限制(406)，已设置24小时冷却期至 %s", rateLimitCooldownText)
+			part.UploadErrorType = UploadErrorTypeRateLimit
 			db.Save(part)
-			log.Printf("[速率限制] 分P %d 触发406限制，设置24小时冷却期至: %s", part.ID, cooldownTime.Format("2006-01-02 15:04:05"))
+			log.Printf("[速率限制] 分P %d 触发406限制，设置24小时冷却期至: %s", part.ID, rateLimitCooldownText)
 		} else {
 			part.UploadRetryCount++
 			part.UploadErrorMsg = uploadErr.Error()
+			part.UploadErrorType = classifyUploadError(uploadErr)
 			db.Save(part)
 		}
 
@@ -577,16 +628,24 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 
 		// 推送失败通知（使用历史记录中实际的主播名）
 		if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
-			s.wxPusher.NotifyUploadFailed(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, uploadErr.Error())
+			if is406RateLimit {
+				s.wxPusher.NotifyRateLimit(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, rateLimitCooldownText)
+			} else {
+				s.wxPusher.NotifyUploadFailed(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, uploadErr.Error())
+			}
 		}
 		return fmt.Errorf("上传失败: %w", uploadErr)
 	}
 
 	// 更新分P信息
+	uploadedAt := time.Now()
 	part.Upload = true
+	part.UploadedAt = &uploadedAt
+	part.UploadUserID = room.UploadUserID
 	part.FileName = uploadResult.FileName
 	part.CID = uploadResult.BizID
 	part.UploadErrorMsg = ""
+	part.UploadErrorType = ""
 	db.Save(part)
 
 	log.Printf("上传完成: part_id=%d, cid=%d", part.ID, part.CID)
@@ -683,6 +742,23 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	return nil
 }
 
+func formatUploadRetryWaitMessage(attempt, maxAttempts int, delay time.Duration, chunkDone, chunkTotal int) string {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if maxAttempts < attempt {
+		maxAttempts = attempt
+	}
+	base := fmt.Sprintf("等待 %s 后重试 (%d/%d)", formatDurationForLog(delay), attempt, maxAttempts)
+	if chunkTotal > 0 {
+		if chunkDone < 0 {
+			chunkDone = 0
+		}
+		return fmt.Sprintf("%s，已完成分片 %d/%d", base, chunkDone, chunkTotal)
+	}
+	return base
+}
+
 func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.RecordRoom) {
 	db := database.GetDB()
 
@@ -695,6 +771,11 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 	}
 	// 使用freshHistory进行后续判断（替代stale的传入指针）
 	history = &freshHistory
+	if history.PublishCooldownAt != nil && history.PublishCooldownAt.After(time.Now()) {
+		log.Printf("[自动投稿] 历史记录处于投稿冷却期，暂缓投稿: history_id=%d, cooldown_until=%s, error_type=%s",
+			history.ID, history.PublishCooldownAt.Format("2006-01-02 15:04:05"), history.PublishErrorType)
+		return
+	}
 	// totalCount 只统计非临时文件（is_temp_file=false），并排除"已标记删除且未上传"的孤立记录：
 	//   - 烧录/切分产生的临时分P（is_temp_file=true）不应阻塞投稿条件
 	//   - file_delete=true 且 upload=false ：孤立临时分P（烧录失败后清理标记），不能阻塞投稿

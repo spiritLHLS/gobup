@@ -1,11 +1,13 @@
 package upload
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
 )
 
@@ -83,17 +85,35 @@ func (q *UserUploadQueue) process() {
 		log.Printf("[队列] 开始处理用户%d的上传任务: part_id=%d, file=%s (剩余队列: %d)",
 			q.userID, task.Part.ID, task.Part.FileName, len(q.tasks))
 
+		if windowErr := newUploadWindowClosedError(task.Room, time.Now()); windowErr != nil {
+			log.Printf("[队列] 用户%d的任务part_id=%d当前不在上传时间窗口(%s)，约%s后重新入队",
+				q.userID, task.Part.ID, windowErr.Window, formatDurationForLog(windowErr.RetryAfter))
+			recordQueuedUploadError(task.Part, windowErr)
+			q.requeueAfter(task, windowErr.RetryAfter)
+			continue
+		}
+
 		// 速率限制冷却期内直接丢弃任务，由10分钟调度器重新入队
 		// 原来的做法是将任务放回队列尾部并立即 continue，导致忙等死循环（CPU 100%）
 		if task.Part.RateLimitCooldownAt != nil && time.Now().Before(*task.Part.RateLimitCooldownAt) {
 			remainingTime := time.Until(*task.Part.RateLimitCooldownAt)
 			log.Printf("[队列] 用户%d的任务part_id=%d处于速率限制冷却期，剩余%.0f分钟，丢弃任务（调度器将在冷却期结束后重新入队）",
 				q.userID, task.Part.ID, remainingTime.Minutes())
+			recordQueuedUploadError(task.Part, fmt.Errorf("速率限制冷却期中，剩余时间: %.0f分钟", remainingTime.Minutes()))
 			continue
 		}
 
 		// 执行上传
 		if err := q.service.uploadPartInternal(task.Part, task.History, task.Room); err != nil {
+			var windowErr *UploadWindowClosedError
+			if errors.As(err, &windowErr) {
+				log.Printf("[队列] 用户%d的任务part_id=%d上传窗口刚关闭(%s)，约%s后重新入队",
+					q.userID, task.Part.ID, windowErr.Window, formatDurationForLog(windowErr.RetryAfter))
+				recordQueuedUploadError(task.Part, windowErr)
+				q.requeueAfter(task, windowErr.RetryAfter)
+				continue
+			}
+			recordQueuedUploadError(task.Part, err)
 			log.Printf("[队列] 用户%d的上传任务失败: part_id=%d, error=%v",
 				q.userID, task.Part.ID, err)
 		} else {
@@ -101,6 +121,37 @@ func (q *UserUploadQueue) process() {
 				q.userID, task.Part.ID)
 		}
 	}
+}
+
+func (q *UserUploadQueue) requeueAfter(task *UploadTask, delay time.Duration) {
+	if delay < time.Minute {
+		delay = time.Minute
+	}
+	go func() {
+		time.Sleep(delay)
+		if err := q.Add(task); err != nil {
+			log.Printf("[队列] 用户%d的延迟任务重新入队失败: part_id=%d, error=%v", q.userID, task.Part.ID, err)
+		}
+	}()
+}
+
+func recordQueuedUploadError(part *models.RecordHistoryPart, err error) {
+	if part == nil || part.ID == 0 || err == nil {
+		return
+	}
+	errorType := classifyUploadError(err)
+	msg := err.Error()
+	updates := map[string]interface{}{
+		"upload_error_msg":  msg,
+		"upload_error_type": errorType,
+	}
+	if dbErr := database.GetDB().Model(&models.RecordHistoryPart{}).
+		Where("id = ? AND upload = ?", part.ID, false).
+		Updates(updates).Error; dbErr != nil {
+		log.Printf("[队列] 记录上传错误分类失败: part_id=%d, err=%v", part.ID, dbErr)
+	}
+	part.UploadErrorMsg = msg
+	part.UploadErrorType = errorType
 }
 
 // QueueManager 队列管理器

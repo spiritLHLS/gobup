@@ -62,6 +62,13 @@
             style="width: 180px"
             @input="debouncedSearch"
           />
+          <el-input
+            v-model="searchParams.sessionId"
+            placeholder="SessionID"
+            clearable
+            style="width: 200px"
+            @input="debouncedSearch"
+          />
           <el-date-picker
             v-model="dateRange"
             type="daterange"
@@ -122,59 +129,19 @@
         <el-empty description="暂无录制历史" />
       </div>
 
-      <div v-else class="card-grid">
-        <div
-          v-for="row in histories"
-          :key="row.id"
-          class="history-card"
-          :class="getCardClass(row)"
-          @click="showActionsDialog(row)"
-        >
-          <!-- 状态角 -->
-          <div class="history-card-status">
-            <el-tag v-if="row.bvId" type="success" size="small" effect="dark">已投稿</el-tag>
-            <el-tag v-else-if="row.recording" type="danger" size="small" effect="dark">录制中</el-tag>
-            <el-tag v-else-if="isUploading(row)" type="warning" size="small" effect="dark">上传中</el-tag>
-            <el-tag v-else-if="row.uploadPartCount > 0" type="info" size="small">已上传{{ row.uploadPartCount }}P</el-tag>
-            <el-tag v-else type="info" size="small" effect="plain">未上传</el-tag>
-          </div>
-
-          <div class="history-card-title" :title="row.title">{{ row.title || '无标题' }}</div>
-          <div class="history-card-meta">
-            <span class="meta-item">
-              <el-icon><User /></el-icon>
-              {{ privacyMode.value ? '***' : (row.uname || '-') }}
-            </span>
-            <span class="meta-item">
-              <el-icon><HomeFilled /></el-icon>
-              {{ privacyMode.value ? '***' : row.roomId }}
-            </span>
-            <span class="meta-item part-count-meta" @click.stop="showParts(row)" title="查看分P详情">
-              <el-icon><Film /></el-icon>
-              {{ row.partCount || 0 }}P
-            </span>
-          </div>
-
-          <!-- 上传进度 -->
-          <div v-if="isUploading(row) && getHistoryProgress(row.id)" class="history-card-progress">
-            <el-progress
-              :percentage="getHistoryUploadPercent(row.id)"
-              :stroke-width="6"
-              :status="getHistoryUploadPercent(row.id) >= 100 ? 'success' : null"
-            />
-            <span class="progress-hint">{{ getHistoryProgress(row.id)?.activeCount || 0 }}P上传中</span>
-          </div>
-
-          <!-- BV号 -->
-          <div v-if="row.bvId" class="history-card-bv">
-            <a :href="`https://www.bilibili.com/video/${row.bvId}`" target="_blank" @click.stop>
-              {{ row.bvId }}
-            </a>
-          </div>
-
-          <div class="history-card-time">{{ formatTime(row.startTime) }}</div>
-        </div>
-      </div>
+      <SessionHistoryGroups
+        v-else
+        :histories="histories"
+        :privacy-mode="privacyMode.value"
+        :is-uploading="isUploading"
+        :get-card-class="getCardClass"
+        :get-history-progress="getHistoryProgress"
+        :get-history-upload-percent="getHistoryUploadPercent"
+        :format-time="formatTime"
+        @show-actions="showActionsDialog"
+        @show-parts="showParts"
+        @filter-session="filterBySession"
+      />
     </template>
 
     <!-- 表格视图 -->
@@ -189,7 +156,20 @@
         <el-table-column prop="roomId" label="房间ID" width="90">
           <template #default="{ row }">{{ privacyMode.value ? '***' : row.roomId }}</template>
         </el-table-column>
+        <el-table-column label="类型" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row.isHighlight" type="warning" size="small">高光</el-tag>
+            <el-tag v-else type="info" size="small" effect="plain">录制</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="sessionId" label="SessionID" width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <button class="table-session-button" type="button" @click="filterBySession(row.sessionId)">
+              {{ row.sessionId || '-' }}
+            </button>
+          </template>
+        </el-table-column>
         <el-table-column prop="uname" label="主播" width="110">
           <template #default="{ row }">{{ privacyMode.value ? '***' : (row.uname || '-') }}</template>
         </el-table-column>
@@ -318,7 +298,7 @@
 import { ref, computed, inject, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Grid, List, Filter, Refresh, User, HomeFilled, Film, Download
+  Grid, List, Filter, Refresh, Download
 } from '@element-plus/icons-vue'
 import { historyAPI } from '@/api'
 import axios from 'axios'
@@ -327,6 +307,7 @@ import PartsDialog from '@/components/history/PartsDialog.vue'
 import ActionsDialog from '@/components/history/ActionsDialog.vue'
 import ManualPublishDialog from '@/components/history/ManualPublishDialog.vue'
 import ResetStatusDialog from '@/components/history/ResetStatusDialog.vue'
+import SessionHistoryGroups from '@/components/history/SessionHistoryGroups.vue'
 import { useHistoryProgress, useHistoryOperations } from '@/composables/useHistory'
 
 const privacyMode = inject('privacyMode', ref(false))
@@ -348,19 +329,22 @@ const searchParams = ref({
   pageSize: 10,
   roomId: '',
   bvId: '',
+  sessionId: '',
   viewType: 'working',
   from: '',
   to: '',
   recording: null,
   upload: null,
-  publish: null
+  publish: null,
+  isHighlight: null
 })
 
 const quickFilterTags = [
   { label: '录制中', value: 'recording' },
   { label: '已投稿', value: 'published' },
   { label: '上传中', value: 'uploading' },
-  { label: '未上传', value: 'noUpload' }
+  { label: '未上传', value: 'noUpload' },
+  { label: '高能剪辑', value: 'highlight' }
 ]
 const quickFilters = ref([])
 
@@ -368,6 +352,7 @@ const activeFilterCount = computed(() => {
   let count = 0
   if (searchParams.value.roomId) count++
   if (searchParams.value.bvId) count++
+  if (searchParams.value.sessionId) count++
   if (dateRange.value) count++
   count += quickFilters.value.length
   return count
@@ -438,25 +423,37 @@ const applyQuickFilters = () => {
   searchParams.value.recording = null
   searchParams.value.upload = null
   searchParams.value.publish = null
+  searchParams.value.isHighlight = null
   for (const f of quickFilters.value) {
     if (f === 'recording') searchParams.value.recording = true
     if (f === 'published') searchParams.value.publish = true
     if (f === 'uploading') searchParams.value.upload = 1
     if (f === 'noUpload') searchParams.value.upload = 0
+    if (f === 'highlight') searchParams.value.isHighlight = true
   }
 }
 
 const clearFilters = () => {
   searchParams.value.roomId = ''
   searchParams.value.bvId = ''
+  searchParams.value.sessionId = ''
   searchParams.value.from = ''
   searchParams.value.to = ''
   searchParams.value.recording = null
   searchParams.value.upload = null
   searchParams.value.publish = null
+  searchParams.value.isHighlight = null
   dateRange.value = null
   quickFilters.value = []
   handleSearch()
+}
+
+const filterBySession = (sessionId) => {
+  if (!sessionId) return
+  searchParams.value.sessionId = sessionId
+  searchParams.value.page = 1
+  filterPanelVisible.value = true
+  fetchHistories()
 }
 
 let searchTimer = null
@@ -728,7 +725,11 @@ const handleBatchDeleteWithFiles = async () => {
   if (!selectedHistories.value.length) return ElMessage.warning('请先选择记录')
   try {
     await ElMessageBox.confirm(`将删除 ${selectedHistories.value.length} 条记录及所有相关文件，不可恢复！`, '批量删除', { type: 'error', confirmButtonText: '确定删除' })
-    const response = await axios.post('/api/history/batchDeleteWithFiles', { historyIds: selectedHistories.value.map(h => h.id) })
+    const response = await axios.post('/api/history/batchDeleteWithFiles', {
+      historyIds: selectedHistories.value.map(h => h.id),
+      confirmDeleteFiles: true,
+      confirmText: 'DELETE_FILES'
+    })
     ElMessage.success(response.data.msg || '批量删除成功')
     fetchHistories()
   } catch (e) { if (e !== 'cancel') ElMessage.error(e.response?.data?.msg || '批量删除失败') }
@@ -832,6 +833,24 @@ onMounted(() => fetchHistories())
 }
 
 /* ===== 卡片视图 ===== */
+.table-session-button {
+  border: none;
+  background: transparent;
+  color: var(--primary-color);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.table-session-button:hover {
+  text-decoration: underline;
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -845,101 +864,6 @@ onMounted(() => fetchHistories())
   border-radius: var(--border-radius-large);
   padding: var(--spacing-lg);
   height: 164px;
-}
-
-.history-card {
-  background: var(--bg-color-secondary);
-  border: 1px solid var(--border-color);
-  border-left: 3px solid var(--border-color);
-  border-radius: var(--border-radius-large);
-  padding: var(--spacing-lg);
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  position: relative;
-  animation: fadeIn 0.2s ease;
-
-  &:hover {
-    box-shadow: var(--shadow-medium);
-    transform: translateY(-2px);
-  }
-
-  &.status-success { border-left-color: var(--success-color); }
-  &.status-uploading { border-left-color: var(--warning-color); }
-  &.status-recording { border-left-color: var(--danger-color); }
-  &.status-partial { border-left-color: var(--info-color); }
-}
-
-.history-card-status {
-  position: absolute;
-  top: var(--spacing-md);
-  right: var(--spacing-md);
-}
-
-.history-card-title {
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-color-primary);
-  font-size: var(--font-size-base);
-  margin-bottom: var(--spacing-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding-right: 90px;
-}
-
-.history-card-meta {
-  display: flex;
-  gap: var(--spacing-md);
-  flex-wrap: wrap;
-  margin-bottom: var(--spacing-sm);
-}
-
-.meta-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--font-size-sm);
-  color: var(--text-color-secondary);
-}
-
-.part-count-meta {
-  cursor: pointer;
-  color: var(--primary-color);
-  border-radius: var(--border-radius-small);
-  padding: 0 4px;
-  transition: background var(--transition-fast);
-
-  &:hover {
-    background: rgba(64, 158, 255, 0.1);
-    color: var(--primary-color-dark, var(--primary-color));
-  }
-}
-
-.history-card-progress {
-  margin-bottom: var(--spacing-sm);
-  
-  .progress-hint {
-    font-size: 11px;
-    color: var(--text-color-secondary);
-    margin-top: 2px;
-    display: block;
-  }
-}
-
-.history-card-bv {
-  margin-bottom: 4px;
-  
-  a {
-    font-size: var(--font-size-sm);
-    color: var(--primary-color);
-    text-decoration: none;
-    
-    &:hover { text-decoration: underline; }
-  }
-}
-
-.history-card-time {
-  font-size: var(--font-size-sm);
-  color: var(--text-color-secondary);
 }
 
 /* ===== 表格 ===== */

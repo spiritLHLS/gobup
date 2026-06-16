@@ -7,21 +7,25 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gobup/server/internal/ratelimit"
 	"github.com/imroc/req/v3"
 	"github.com/wzshiming/socks5"
 )
 
 type BiliClient struct {
-	AccessKey   string
-	AccessToken string
-	Cookies     string
-	Mid         int64
-	Line        string // 上传线路，如 cs_txa, cs_bda2
-	ReqClient   *req.Client
+	AccessKey         string
+	AccessToken       string
+	Cookies           string
+	Mid               int64
+	Line              string // 上传线路，如 cs_txa, cs_bda2
+	ReqClient         *req.Client
+	UploadRateLimiter *ratelimit.RateLimiter
 }
 
 type PreUploadResp struct {
@@ -104,10 +108,10 @@ type BuvIdResponse struct {
 
 func NewBiliClient(accessKey, cookies string, mid int64) *BiliClient {
 	client := req.C().
-		SetTimeout(30 * time.Minute).             // 增加超时时间到30分钟，适应大文件上传
-		SetCommonRetryCount(0).                   // 禁用自动重试，由业务层控制
-		EnableKeepAlives().                       // 启用连接保持
-		SetTLSHandshakeTimeout(30 * time.Second). // TLS握手超时
+		SetTimeout(uploadRequestTimeout()).            // 适配大文件上传，可通过 GOBUP_UPLOAD_TIMEOUT_MINUTES 调整
+		SetCommonRetryCount(0).                        // 禁用自动重试，由业务层控制
+		EnableKeepAlives().                            // 启用连接保持
+		SetTLSHandshakeTimeout(tlsHandshakeTimeout()). // TLS握手超时
 		SetCommonRetryCondition(func(_ *req.Response, _ error) bool {
 			return false // 禁用自动重试，避免并发冲突
 		}).
@@ -128,8 +132,8 @@ func NewBiliClient(accessKey, cookies string, mid int64) *BiliClient {
 // NewBiliClientWithProxy 创建带代理的BiliClient
 func NewBiliClientWithProxy(accessKey, cookies string, mid int64, proxyURL string) *BiliClient {
 	client := req.C().
-		SetTimeout(30 * time.Minute).             // 增加超时时间到30分钟，适应大文件上传
-		SetTLSHandshakeTimeout(30 * time.Second). // TLS握手超时
+		SetTimeout(uploadRequestTimeout()).            // 适配大文件上传，可通过 GOBUP_UPLOAD_TIMEOUT_MINUTES 调整
+		SetTLSHandshakeTimeout(tlsHandshakeTimeout()). // TLS握手超时
 		ImpersonateChrome().
 		DisableKeepAlives(). // 禁用连接复用，避免EOF错误
 		SetCommonRetryCondition(func(_ *req.Response, _ error) bool {
@@ -164,6 +168,29 @@ func NewBiliClientWithProxy(accessKey, cookies string, mid int64, proxyURL strin
 		Mid:       mid,
 		ReqClient: client,
 	}
+}
+
+func uploadRequestTimeout() time.Duration {
+	return envDuration("GOBUP_UPLOAD_TIMEOUT_MINUTES", 30*time.Minute, time.Minute, 1, 24*60)
+}
+
+func tlsHandshakeTimeout() time.Duration {
+	return envDuration("GOBUP_TLS_HANDSHAKE_TIMEOUT_SECONDS", 30*time.Second, time.Second, 1, 300)
+}
+
+func envDuration(name string, fallback, unit time.Duration, minValue, maxValue int64) time.Duration {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < minValue {
+		return fallback
+	}
+	if maxValue > 0 && parsed > maxValue {
+		parsed = maxValue
+	}
+	return time.Duration(parsed) * unit
 }
 
 // PreUpload 预上传
@@ -254,7 +281,7 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 		// 这种情况说明投稿实际上已经成功了，需要从用户投稿列表中查找视频信息
 		if strings.Contains(resp.Msg, "稿件已成功投稿") || strings.Contains(resp.Msg, "请勿重新提交") {
 			log.Printf("[投稿] 检测到重复投稿错误，尝试从投稿列表中查找视频: %s", resp.Msg)
-			
+
 			// 从错误信息中提取稿件名
 			// 格式: "稿件已成功投稿，请勿重新提交哦～\n提交时间：03:54 稿件名《xxx》"
 			titleFromError := extractTitleFromDuplicateError(resp.Msg)
@@ -263,29 +290,29 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 				titleFromError = title
 			}
 			log.Printf("[投稿] 从错误信息中提取的稿件名: %s", titleFromError)
-			
+
 			// 等待一下让B站处理完成
 			time.Sleep(2 * time.Second)
-			
+
 			// 获取用户投稿列表，查找匹配的视频
 			archives, err := c.GetUserArchiveList(c.Mid, 1, 20)
 			if err != nil {
 				log.Printf("[投稿] 获取用户投稿列表失败: %v，返回原始错误", err)
 				return 0, "", fmt.Errorf("投稿失败: %s", resp.Msg)
 			}
-			
+
 			// 查找标题匹配的视频（从最新的开始查找）
 			for _, archive := range archives {
 				if archive.Title == titleFromError || archive.Title == title {
-					log.Printf("[投稿] ✓ 找到匹配的视频: AID=%d, BVID=%s, Title=%s", 
+					log.Printf("[投稿] ✓ 找到匹配的视频: AID=%d, BVID=%s, Title=%s",
 						archive.Aid, archive.Bvid, archive.Title)
 					return archive.Aid, archive.Bvid, nil
 				}
 			}
-			
+
 			log.Printf("[投稿] 未找到匹配的视频，返回原始错误")
 		}
-		
+
 		return 0, "", fmt.Errorf("投稿失败: %s", resp.Msg)
 	}
 
@@ -357,6 +384,65 @@ func (c *BiliClient) GetSeasons() ([]Season, error) {
 	return seasons, nil
 }
 
+// CreateSeason 创建合集，并返回可用于后续加入投稿的小节信息。
+func (c *BiliClient) CreateSeason(title, desc, cover string) (*Season, error) {
+	csrf := GetCookieValue(c.Cookies, "bili_jct")
+	if csrf == "" {
+		return nil, fmt.Errorf("未找到CSRF token")
+	}
+
+	title = strings.TrimSpace(title)
+	desc = strings.TrimSpace(desc)
+	cover = strings.TrimSpace(cover)
+	if title == "" {
+		return nil, fmt.Errorf("合集标题不能为空")
+	}
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data int64  `json:"data"`
+	}
+
+	form := url.Values{}
+	form.Set("title", title)
+	form.Set("desc", desc)
+	form.Set("cover", cover)
+	form.Set("season_price", "0")
+	form.Set("csrf", csrf)
+
+	_, err := c.ReqClient.R().
+		SetHeader("Referer", "https://member.bilibili.com/platform/upload-manager/collection").
+		SetHeader("Content-Type", "application/x-www-form-urlencoded").
+		SetFormDataFromValues(form).
+		SetSuccessResult(&result).
+		Post("https://member.bilibili.com/x2/creative/web/season/add")
+	if err != nil {
+		return nil, fmt.Errorf("创建合集请求失败: %w", err)
+	}
+	if result.Code != 0 {
+		return nil, fmt.Errorf("创建合集失败: %s", result.Msg)
+	}
+
+	season := &Season{
+		ID:   result.Data,
+		Name: title,
+	}
+
+	// 创建接口只返回合集ID；再拉取一次列表，补齐小节ID，供 AddToSeason 使用。
+	seasons, err := c.GetSeasons()
+	if err != nil {
+		return season, nil
+	}
+	for _, item := range seasons {
+		if item.ID == result.Data {
+			season = &item
+			break
+		}
+	}
+	return season, nil
+}
+
 // AddToSeason 将视频加入合集
 func (c *BiliClient) AddToSeason(sectionID int64, aid, cid int64, title string) error {
 	csrf := GetCookieValue(c.Cookies, "bili_jct")
@@ -374,9 +460,11 @@ func (c *BiliClient) AddToSeason(sectionID int64, aid, cid int64, title string) 
 
 	// 构建请求体
 	requestBody := map[string]interface{}{
-		"csrf":      csrf,
-		"sectionId": sectionID,
-		"episodes":  []map[string]interface{}{episode},
+		"csrf":       csrf,
+		"section_id": sectionID,
+		"sectionId":  sectionID,
+		"episode":    []map[string]interface{}{episode},
+		"episodes":   []map[string]interface{}{episode},
 	}
 
 	var result struct {

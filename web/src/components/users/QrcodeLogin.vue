@@ -3,8 +3,8 @@
     <!-- 登录方式选择 -->
     <div class="login-type-selector">
       <el-radio-group v-model="localQrcodeType" @change="handleTypeChange" size="default">
-        <el-radio-button label="tv">TV端扫码</el-radio-button>
-        <el-radio-button label="web">Web端扫码</el-radio-button>
+        <el-radio-button value="tv">TV端扫码</el-radio-button>
+        <el-radio-button value="web">Web端扫码</el-radio-button>
       </el-radio-group>
       <div class="type-description">
         <template v-if="localQrcodeType === 'tv'">

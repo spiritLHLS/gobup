@@ -1,8 +1,12 @@
 package services
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gobup/server/internal/database"
@@ -11,6 +15,13 @@ import (
 )
 
 const WxPusherAPIURL = "https://wxpusher.zjiecode.com/api/send/message"
+
+const (
+	wxPusherRequestTimeout = 10 * time.Second
+	wxPusherDedupTTL       = 10 * time.Minute
+)
+
+var wxPusherDeduper = newExpiringPushDeduper(wxPusherDedupTTL)
 
 // WxPusherService WxPusher推送服务
 type WxPusherService struct{}
@@ -45,11 +56,18 @@ type PushMessage struct {
 
 // SendTextMessage 发送文本消息
 func (s *WxPusherService) SendTextMessage(userID uint, wxuid, content string) error {
+	wxuid = strings.TrimSpace(wxuid)
+	if wxuid == "" {
+		log.Printf("用户%d未配置WxPusher UID，跳过推送", userID)
+		return nil
+	}
+
 	appToken, err := s.getUserToken(userID)
 	if err != nil {
 		log.Printf("获取用户Token失败: %v", err)
 		return err
 	}
+	appToken = strings.TrimSpace(appToken)
 
 	if appToken == "" {
 		log.Printf("用户%d未配置WxPusher token，跳过推送", userID)
@@ -68,10 +86,16 @@ func (s *WxPusherService) SendTextMessage(userID uint, wxuid, content string) er
 
 // SendMarkdownMessage 发送Markdown消息
 func (s *WxPusherService) SendMarkdownMessage(userID uint, wxuid, content, summary string) error {
+	wxuid = strings.TrimSpace(wxuid)
+	if wxuid == "" {
+		return nil
+	}
+
 	appToken, err := s.getUserToken(userID)
 	if err != nil {
 		return err
 	}
+	appToken = strings.TrimSpace(appToken)
 
 	if appToken == "" {
 		return nil
@@ -89,21 +113,29 @@ func (s *WxPusherService) SendMarkdownMessage(userID uint, wxuid, content, summa
 }
 
 func (s *WxPusherService) send(msg PushMessage) error {
+	dedupeKey := wxPusherMessageKey(msg)
+	if !wxPusherDeduper.Reserve(dedupeKey) {
+		log.Printf("WxPusher重复消息已跳过: summary=%s", msg.Summary)
+		return nil
+	}
+
 	var result struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 	}
 
-	client := req.C().ImpersonateChrome()
+	client := req.C().ImpersonateChrome().SetTimeout(wxPusherRequestTimeout)
 	_, err := client.R().
 		SetBody(msg).
 		SetSuccessResult(&result).
 		Post(WxPusherAPIURL)
 	if err != nil {
+		wxPusherDeduper.Forget(dedupeKey)
 		return fmt.Errorf("发送请求失败: %w", err)
 	}
 
 	if result.Code != 1000 {
+		wxPusherDeduper.Forget(dedupeKey)
 		return fmt.Errorf("推送失败: %s", result.Msg)
 	}
 
@@ -149,6 +181,32 @@ func (s *WxPusherService) NotifyUploadFailed(userID uint, wxuid, roomName, fileN
 	s.SendTextMessage(userID, wxuid, content)
 }
 
+// NotifyRateLimit 上传速率限制通知
+func (s *WxPusherService) NotifyRateLimit(userID uint, wxuid, roomName, fileName, cooldown string) {
+	content := fmt.Sprintf(`⚠️ 上传限流
+房间: %s
+文件: %s
+冷却至: %s
+时间: %s`,
+		roomName, fileName, cooldown,
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	s.SendTextMessage(userID, wxuid, content)
+}
+
+// NotifyCookieInvalid Cookie失效通知
+func (s *WxPusherService) NotifyCookieInvalid(userID uint, wxuid, uname, roomID, reason string) {
+	content := fmt.Sprintf(`账号登录状态异常
+账号: %s
+关联房间: %s
+原因: %s
+时间: %s`,
+		uname, roomID, reason,
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	s.SendTextMessage(userID, wxuid, content)
+}
+
 // NotifyPublishSuccess 投稿成功通知
 func (s *WxPusherService) NotifyPublishSuccess(userID uint, wxuid, roomName, title, bvid string) {
 	content := fmt.Sprintf(`🎉 投稿成功
@@ -174,4 +232,76 @@ func (s *WxPusherService) NotifyLiveStart(userID uint, wxuid, uname, title, area
 		time.Now().Format("2006-01-02 15:04:05"))
 
 	s.SendTextMessage(userID, wxuid, content)
+}
+
+type expiringPushDeduper struct {
+	mu      sync.Mutex
+	ttl     time.Duration
+	expires map[string]time.Time
+}
+
+func newExpiringPushDeduper(ttl time.Duration) *expiringPushDeduper {
+	return &expiringPushDeduper{
+		ttl:     ttl,
+		expires: make(map[string]time.Time),
+	}
+}
+
+func (d *expiringPushDeduper) Reserve(key string) bool {
+	if key == "" {
+		return true
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	now := time.Now()
+	for existingKey, expiresAt := range d.expires {
+		if now.After(expiresAt) {
+			delete(d.expires, existingKey)
+		}
+	}
+	if expiresAt, ok := d.expires[key]; ok && now.Before(expiresAt) {
+		return false
+	}
+	d.expires[key] = now.Add(d.ttl)
+	return true
+}
+
+func (d *expiringPushDeduper) Forget(key string) {
+	if key == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.expires, key)
+}
+
+func wxPusherMessageKey(msg PushMessage) string {
+	if msg.AppToken == "" || msg.Content == "" {
+		return ""
+	}
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(msg.AppToken))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write([]byte(normalizePushContentForDedupe(msg.Content)))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write([]byte(strings.Join(msg.UIDs, ",")))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write([]byte(fmt.Sprint(msg.TopicIDs)))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write([]byte(msg.URL))
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func normalizePushContentForDedupe(content string) string {
+	lines := strings.Split(content, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "时间:") || strings.HasPrefix(strings.ToLower(trimmed), "time:") {
+			continue
+		}
+		kept = append(kept, trimmed)
+	}
+	return strings.Join(kept, "\n")
 }
