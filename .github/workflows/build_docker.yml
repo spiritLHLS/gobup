@@ -221,6 +221,9 @@ jobs:
           pattern: digests-dockerhub-*
           merge-multiple: true
           path: /tmp/digests-dockerhub
+
+      - name: Ensure digest dir exists (Docker Hub)
+        run: mkdir -p /tmp/digests-dockerhub
       
       - name: Extract metadata for Docker Hub
         if: steps.login-dockerhub.outcome == 'success' && steps.download-dockerhub.outcome == 'success'
@@ -285,13 +288,19 @@ jobs:
         run: echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
       
       - name: Download GHCR digests
+        id: download-ghcr
+        continue-on-error: true
         uses: actions/download-artifact@v6
         with:
           pattern: digests-ghcr-*
           merge-multiple: true
           path: /tmp/digests-ghcr
+
+      - name: Ensure digest dir exists (GHCR)
+        run: mkdir -p /tmp/digests-ghcr
       
       - name: Extract metadata for GHCR
+        if: steps.download-ghcr.outcome == 'success'
         id: meta-ghcr
         uses: docker/metadata-action@v6
         with:
@@ -300,13 +309,17 @@ jobs:
             type=raw,value=latest
             type=raw,value=v${{ steps.date.outputs.date }}
             type=raw,value={{date 'YYYYMMDD'}}
-      
+
       - name: Create manifest list and push to GHCR
+        if: steps.download-ghcr.outcome == 'success'
+        continue-on-error: true
         working-directory: /tmp/digests-ghcr
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
-      
+
       - name: Inspect GHCR image
+        if: steps.download-ghcr.outcome == 'success'
+        continue-on-error: true
         run: |
           docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:latest

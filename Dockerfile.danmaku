@@ -18,34 +18,28 @@ RUN npm run build
 FROM alpine:latest AS danmaku-builder
 ARG TARGETARCH
 
-# Install build dependencies for DanmakuFactory (bash 用于 fallback 时 xmake 编译脚本)
+# Install build dependencies for DanmakuFactory
 RUN apk add --no-cache git build-base curl tar bash p7zip cmake linux-headers
 
-# Download or build DanmakuFactory (优先使用预编译版本)
+# Download prebuilt DanmakuFactory CLI binary (dev release)
+# Asset names: DanmakuFactory-dev-linux-x86_64-CLI.tar.gz / DanmakuFactory-dev-linux-arm64-CLI.tar.gz
 WORKDIR /build
-RUN ARCH_NAME=$([ "$TARGETARCH" = "amd64" ] && echo "x64" || echo "arm64") && \
-    RELEASE_URL="https://github.com/hihkm/DanmakuFactory/releases/download/dev/DanmakuFactory-linux-${ARCH_NAME}.tar.gz" && \
-    echo "Attempting to download prebuilt DanmakuFactory for ${ARCH_NAME}..." && \
+RUN ARCH_NAME=$([ "$TARGETARCH" = "amd64" ] && echo "x86_64" || echo "arm64") && \
+    ASSET_NAME="DanmakuFactory-dev-linux-${ARCH_NAME}-CLI.tar.gz" && \
+    RELEASE_URL="https://github.com/hihkm/DanmakuFactory/releases/download/dev/${ASSET_NAME}" && \
+    echo "Downloading prebuilt DanmakuFactory: ${ASSET_NAME}..." && \
     mkdir -p /danmakufactory && \
-    if curl -fsSL "$RELEASE_URL" -o danmaku.tar.gz && tar -xzf danmaku.tar.gz -C /danmakufactory --strip-components=1 && test -f /danmakufactory/DanmakuFactory; then \
+    if curl -fsSL "$RELEASE_URL" -o danmaku.tar.gz && \
+       tar -xzf danmaku.tar.gz -C /danmakufactory --strip-components=1 && \
+       test -f /danmakufactory/DanmakuFactory; then \
         echo "Successfully downloaded prebuilt DanmakuFactory" && \
         chmod +x /danmakufactory/DanmakuFactory && \
         ls -lh /danmakufactory/; \
     else \
-        echo "Prebuilt version not available, building from source..." && \
-        echo "Installing xmake from source..." && \
-        XMAKE_VERSION="v2.9.4" && \
-        git clone --depth=1 --branch="${XMAKE_VERSION}" --recurse-submodules https://github.com/xmake-io/xmake.git /tmp/xmake-src && \
-        make -C /tmp/xmake-src -j$(nproc) && \
-        make -C /tmp/xmake-src install PREFIX=/root/.local && \
-        ln -s /root/.local/bin/xmake /usr/local/bin/xmake && \
-        echo "Building DanmakuFactory from source..." && \
-        git clone --depth=1 https://github.com/hihkm/DanmakuFactory.git && \
-        cd DanmakuFactory && \
-        xmake build -y -v --root && \
-        find build -name DanmakuFactory -type f -executable -exec cp {} /danmakufactory/ \; && \
-        ls -lh /danmakufactory/ && \
-        test -f /danmakufactory/DanmakuFactory && echo "DanmakuFactory built successfully from source"; \
+        echo "ERROR: Failed to download prebuilt DanmakuFactory from ${RELEASE_URL}" && \
+        echo "The dev release may have been updated or removed." && \
+        echo "Please check https://github.com/hihkm/DanmakuFactory/releases/tag/dev" && \
+        exit 1; \
     fi
 
 # Stage 3: Build Backend with Embedded Frontend
