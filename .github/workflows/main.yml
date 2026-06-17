@@ -42,12 +42,25 @@ jobs:
       id: date
       run: echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
 
-    - name: Verify Swagger documentation
-      working-directory: ./server
+    - name: Regenerate Swagger docs & auto-commit if outdated
       run: |
+        cd server
         go run github.com/swaggo/swag/cmd/swag@v1.8.12 init --parseDependency --parseInternal --output docs --quiet
-        git diff --exit-code docs
         cd ..
+
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+
+        if git diff --quiet server/docs; then
+          echo "Swagger docs are up to date, no changes needed."
+        else
+          echo "Swagger docs are outdated, auto-committing updated docs..."
+          git add server/docs/
+          git commit -m "chore: update swagger documentation [skip ci]"
+          git push origin main
+          echo "Updated Swagger docs have been pushed to main."
+        fi
+
         node scripts/check_swagger_coverage.js
 
     - name: Create build directory
