@@ -140,6 +140,15 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -169,6 +178,15 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -198,6 +216,15 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -227,6 +254,15 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -256,6 +292,15 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -323,6 +368,15 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -1404,6 +1458,15 @@
                     "histories"
                 ],
                 "summary": "History entity APIs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "History ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -1804,6 +1867,15 @@
                     "histories"
                 ],
                 "summary": "History entity APIs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "History ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2225,6 +2297,15 @@
                     "queue"
                 ],
                 "summary": "Upload queue controls",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Part ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2406,6 +2487,15 @@
                     "queue"
                 ],
                 "summary": "Upload queue controls",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Part ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2435,6 +2525,15 @@
                     "queue"
                 ],
                 "summary": "Upload queue controls",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Part ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",

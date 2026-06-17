@@ -334,6 +334,12 @@ paths:
       - application/json
       description: Lists users and manages login, refresh, status checks, deletion,
         updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -353,6 +359,12 @@ paths:
       - application/json
       description: Lists users and manages login, refresh, status checks, deletion,
         updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -372,6 +384,12 @@ paths:
       - application/json
       description: Lists users and manages login, refresh, status checks, deletion,
         updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -391,6 +409,12 @@ paths:
       - application/json
       description: Lists users and manages login, refresh, status checks, deletion,
         updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -410,6 +434,12 @@ paths:
       - application/json
       description: Lists users and manages login, refresh, status checks, deletion,
         updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -454,6 +484,12 @@ paths:
       - application/json
       description: Lists users and manages login, refresh, status checks, deletion,
         updates, and enable state.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -1158,6 +1194,12 @@ paths:
       - application/json
       description: Updates, deletes, uploads, publishes, syncs, and inspects a single
         recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -1420,6 +1462,12 @@ paths:
       - application/json
       description: Updates, deletes, uploads, publishes, syncs, and inspects a single
         recording history.
+      parameters:
+      - description: History ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -1688,6 +1736,12 @@ paths:
       - application/json
       description: Pauses, resumes, cancels, and retries individual or pending upload
         tasks.
+      parameters:
+      - description: Part ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -1807,6 +1861,12 @@ paths:
       - application/json
       description: Pauses, resumes, cancels, and retries individual or pending upload
         tasks.
+      parameters:
+      - description: Part ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -1826,6 +1886,12 @@ paths:
       - application/json
       description: Pauses, resumes, cancels, and retries individual or pending upload
         tasks.
+      parameters:
+      - description: Part ID
+        in: path
+        name: id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
