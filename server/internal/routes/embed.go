@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed dist
+//go:embed dist dist/assets/_*
 var FS embed.FS
 
 // embedEnabled 标记是否启用了前端嵌入
