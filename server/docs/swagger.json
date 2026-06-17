@@ -140,15 +140,6 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "User ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -178,15 +169,6 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "User ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -216,15 +198,6 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "User ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -254,15 +227,6 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "User ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -292,15 +256,6 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "User ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -368,15 +323,6 @@
                     "users"
                 ],
                 "summary": "Bilibili user APIs",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "User ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -1458,15 +1404,6 @@
                     "histories"
                 ],
                 "summary": "History entity APIs",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "History ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -1867,15 +1804,6 @@
                     "histories"
                 ],
                 "summary": "History entity APIs",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "History ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2297,15 +2225,6 @@
                     "queue"
                 ],
                 "summary": "Upload queue controls",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Part ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2487,15 +2406,6 @@
                     "queue"
                 ],
                 "summary": "Upload queue controls",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Part ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2525,15 +2435,6 @@
                     "queue"
                 ],
                 "summary": "Upload queue controls",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Part ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -3208,6 +3109,10 @@
                 "percentileRank": {
                     "type": "number"
                 },
+                "priority": {
+                    "description": "自动上传调度优先级，0-100，数值越大越优先",
+                    "type": "integer"
+                },
                 "pushMsgTags": {
                     "type": "string"
                 },
@@ -3271,6 +3176,10 @@
                 "upload": {
                     "description": "启用上传功能（总开关）",
                     "type": "boolean"
+                },
+                "uploadSpeedLimitMbps": {
+                    "description": "房间级上传限速，MB/s，0=使用全局/不限制",
+                    "type": "number"
                 },
                 "uploadUserId": {
                     "type": "integer"
