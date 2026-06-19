@@ -37,6 +37,10 @@
           <el-icon><Download /></el-icon>
           导出
         </el-button>
+        <el-button type="success" plain @click="handleSyncSessions">
+          <el-icon><RefreshRight /></el-icon>
+          同步
+        </el-button>
         <el-button type="primary" @click="fetchHistories">
           <el-icon><Refresh /></el-icon>
           刷新
@@ -103,6 +107,7 @@
       :selected-histories="selectedHistories"
       @upload="handleBatchUpload"
       @publish="handleBatchPublish"
+      @sync-sessions="handleBatchSyncSessions"
       @sync-video="handleBatchSyncVideo"
       @move-files="handleBatchMoveFiles"
       @reset-status="handleBatchResetStatus"
@@ -298,7 +303,7 @@
 import { ref, computed, inject, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Grid, List, Filter, Refresh, Download
+  Grid, List, Filter, Refresh, Download, RefreshRight
 } from '@element-plus/icons-vue'
 import { historyAPI } from '@/api'
 import axios from 'axios'
@@ -682,6 +687,29 @@ const handleBatchSyncVideo = async () => {
     ElMessage.success(response.data.msg || '批量同步成功')
     fetchHistories()
   } catch (e) { if (e !== 'cancel') ElMessage.error(e.response?.data?.msg || '批量同步失败') }
+}
+
+const handleSyncSessions = async () => {
+  try {
+    await ElMessageBox.confirm('将按同房间、完全一致标题重整同场直播分组。确定同步吗？', '同步', { type: 'info' })
+    const response = await historyAPI.syncSessions([])
+    ElMessage.success(response.msg || '同步完成')
+    fetchHistories()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.response?.data?.msg || '同步失败')
+  }
+}
+
+const handleBatchSyncSessions = async () => {
+  if (!selectedHistories.value.length) return ElMessage.warning('请先选择记录')
+  try {
+    await ElMessageBox.confirm(`将同步并重整选中的 ${selectedHistories.value.length} 项同场直播分组。确定继续吗？`, '同步', { type: 'info' })
+    const response = await historyAPI.syncSessions(selectedHistories.value.map(h => h.id))
+    ElMessage.success(response.msg || '同步完成')
+    fetchHistories()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.response?.data?.msg || '同步失败')
+  }
 }
 
 const handleBatchMoveFiles = async () => {

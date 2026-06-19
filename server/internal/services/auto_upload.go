@@ -123,6 +123,12 @@ func (s *AutoUploadService) ProcessPendingUploads() error {
 func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error) {
 	db := database.GetDB()
 
+	allowUploadWhileRecording := false
+	var sysConfig models.SystemConfig
+	if err := db.First(&sysConfig).Error; err == nil {
+		allowUploadWhileRecording = sysConfig.UploadWhileRecording
+	}
+
 	// 查询所有启用了上传功能和自动上传的房间
 	var rooms []models.RecordRoom
 	if err := db.Where("upload = ? AND auto_upload = ?", true, true).Order("priority DESC, id ASC").Find(&rooms).Error; err != nil {
@@ -178,6 +184,10 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 				log.Printf("[自动上传] 历史记录禁止上传，跳过: history_id=%d, part_id=%d", history.ID, part.ID)
 				continue
 			}
+			if !allowUploadWhileRecording && (history.Recording || history.Streaming) {
+				log.Printf("[自动上传] 直播仍在进行且未开启边录制边上传，跳过: history_id=%d, part_id=%d", history.ID, part.ID)
+				continue
+			}
 
 			// 检查文件是否已稳定（写入完毕5分钟未变动）
 			if !s.isFileStable(part.FilePath, 5*time.Minute) {
@@ -187,8 +197,11 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 
 			// 检查该分P是否属于仍在进行中的直播（同场直播分P间隔不超过10分钟）
 			if s.isLiveStreamInProgress(&part, db) {
-				log.Printf("[自动上传] 该分P所属的直播仍在进行中，但文件已稳定5分钟，可以预先上传: part_id=%d", part.ID)
-				// 虽然直播仍在进行，但文件已稳定5分钟，可以预先上传（不投稿）
+				if !allowUploadWhileRecording {
+					log.Printf("[自动上传] 该分P所属的直播仍在进行中且未开启边录制边上传，跳过: part_id=%d", part.ID)
+					continue
+				}
+				log.Printf("[自动上传] 已开启边录制边上传，文件稳定后预先上传: part_id=%d", part.ID)
 			}
 
 			tasks = append(tasks, PendingUploadTask{

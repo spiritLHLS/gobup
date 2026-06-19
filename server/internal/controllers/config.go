@@ -56,21 +56,34 @@ func ExportConfig(c *gin.Context) {
 		var histories []models.RecordHistory
 		db.Limit(1000).Order("start_time DESC").Find(&histories)
 
-		// 统计每个历史记录的分P信息
-		for i := range histories {
-			var partCount int64
-			db.Model(&models.RecordHistoryPart{}).Where("history_id = ?", histories[i].ID).Count(&partCount)
-			histories[i].PartCount = int(partCount)
+		historyIDs := make([]uint, len(histories))
+		for i, h := range histories {
+			historyIDs[i] = h.ID
+		}
+		if len(historyIDs) > 0 {
+			type partCountRow struct {
+				HistoryID uint
+				Count     int64
+			}
+			var countRows []partCountRow
+			db.Model(&models.RecordHistoryPart{}).
+				Select("history_id, COUNT(*) AS count").
+				Where("history_id IN ?", historyIDs).
+				Group("history_id").
+				Scan(&countRows)
+			partCountByHistory := make(map[uint]int, len(countRows))
+			for _, row := range countRows {
+				partCountByHistory[row.HistoryID] = int(row.Count)
+			}
+			for i := range histories {
+				histories[i].PartCount = partCountByHistory[histories[i].ID]
+			}
 		}
 
 		configData["historyList"] = histories
 
 		// 导出对应的分P数据
 		var parts []models.RecordHistoryPart
-		historyIDs := make([]uint, len(histories))
-		for i, h := range histories {
-			historyIDs[i] = h.ID
-		}
 		if len(historyIDs) > 0 {
 			db.Where("history_id IN ?", historyIDs).Find(&parts)
 			configData["partList"] = parts
@@ -267,6 +280,12 @@ func UpdateSystemConfig(c *gin.Context) {
 	config.DanmakuProxyList = req.DanmakuProxyList
 	config.AutoDataRepair = req.AutoDataRepair
 	config.UploadSpeedLimitMBps = req.UploadSpeedLimitMBps
+	config.UploadWhileRecording = req.UploadWhileRecording
+	config.PublishWhileRecording = req.PublishWhileRecording
+	config.PublishMode = strings.TrimSpace(req.PublishMode)
+	config.PublishAgentEndpoint = strings.TrimSpace(req.PublishAgentEndpoint)
+	config.PublishAgentToken = strings.TrimSpace(req.PublishAgentToken)
+	config.PublishAgentTimeout = req.PublishAgentTimeout
 	config.DanmakuBurnStyle = strings.TrimSpace(req.DanmakuBurnStyle)
 	config.DanmakuFontSize = req.DanmakuFontSize
 	config.DanmakuFontColor = strings.TrimSpace(req.DanmakuFontColor)
@@ -274,47 +293,7 @@ func UpdateSystemConfig(c *gin.Context) {
 	config.DanmakuDisplayArea = req.DanmakuDisplayArea
 
 	// 参数验证
-	if config.FileScanInterval < 10 {
-		config.FileScanInterval = 10
-	}
-	if config.FileScanMinAge < 1 {
-		config.FileScanMinAge = 1
-	}
-	if config.UploadSpeedLimitMBps < 0 {
-		config.UploadSpeedLimitMBps = 0
-	}
-	switch config.DanmakuBurnStyle {
-	case "compact", "large":
-	default:
-		config.DanmakuBurnStyle = "default"
-	}
-	if config.DanmakuFontSize < 0 {
-		config.DanmakuFontSize = 0
-	}
-	if config.DanmakuFontSize > 0 && config.DanmakuFontSize < 12 {
-		config.DanmakuFontSize = 12
-	}
-	if config.DanmakuFontSize > 72 {
-		config.DanmakuFontSize = 72
-	}
-	if config.DanmakuScrollArea <= 0 {
-		config.DanmakuScrollArea = 0.75
-	}
-	if config.DanmakuScrollArea < 0.1 {
-		config.DanmakuScrollArea = 0.1
-	}
-	if config.DanmakuScrollArea > 1 {
-		config.DanmakuScrollArea = 1
-	}
-	if config.DanmakuDisplayArea <= 0 {
-		config.DanmakuDisplayArea = 0.8
-	}
-	if config.DanmakuDisplayArea < 0.1 {
-		config.DanmakuDisplayArea = 0.1
-	}
-	if config.DanmakuDisplayArea > 1 {
-		config.DanmakuDisplayArea = 1
-	}
+	normalizeSystemConfig(&config)
 
 	if err := db.Save(&config).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "保存失败"})
@@ -356,10 +335,15 @@ func ToggleSystemConfig(c *gin.Context) {
 		config.EnableDanmakuProxy = req.Value
 	case "autoDataRepair":
 		config.AutoDataRepair = req.Value
+	case "uploadWhileRecording":
+		config.UploadWhileRecording = req.Value
+	case "publishWhileRecording":
+		config.PublishWhileRecording = req.Value
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "msg": "未知的配置项"})
 		return
 	}
+	normalizeSystemConfig(&config)
 
 	if err := db.Save(&config).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "保存失败"})
@@ -367,6 +351,62 @@ func ToggleSystemConfig(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "配置已更新", "data": config})
+}
+
+func normalizeSystemConfig(config *models.SystemConfig) {
+	if config.FileScanInterval < 10 {
+		config.FileScanInterval = 10
+	}
+	if config.FileScanMinAge < 1 {
+		config.FileScanMinAge = 1
+	}
+	if config.UploadSpeedLimitMBps < 0 {
+		config.UploadSpeedLimitMBps = 0
+	}
+	switch strings.ToLower(strings.TrimSpace(config.PublishMode)) {
+	case "remote":
+		config.PublishMode = "remote"
+	default:
+		config.PublishMode = "local"
+	}
+	if config.PublishAgentTimeout < 3 {
+		config.PublishAgentTimeout = 3
+	}
+	if config.PublishAgentTimeout > 600 {
+		config.PublishAgentTimeout = 600
+	}
+	switch config.DanmakuBurnStyle {
+	case "compact", "large":
+	default:
+		config.DanmakuBurnStyle = "default"
+	}
+	if config.DanmakuFontSize < 0 {
+		config.DanmakuFontSize = 0
+	}
+	if config.DanmakuFontSize > 0 && config.DanmakuFontSize < 12 {
+		config.DanmakuFontSize = 12
+	}
+	if config.DanmakuFontSize > 72 {
+		config.DanmakuFontSize = 72
+	}
+	if config.DanmakuScrollArea <= 0 {
+		config.DanmakuScrollArea = 0.75
+	}
+	if config.DanmakuScrollArea < 0.1 {
+		config.DanmakuScrollArea = 0.1
+	}
+	if config.DanmakuScrollArea > 1 {
+		config.DanmakuScrollArea = 1
+	}
+	if config.DanmakuDisplayArea <= 0 {
+		config.DanmakuDisplayArea = 0.8
+	}
+	if config.DanmakuDisplayArea < 0.1 {
+		config.DanmakuDisplayArea = 0.1
+	}
+	if config.DanmakuDisplayArea > 1 {
+		config.DanmakuDisplayArea = 1
+	}
 }
 
 // GetSystemStats 获取系统统计信息

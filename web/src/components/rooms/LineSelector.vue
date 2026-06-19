@@ -1,25 +1,31 @@
 <template>
-  <el-form-item label="上传线路">
-    <el-select v-model="localLine" placeholder="选择线路" style="width: 100%">
+  <div class="line-selector">
+    <el-select
+      v-model="localLine"
+      placeholder="选择线路"
+      style="width: 100%"
+      :fit-input-width="false"
+      popper-class="line-select-dropdown"
+    >
       <el-option
         v-for="line in uploadLines"
         :key="line.value"
         :label="line.label"
         :value="line.value"
       >
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-          <div style="flex: 1; overflow: hidden;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-weight: 500;">{{ line.label }}</span>
+        <div class="line-option">
+          <div class="line-option-main">
+            <div class="line-option-title">
+              <span class="line-label">{{ line.label }}</span>
               <el-tag v-if="line.recommended" size="small" type="success">推荐</el-tag>
               <el-tag v-if="line.provider" size="small" type="info">{{ line.provider }}</el-tag>
             </div>
-            <div style="font-size: 12px; color: #909399; margin-top: 2px;">{{ line.description }}</div>
+            <div class="line-description">{{ line.description }}</div>
           </div>
-          <div style="flex-shrink: 0; margin-left: 10px; font-size: 12px; color: #8492a6;" v-if="lineStats[line.value]">
+          <div class="line-option-status" v-if="lineStats[line.value]">
             <i :class="getLineStatusIcon(lineStats[line.value])" :style="{color: getLineStatusColor(lineStats[line.value])}"></i>
             {{ lineStats[line.value] }}
-            <span v-if="lineSpeeds[line.value]" style="margin-left: 5px; color: #409EFF">
+            <span v-if="lineSpeeds[line.value]" class="line-speed">
               <el-icon><Upload /></el-icon> {{ lineSpeeds[line.value] }}
             </span>
           </div>
@@ -39,7 +45,7 @@
     <div class="help-text" style="margin-top: 5px;">
       提示：线路检测采用全并发策略，通常在 10 秒内完成。深度测速将对可用线路逐一上传 2MB 测试数据以确认真实速度。
     </div>
-  </el-form-item>
+  </div>
 </template>
 
 <script setup>
@@ -104,6 +110,64 @@ const getLineStatusIcon = (status) => {
 </script>
 
 <style scoped>
+.line-selector {
+  width: 100%;
+}
+
+.line-option {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) max-content;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  width: 100%;
+}
+
+.line-option-main {
+  min-width: 0;
+}
+
+.line-option-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.line-label {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.line-description {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.4;
+  margin-top: 2px;
+  white-space: normal;
+}
+
+.line-option-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: max-content;
+  font-size: 12px;
+  color: #8492a6;
+  white-space: nowrap;
+}
+
+.line-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 5px;
+  color: #409EFF;
+}
+
 .help-text {
   font-size: 12px;
   color: #999;
@@ -112,6 +176,30 @@ const getLineStatusIcon = (status) => {
 
 .line-test-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+}
+
+:global(.line-select-dropdown) {
+  min-width: min(620px, calc(100vw - 32px)) !important;
+}
+
+:global(.line-select-dropdown .el-select-dropdown__item) {
+  height: auto;
+  min-height: 52px;
+  line-height: 1.4;
+  padding: 8px 14px;
+}
+
+@media (max-width: 640px) {
+  .line-option {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .line-option-status {
+    justify-content: flex-start;
+    white-space: normal;
+  }
 }
 </style>

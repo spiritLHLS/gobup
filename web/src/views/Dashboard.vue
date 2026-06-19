@@ -173,6 +173,15 @@
 
         <el-divider />
 
+        <PublishAgentConfig
+          :config="config"
+          :detecting-agent="detectingAgent"
+          @toggle-feature="toggleFeature"
+          @detect="detectPublishAgent"
+        />
+
+        <el-divider />
+
         <div class="form-section">
           <div class="section-title">维护与清理</div>
           
@@ -276,67 +285,7 @@
 
         <el-divider />
 
-        <div class="form-section">
-          <div class="section-title">弹幕代理配置（全局）</div>
-          
-          <el-form-item label="启用代理池">
-            <div class="switch-item">
-              <el-switch 
-                v-model="config.enableDanmakuProxy" 
-                @change="toggleFeature('enableDanmakuProxy', $event)"
-                size="large"
-              />
-              <span class="help-text">启用后，发送弹幕时将轮询使用代理池中的IP，突破单IP限流</span>
-            </div>
-          </el-form-item>
-
-          <el-form-item label="代理列表">
-            <div class="proxy-input-wrapper">
-              <el-input
-                v-model="config.danmakuProxyList"
-                type="textarea"
-                :rows="10"
-                placeholder="每行一个代理，支持格式：&#10;socks5://ip:port&#10;socks5://user:pass@ip:port&#10;http://ip:port&#10;http://user:pass@ip:port&#10;https://ip:port&#10;&#10;示例：&#10;socks5://127.0.0.1:1080&#10;http://user:pass@proxy.example.com:8080"
-                size="large"
-              />
-            </div>
-          </el-form-item>
-
-          <el-alert
-            v-if="config.enableDanmakuProxy && proxyCount > 0"
-            :title="`当前配置了 ${proxyCount} 个代理IP + 1 个本地IP，总计 ${proxyCount + 1} 个IP`"
-            type="success"
-            :closable="false"
-            style="margin-top: 10px; margin-bottom: 10px;"
-          />
-
-          <el-alert
-            v-if="config.enableDanmakuProxy && !config.danmakuProxyList"
-            title="未配置代理，将仅使用本地IP"
-            type="warning"
-            :closable="false"
-            style="margin-top: 10px; margin-bottom: 10px;"
-          />
-
-          <el-alert
-            v-if="config.enableDanmakuProxy"
-            type="info"
-            :closable="false"
-          >
-            <template #default>
-              <div style="font-size: 12px; line-height: 1.6;">
-                <p style="margin: 4px 0;"><strong>💡 使用说明：</strong></p>
-                <ul style="margin: 4px 0; padding-left: 20px;">
-                  <li>每行一个代理地址，支持 socks5 和 http(s) 协议</li>
-                  <li>系统会自动包含本地IP，无需单独配置</li>
-                  <li>每个IP独立限流（22秒/条），实现真正的并行发送</li>
-                  <li>代理池会轮询使用所有可用IP（所有用户共享此代理池）</li>
-                  <li>以 # 开头的行会被忽略（可用于注释）</li>
-                </ul>
-              </div>
-            </template>
-          </el-alert>
-        </div>
+        <DanmakuProxyConfig :config="config" @toggle-feature="toggleFeature" />
       </el-form>
     </el-card>
 
@@ -359,6 +308,8 @@ import DashboardStats from '../components/dashboard/DashboardStats.vue'
 import UploadQueueCard from '../components/dashboard/UploadQueueCard.vue'
 import TaskManagerCard from '../components/dashboard/TaskManagerCard.vue'
 import DanmakuBurnGlobalConfig from '../components/dashboard/DanmakuBurnGlobalConfig.vue'
+import DanmakuProxyConfig from '../components/dashboard/DanmakuProxyConfig.vue'
+import PublishAgentConfig from '../components/dashboard/PublishAgentConfig.vue'
 import { createDefaultDashboardConfig, normalizeDashboardConfig } from '../utils/dashboardConfig'
 
 const loading = ref(false)
@@ -369,6 +320,7 @@ const repairing = ref(false)
 const cleaning = ref(false)
 const cleanupPreviewing = ref(false)
 const cleaningDatabase = ref(false)
+const detectingAgent = ref(false)
 const fileScanDialogRef = ref(null)
 const cleanFilesDialogRef = ref(null)
 const config = ref(createDefaultDashboardConfig())
@@ -413,19 +365,6 @@ const updateFileScanMinSize = (val) => {
 const updateFileScanMaxAge = (val) => {
   config.value.fileScanMaxAge = val
 }
-
-// 计算代理数量
-const proxyCount = computed(() => {
-  if (!config.value.danmakuProxyList) {
-    return 0
-  }
-  
-  const lines = config.value.danmakuProxyList.split('\n')
-  return lines.filter(line => {
-    const trimmed = line.trim()
-    return trimmed && !trimmed.startsWith('#')
-  }).length
-})
 
 // 加载配置
 const loadConfig = async () => {
@@ -526,9 +465,28 @@ const getFeatureName = (feature) => {
     enableFileWatcher: '目录事件监控',
     autoDataRepair: '自动数据修复',
     enableOrphanScan: '孤儿文件扫描',
-    enableDanmakuProxy: '弹幕代理池'
+    enableDanmakuProxy: '弹幕代理池',
+    uploadWhileRecording: '边录制边上传',
+    publishWhileRecording: '边录制边投稿'
   }
   return names[feature] || feature
+}
+
+const detectPublishAgent = async () => {
+  detectingAgent.value = true
+  try {
+    const response = await api.get('/agent/detect')
+    if (response.type === 'success') {
+      ElMessage.success(response.msg || '远程 Agent 可用')
+    } else {
+      ElMessage.error(response.msg || '远程 Agent 不可用')
+    }
+  } catch (error) {
+    console.error('检测远程 Agent 失败:', error)
+    ElMessage.error('检测远程 Agent 失败')
+  } finally {
+    detectingAgent.value = false
+  }
 }
 
 // 触发文件扫描
@@ -920,22 +878,6 @@ onUnmounted(() => {
 
 :deep(.el-input) {
   max-width: 500px;
-}
-
-.proxy-input-wrapper {
-  width: 100%;
-  
-  :deep(.el-textarea) {
-    width: 100%;
-    max-width: 100%;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
-    font-size: 13px;
-  }
-  
-  :deep(.el-textarea__inner) {
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
-    font-size: 13px;
-  }
 }
 
 /* 响应式 */

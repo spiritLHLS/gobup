@@ -152,6 +152,10 @@ func (s *FileScanService) parseFileMetadata(filePath string, info os.FileInfo) *
 		log.Printf("[FileScan] 警告: 结束时间早于开始时间，自动修正")
 		metadata.EndTime = metadata.StartTime.Add(time.Hour)
 	}
+	metadata.Title = normalizeLiveTitle(metadata.Title)
+	if metadata.Title == "" {
+		metadata.Title = strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	}
 
 	// 生成或验证 SessionID
 	// 如果FLV文件中已经有SessionID，直接使用
@@ -210,6 +214,35 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 				log.Printf("[FileScan] 合并到未投稿的已有记录（已确认直播结束）: ID=%d, SessionID=%s", history.ID, metadata.SessionID)
 				return &history, nil
 			}
+		}
+	}
+
+	if title := normalizeLiveTitle(metadata.Title); title != "" {
+		var exactTitleHistory models.RecordHistory
+		if err := db.Where(
+			"room_id = ? AND title = ? AND publish = ? AND is_highlight = ?",
+			metadata.RoomID, title, false, false,
+		).Order("start_time ASC").First(&exactTitleHistory).Error; err == nil {
+			updates := map[string]interface{}{}
+			if strings.TrimSpace(exactTitleHistory.SessionID) == "" {
+				updates["session_id"] = metadata.SessionID
+				exactTitleHistory.SessionID = metadata.SessionID
+			}
+			if metadata.EndTime.After(exactTitleHistory.EndTime) {
+				updates["end_time"] = metadata.EndTime
+			}
+			if metadata.StartTime.Before(exactTitleHistory.StartTime) {
+				updates["start_time"] = metadata.StartTime
+			}
+			if len(updates) > 0 {
+				db.Model(&exactTitleHistory).Updates(updates)
+			}
+			if exactTitleHistory.SessionID != "" {
+				metadata.SessionID = exactTitleHistory.SessionID
+			}
+			log.Printf("[FileScan] 标题完全相同，合并到同场直播历史记录: ID=%d, Title=%s, SessionID=%s",
+				exactTitleHistory.ID, title, exactTitleHistory.SessionID)
+			return &exactTitleHistory, nil
 		}
 	}
 
@@ -379,6 +412,10 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 		history.ID, history.SessionID, metadata.RoomID, history.Uname)
 
 	return &history, nil
+}
+
+func normalizeLiveTitle(title string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(title)), " ")
 }
 
 // isSimilarTitle 判断两个标题是否相似

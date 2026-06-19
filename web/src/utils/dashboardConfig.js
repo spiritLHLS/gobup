@@ -13,6 +13,12 @@ export const createDefaultDashboardConfig = () => ({
   enableDanmakuProxy: false,
   danmakuProxyList: '',
   uploadSpeedLimitMbps: 0,
+  uploadWhileRecording: false,
+  publishWhileRecording: false,
+  publishMode: 'local',
+  publishAgentEndpoint: '',
+  publishAgentToken: '',
+  publishAgentTimeout: 30,
   danmakuBurnStyle: 'default',
   danmakuFontSize: 0,
   danmakuFontColor: '',
@@ -27,5 +33,7 @@ export const normalizeDashboardConfig = (currentConfig, data) => {
   if (!merged.danmakuDisplayArea || merged.danmakuDisplayArea <= 0) merged.danmakuDisplayArea = 0.8
   if (merged.danmakuFontSize < 0) merged.danmakuFontSize = 0
   if (merged.uploadSpeedLimitMbps < 0) merged.uploadSpeedLimitMbps = 0
+  if (!['local', 'remote'].includes(merged.publishMode)) merged.publishMode = 'local'
+  if (!merged.publishAgentTimeout || merged.publishAgentTimeout < 3) merged.publishAgentTimeout = 30
   return merged
 }

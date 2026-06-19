@@ -5,6 +5,14 @@
         <div class="card-header">
           <span>用户列表</span>
           <div class="header-actions">
+            <el-button type="success" plain :disabled="selectedUsers.length === 0" :loading="exportingUsers" @click="handleExportSelectedUsers">
+              <el-icon><Download /></el-icon>
+              导出选中
+            </el-button>
+            <el-button type="warning" plain :loading="importingUsers" @click="triggerUserImport">
+              <el-icon><Upload /></el-icon>
+              导入用户
+            </el-button>
             <el-button type="primary" plain @click="showRateLimitDialog = true">
               <el-icon><Setting /></el-icon>
               上传限速
@@ -17,7 +25,10 @@
         </div>
       </template>
 
-      <el-table :data="users" style="width: 100%" v-loading="loading">
+      <input ref="userImportInputRef" type="file" accept=".json,application/json" class="hidden-file-input" @change="handleImportUsers" />
+
+      <el-table :data="users" style="width: 100%" v-loading="loading" @selection-change="handleUserSelectionChange">
+        <el-table-column type="selection" width="50" />
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="uname" label="用户名" width="150" />
         <el-table-column prop="uid" label="UID" width="150" />
@@ -180,7 +191,7 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Setting } from '@element-plus/icons-vue'
+import { Plus, Setting, Download, Upload } from '@element-plus/icons-vue'
 import { userAPI } from '@/api'
 import axios from 'axios'
 import QrcodeLogin from '@/components/users/QrcodeLogin.vue'
@@ -195,6 +206,10 @@ const loginDialogVisible = ref(false)
 const loginMethod = ref('qrcode')
 const showRateLimitDialog = ref(false)
 const showWxPushDialog = ref(false)
+const selectedUsers = ref([])
+const exportingUsers = ref(false)
+const importingUsers = ref(false)
+const userImportInputRef = ref(null)
 
 // 使用composables
 const {
@@ -244,6 +259,75 @@ const fetchUsers = async () => {
     console.error('获取用户列表失败:', error)
   } finally {
     loading.value = false
+  }
+}
+
+const handleUserSelectionChange = (selection) => {
+  selectedUsers.value = selection
+}
+
+const handleExportSelectedUsers = async () => {
+  if (!selectedUsers.value.length) {
+    ElMessage.warning('请先选择要导出的用户')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将导出 ${selectedUsers.value.length} 个用户的迁移文件，包含 Cookie 和 AccessKey 等敏感凭据。请妥善保存。`,
+      '导出用户',
+      { type: 'warning', confirmButtonText: '导出' }
+    )
+    exportingUsers.value = true
+    const blob = await userAPI.export({
+      ids: selectedUsers.value.map(user => user.id),
+      includeSecrets: true
+    })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `gobup-users-${Date.now()}.json`
+    a.click()
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('用户导出成功')
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('导出用户失败:', error)
+      ElMessage.error('导出用户失败')
+    }
+  } finally {
+    exportingUsers.value = false
+  }
+}
+
+const triggerUserImport = () => {
+  userImportInputRef.value?.click()
+}
+
+const handleImportUsers = async (event) => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  try {
+    await ElMessageBox.confirm(
+      '导入会按 UID 覆盖同名账号的迁移字段，请确认文件来源可信。',
+      '导入用户',
+      { type: 'warning', confirmButtonText: '导入' }
+    )
+    importingUsers.value = true
+    const result = await userAPI.import(file)
+    if (result.type === 'success') {
+      ElMessage.success(result.msg || '导入成功')
+      fetchUsers()
+    } else {
+      ElMessage.error(result.msg || '导入失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('导入用户失败:', error)
+      ElMessage.error('导入用户失败')
+    }
+  } finally {
+    importingUsers.value = false
   }
 }
 
@@ -441,6 +525,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hidden-file-input {
+  display: none;
 }
 
 .login-tabs {

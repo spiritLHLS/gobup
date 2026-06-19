@@ -287,6 +287,11 @@ func (s *Service) RequeueInterruptedBurns() {
 // 场景：checkAndPublish 被容器重启打断，或烧录版上传完成后 checkAndPublish 从未触发
 func (s *Service) RecoverUnpublishedHistories() {
 	db := database.GetDB()
+	allowPublishWhileRecording := false
+	var sysConfig models.SystemConfig
+	if err := db.First(&sysConfig).Error; err == nil {
+		allowPublishWhileRecording = sysConfig.PublishWhileRecording
+	}
 
 	// 只处理启用了自动投稿的房间
 	var rooms []models.RecordRoom
@@ -300,12 +305,13 @@ func (s *Service) RecoverUnpublishedHistories() {
 			continue
 		}
 
-		// 查找该房间未投稿、未录制/直播的历史记录
+		// 查找该房间未投稿的历史记录；默认仅处理已结束历史，开启边录制投稿时允许活动场次进入检查。
 		var histories []models.RecordHistory
-		if err := db.Where(
-			"room_id = ? AND publish = ? AND recording = ? AND streaming = ?",
-			room.RoomID, false, false, false,
-		).Find(&histories).Error; err != nil {
+		query := db.Where("room_id = ? AND publish = ?", room.RoomID, false)
+		if !allowPublishWhileRecording {
+			query = query.Where("recording = ? AND streaming = ?", false, false)
+		}
+		if err := query.Find(&histories).Error; err != nil {
 			log.Printf("[启动恢复-投稿] 查询房间 %s 的历史记录失败: %v", room.RoomID, err)
 			continue
 		}
@@ -776,6 +782,11 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 			history.ID, history.PublishCooldownAt.Format("2006-01-02 15:04:05"), history.PublishErrorType)
 		return
 	}
+	var sysConfig models.SystemConfig
+	allowPublishWhileRecording := false
+	if err := db.First(&sysConfig).Error; err == nil {
+		allowPublishWhileRecording = sysConfig.PublishWhileRecording
+	}
 	// totalCount 只统计非临时文件（is_temp_file=false），并排除"已标记删除且未上传"的孤立记录：
 	//   - 烧录/切分产生的临时分P（is_temp_file=true）不应阻塞投稿条件
 	//   - file_delete=true 且 upload=false ：孤立临时分P（烧录失败后清理标记），不能阻塞投稿
@@ -826,24 +837,29 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 		}
 	}
 
-	if totalCount > 0 && totalCount == uploadedCount && recordingCount == 0 &&
-		!history.Publish && !history.Recording && !history.Streaming &&
-		room.AutoPublish {
+	noActiveRecording := recordingCount == 0 && !history.Recording && !history.Streaming
+	if totalCount > 0 && totalCount == uploadedCount &&
+		!history.Publish && room.AutoPublish &&
+		(noActiveRecording || allowPublishWhileRecording) {
 
 		// 额外验证：检查最后一个分P的结束时间，确保距离现在已超过10分钟
 		// 这是为了应对：同场直播的最后一个分P已上传，但可能马上又有新的分P产生的情况
-		var lastPart models.RecordHistoryPart
-		err := db.Where("history_id = ?", history.ID).
-			Order("end_time DESC").
-			First(&lastPart).Error
+		if !allowPublishWhileRecording {
+			var lastPart models.RecordHistoryPart
+			err := db.Where("history_id = ?", history.ID).
+				Order("end_time DESC").
+				First(&lastPart).Error
 
-		if err == nil {
-			timeSinceLastPart := time.Since(lastPart.EndTime)
-			if timeSinceLastPart < 10*time.Minute {
-				log.Printf("[自动投稿] 最后分P结束时间过近(%.1f分钟)，暂缓投稿等待确认直播结束: history_id=%d",
-					timeSinceLastPart.Minutes(), history.ID)
-				return
+			if err == nil {
+				timeSinceLastPart := time.Since(lastPart.EndTime)
+				if timeSinceLastPart < 10*time.Minute {
+					log.Printf("[自动投稿] 最后分P结束时间过近(%.1f分钟)，暂缓投稿等待确认直播结束: history_id=%d",
+						timeSinceLastPart.Minutes(), history.ID)
+					return
+				}
 			}
+		} else if !noActiveRecording {
+			log.Printf("[自动投稿] 已开启边录制边投稿，允许直播仍在进行时提交已完成分P: history_id=%d", history.ID)
 		}
 
 		log.Printf("[自动投稿] 所有条件满足，开始自动投稿: history_id=%d, 总分P=%d, 已上传=%d",
@@ -864,8 +880,9 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 
 				// 投稿成功后，检查同SessionID是否还有其他已上传完成但未投稿的历史记录
 				// 如果有，应该将它们追加到刚才投稿的视频上
-				if room.MergeBySession && history.SessionID != "" {
-					log.Printf("[自动投稿] 投稿成功后检查同SessionID是否有待追加记录: session_id=%s", history.SessionID)
+				if room.MergeBySession && (history.SessionID != "" || normalizePublishTitle(history.Title) != "") {
+					log.Printf("[自动投稿] 投稿成功后检查同SessionID/同标题是否有待追加记录: session_id=%s title=%s",
+						history.SessionID, history.Title)
 					go s.checkAndAppendPendingHistories(history, room)
 				}
 			}
@@ -875,8 +892,8 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 	} else if totalCount > 0 && uploadedCount < totalCount {
 		log.Printf("[自动投稿] 等待所有分P上传完成: history_id=%d, 总分P=%d, 已上传=%d, 正在录制=%d",
 			history.ID, totalCount, uploadedCount, recordingCount)
-	} else if recordingCount > 0 {
-		log.Printf("[自动投稿] 仍有分P正在录制，等待录制完成: history_id=%d, 正在录制=%d",
+	} else if !noActiveRecording && !allowPublishWhileRecording {
+		log.Printf("[自动投稿] 直播仍在进行，等待录制完成: history_id=%d, 正在录制分P=%d",
 			history.ID, recordingCount)
 	}
 }
@@ -888,12 +905,24 @@ func (s *Service) checkAndAppendPendingHistories(publishedHistory *models.Record
 
 	db := database.GetDB()
 
-	log.Printf("[投稿后检查] 开始检查同SessionID待追加记录: session_id=%s", publishedHistory.SessionID)
+	log.Printf("[投稿后检查] 开始检查同SessionID/同标题待追加记录: session_id=%s title=%s",
+		publishedHistory.SessionID, publishedHistory.Title)
 
-	// 查询同SessionID的其他历史记录（未投稿但有已上传分P的）
+	// 查询同SessionID或同标题的其他历史记录（未投稿但有已上传分P的）
 	var pendingHistories []models.RecordHistory
-	if err := db.Where("session_id = ? AND publish = ? AND room_id = ? AND id != ?",
-		publishedHistory.SessionID, false, room.RoomID, publishedHistory.ID).Find(&pendingHistories).Error; err != nil {
+	pendingQuery := db.Where("publish = ? AND room_id = ? AND id != ?", false, room.RoomID, publishedHistory.ID)
+	normalizedTitle := normalizePublishTitle(publishedHistory.Title)
+	if publishedHistory.SessionID != "" && normalizedTitle != "" {
+		pendingQuery = pendingQuery.Where("(session_id = ? OR title = ?)", publishedHistory.SessionID, normalizedTitle)
+	} else if publishedHistory.SessionID != "" {
+		pendingQuery = pendingQuery.Where("session_id = ?", publishedHistory.SessionID)
+	} else if normalizedTitle != "" {
+		pendingQuery = pendingQuery.Where("title = ?", normalizedTitle)
+	} else {
+		log.Printf("[投稿后检查] SessionID和标题均为空，跳过")
+		return
+	}
+	if err := pendingQuery.Find(&pendingHistories).Error; err != nil {
 		log.Printf("[投稿后检查] 查询失败: %v", err)
 		return
 	}

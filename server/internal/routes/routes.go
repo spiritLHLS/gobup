@@ -53,6 +53,8 @@ func SetupRoutes(router *gin.Engine) {
 				users.GET("/delete/:id", controllers.DeleteBiliUser)
 				users.POST("/update", controllers.UpdateBiliUser)
 				users.POST("/enabled/:id", controllers.SetBiliUserEnabled)
+				users.POST("/export", controllers.ExportBiliUsers)
+				users.POST("/import", controllers.ImportBiliUsers)
 			}
 
 			histories := auth.Group("/history")
@@ -98,6 +100,7 @@ func SetupRoutes(router *gin.Engine) {
 				histories.POST("/syncVideo/:id", controllers.SyncVideoInfo)
 				histories.POST("/batchSyncVideo", controllers.BatchSyncVideo)
 				histories.POST("/createSyncTask/:id", controllers.CreateSyncTask)
+				histories.POST("/sync", controllers.SyncLiveSessions)
 			}
 
 			// 视频同步任务
@@ -196,7 +199,18 @@ func SetupRoutes(router *gin.Engine) {
 				datarepair.GET("/check", controllers.CheckDataConsistency)
 				datarepair.POST("/repair", controllers.RepairDataConsistency)
 			}
+
+			agentConfig := auth.Group("/agent")
+			{
+				agentConfig.GET("/detect", controllers.DetectPublishAgent)
+			}
 		}
+	}
+
+	agent := router.Group("/agent/v1")
+	{
+		agent.GET("/health", controllers.AgentHealth)
+		agent.POST("/publish", controllers.AgentPublish)
 	}
 
 	// WebSocket路由

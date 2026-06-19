@@ -12,6 +12,10 @@
         <el-icon><Promotion /></el-icon>
         投稿视频
       </el-button>
+      <el-button size="small" type="success" plain @click="$emit('syncSessions')">
+        <el-icon><RefreshRight /></el-icon>
+        同步
+      </el-button>
       <el-button size="small" type="info" @click="$emit('syncVideo')">
         <el-icon><Refresh /></el-icon>
         同步信息
@@ -44,7 +48,8 @@ import {
   RefreshLeft, 
   Delete, 
   DeleteFilled,
-  Promotion
+  Promotion,
+  RefreshRight
 } from '@element-plus/icons-vue'
 
 defineProps({
@@ -57,6 +62,7 @@ defineProps({
 defineEmits([
   'upload',
   'publish',
+  'syncSessions',
   'syncVideo',
   'moveFiles',
   'resetStatus',

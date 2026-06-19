@@ -93,6 +93,7 @@ export const historyAPI = {
   parts: (id) => request.get(`/history/part/${id}`),
   upload: (id) => request.post(`/history/upload/${id}`),
   syncVideo: (id) => request.post(`/history/syncVideo/${id}`),
+  syncSessions: (historyIds = []) => request.post('/history/sync', { historyIds }),
   moveFiles: (id) => request.post(`/history/moveFiles/${id}`),
   resetStatus: (id, options) => request.post(`/history/resetStatus/${id}`, options),
   forceArchive: (id) => request.post(`/history/forceArchive/${id}`),
@@ -125,7 +126,15 @@ export const userAPI = {
   refresh: (id) => request.get(`/biliUser/refresh/${id}`),
   checkStatus: (id) => request.get(`/biliUser/checkStatus/${id}`),
   delete: (id) => request.get(`/biliUser/delete/${id}`),
-  setEnabled: (id, enabled) => request.post(`/biliUser/enabled/${id}`, { enabled })
+  setEnabled: (id, enabled) => request.post(`/biliUser/enabled/${id}`, { enabled }),
+  export: (data) => request.post('/biliUser/export', data, { responseType: 'blob' }),
+  import: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.post('/biliUser/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  }
 }
 
 // 配置管理

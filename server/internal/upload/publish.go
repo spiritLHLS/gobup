@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gobup/server/internal/agent"
 	"github.com/gobup/server/internal/bili"
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
@@ -16,6 +17,14 @@ import (
 )
 
 func (s *Service) PublishHistory(historyID uint, userID uint) error {
+	return s.publishHistory(historyID, userID, true)
+}
+
+func (s *Service) PublishHistoryLocal(historyID uint, userID uint) error {
+	return s.publishHistory(historyID, userID, false)
+}
+
+func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) error {
 	// 进程内防重锁：阻止同一历史记录被并发投稿（API手动触发 + 自动调度器同时触发等场景）
 	if _, loaded := s.publishingHistories.LoadOrStore(historyID, true); loaded {
 		log.Printf("[Publish] 历史记录 %d 正在投稿中（已有另一路径持有锁），拒绝并发调用", historyID)
@@ -78,6 +87,24 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		}
 	}
 
+	if room.MergeBySession {
+		normalizedTitle := normalizePublishTitle(history.Title)
+		if normalizedTitle != "" {
+			log.Printf("[投稿] 查询同标题已投稿记录 (room_id=%s, title=%s)", history.RoomID, normalizedTitle)
+			var existingHistory models.RecordHistory
+			err := db.Where(
+				"room_id = ? AND title = ? AND publish = ? AND id != ? AND is_highlight = ?",
+				history.RoomID, normalizedTitle, true, historyID, false,
+			).Order("start_time ASC").First(&existingHistory).Error
+			if err == nil {
+				log.Printf("[投稿] 检测到同标题已有投稿 (existing_history_id=%d, bv_id=%s)，执行追加分P",
+					existingHistory.ID, existingHistory.BvID)
+				return s.AppendPartsToExisting(historyID, &existingHistory, userID)
+			}
+			log.Printf("[投稿] 同标题无已投稿记录，继续新建投稿 (query_error=%v)", err)
+		}
+	}
+
 	// 权限检查1：房间是否启用上传功能（总开关）
 	if !room.Upload {
 		return fmt.Errorf("房间未启用上传功能，无法投稿")
@@ -90,6 +117,39 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 		log.Printf("[Publish] 请求用户ID=%d 与房间配置用户ID=%d 不一致，使用房间配置用户投稿",
 			userID, room.UploadUserID)
 		userID = room.UploadUserID
+	}
+
+	if allowRemote {
+		var sysConfig models.SystemConfig
+		if err := db.First(&sysConfig).Error; err == nil && strings.TrimSpace(sysConfig.PublishMode) == "remote" {
+			endpoint := strings.TrimSpace(sysConfig.PublishAgentEndpoint)
+			if endpoint == "" {
+				return fmt.Errorf("已选择远程投稿模式，但未配置远程 Agent 地址")
+			}
+			timeout := time.Duration(sysConfig.PublishAgentTimeout) * time.Second
+			client := agent.NewClient(endpoint, sysConfig.PublishAgentToken, timeout)
+			result, err := client.PublishHistory(historyID, userID)
+			if err != nil {
+				return fmt.Errorf("远程 Agent 投稿失败: %w", err)
+			}
+			if result != nil {
+				updates := map[string]interface{}{
+					"publish": result.Publish,
+				}
+				if result.BvID != "" {
+					updates["bv_id"] = result.BvID
+				}
+				if result.AvID != "" {
+					updates["av_id"] = result.AvID
+				}
+				if result.Message != "" {
+					updates["message"] = result.Message
+				}
+				db.Model(&history).Updates(updates)
+			}
+			log.Printf("[Agent] 已通过远程 Agent 完成投稿: history_id=%d, endpoint=%s", historyID, endpoint)
+			return nil
+		}
 	}
 
 	var user models.BiliBiliUser
@@ -524,123 +584,8 @@ func (s *Service) PublishHistory(historyID uint, userID uint) error {
 	return nil
 }
 
-func (s *Service) createAndQueueHighEnergyClip(sourceHistoryID uint) {
-	db := database.GetDB()
-
-	var sourceHistory models.RecordHistory
-	if err := db.First(&sourceHistory, sourceHistoryID).Error; err != nil {
-		log.Printf("[高能剪辑] 获取源历史记录失败: history_id=%d, err=%v", sourceHistoryID, err)
-		return
-	}
-	if sourceHistory.IsHighlight {
-		return
-	}
-
-	var room models.RecordRoom
-	if err := db.Where("room_id = ?", sourceHistory.RoomID).First(&room).Error; err != nil {
-		log.Printf("[高能剪辑] 获取房间配置失败: room_id=%s, err=%v", sourceHistory.RoomID, err)
-		return
-	}
-	if !room.Upload {
-		log.Printf("[高能剪辑] 房间未启用上传，跳过高光稿件入队: room_id=%s", room.RoomID)
-		return
-	}
-	if !roomHasUploadUserOrStrategy(&room) {
-		log.Printf("[高能剪辑] 房间未配置上传账号或账号策略，跳过高光稿件入队: room_id=%s", room.RoomID)
-		return
-	}
-
-	log.Printf("[高能剪辑] 开始生成高光稿件: source_history_id=%d", sourceHistoryID)
-	outputFile, err := services.NewHighEnergyCutService().CutHighEnergySegments(sourceHistoryID)
-	if err != nil {
-		log.Printf("[高能剪辑] 生成失败: source_history_id=%d, err=%v", sourceHistoryID, err)
-		return
-	}
-
-	fileInfo, err := os.Stat(outputFile)
-	if err != nil {
-		log.Printf("[高能剪辑] 输出文件不可用: file=%s, err=%v", outputFile, err)
-		return
-	}
-
-	now := time.Now()
-	startTime := sourceHistory.StartTime
-	if startTime.IsZero() {
-		startTime = now
-	}
-	endTime := sourceHistory.EndTime
-	if endTime.IsZero() || !endTime.After(startTime) {
-		endTime = startTime.Add(time.Second)
-	}
-
-	title := strings.TrimSpace(sourceHistory.Title)
-	if title == "" {
-		title = "高能剪辑"
-	} else {
-		title = title + " - 高能剪辑"
-	}
-
-	sessionBase := strings.TrimSpace(sourceHistory.SessionID)
-	if sessionBase == "" {
-		sessionBase = fmt.Sprintf("%s_%d", sourceHistory.RoomID, sourceHistory.ID)
-	}
-	highlightSessionID := fmt.Sprintf("%s_highlight_%d", sessionBase, now.UnixNano())
-
-	highlightHistory := models.RecordHistory{
-		EventID:      fmt.Sprintf("highlight_%d", sourceHistory.ID),
-		RoomID:       sourceHistory.RoomID,
-		SessionID:    highlightSessionID,
-		Uname:        sourceHistory.Uname,
-		Title:        title,
-		AreaName:     sourceHistory.AreaName,
-		StartTime:    startTime,
-		EndTime:      endTime,
-		Upload:       true,
-		Publish:      false,
-		Recording:    false,
-		Streaming:    false,
-		FilePath:     outputFile,
-		FileSize:     fileInfo.Size(),
-		UploadStatus: 0,
-		CoverURL:     sourceHistory.CoverURL,
-		IsHighlight:  true,
-		Message:      fmt.Sprintf("由历史记录 %d 自动生成的高能剪辑", sourceHistory.ID),
-	}
-	if err := db.Create(&highlightHistory).Error; err != nil {
-		log.Printf("[高能剪辑] 创建高光历史记录失败: file=%s, err=%v", outputFile, err)
-		return
-	}
-
-	highlightPart := models.RecordHistoryPart{
-		HistoryID:    highlightHistory.ID,
-		RoomID:       highlightHistory.RoomID,
-		SessionID:    highlightHistory.SessionID,
-		Title:        title,
-		LiveTitle:    sourceHistory.Title,
-		AreaName:     sourceHistory.AreaName,
-		FilePath:     outputFile,
-		FileName:     filepath.Base(outputFile),
-		FileSize:     fileInfo.Size(),
-		Duration:     int(endTime.Sub(startTime).Seconds()),
-		StartTime:    startTime,
-		EndTime:      endTime,
-		Recording:    false,
-		Upload:       false,
-		Uploading:    false,
-		Page:         1,
-		TempFileType: "high_energy",
-	}
-	if err := db.Create(&highlightPart).Error; err != nil {
-		log.Printf("[高能剪辑] 创建高光分P失败: history_id=%d, file=%s, err=%v", highlightHistory.ID, outputFile, err)
-		return
-	}
-
-	if err := s.UploadPart(&highlightPart, &highlightHistory, &room); err != nil {
-		log.Printf("[高能剪辑] 高光分P入队失败: part_id=%d, err=%v", highlightPart.ID, err)
-		return
-	}
-	log.Printf("[高能剪辑] 高光稿件已创建并加入上传队列: history_id=%d, part_id=%d, file=%s",
-		highlightHistory.ID, highlightPart.ID, outputFile)
+func normalizePublishTitle(title string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(title)), " ")
 }
 
 // bv2avLocal 将 BV 号转换为 AV 号（upload 包内部使用，避免跨包循环导入）
@@ -760,9 +705,21 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 	// - record_histories.publish=true：只统计已成功投稿/追加的历史记录分P，与B站视频当前状态保持一致
 	// - file_delete 不过滤：本地文件删除不影响CID/FileName，已上传记录仍有效
 	var existingParts []models.RecordHistoryPart
-	if err := db.Joins("JOIN record_histories ON record_history_parts.history_id = record_histories.id").
-		Where("record_histories.session_id = ? AND record_histories.publish = ? AND record_history_parts.upload = ? AND (record_history_parts.is_temp_file = ? OR record_history_parts.temp_file_type = ?)",
-			existingHistory.SessionID, true, true, false, "split").
+	normalizedExistingTitle := normalizePublishTitle(existingHistory.Title)
+	existingPartsQuery := db.Joins("JOIN record_histories ON record_history_parts.history_id = record_histories.id").
+		Where("record_histories.room_id = ? AND record_histories.publish = ? AND record_history_parts.upload = ? AND (record_history_parts.is_temp_file = ? OR record_history_parts.temp_file_type = ?)",
+			existingHistory.RoomID, true, true, false, "split")
+	if normalizedExistingTitle != "" && existingHistory.SessionID != "" {
+		existingPartsQuery = existingPartsQuery.Where(
+			"(record_histories.session_id = ? OR record_histories.title = ?)",
+			existingHistory.SessionID, normalizedExistingTitle,
+		)
+	} else if existingHistory.SessionID != "" {
+		existingPartsQuery = existingPartsQuery.Where("record_histories.session_id = ?", existingHistory.SessionID)
+	} else {
+		existingPartsQuery = existingPartsQuery.Where("record_histories.title = ?", normalizedExistingTitle)
+	}
+	if err := existingPartsQuery.
 		Order("record_history_parts.start_time ASC").
 		Find(&existingParts).Error; err != nil {
 		return fmt.Errorf("查询已存在分P失败: %w", err)

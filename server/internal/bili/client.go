@@ -3,6 +3,7 @@ package bili
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -398,10 +399,16 @@ func (c *BiliClient) CreateSeason(title, desc, cover string) (*Season, error) {
 		return nil, fmt.Errorf("合集标题不能为空")
 	}
 
+	if existing, err := c.findSeasonByTitle(title); err == nil && existing != nil {
+		return existing, nil
+	}
+
 	var result struct {
-		Code int    `json:"code"`
-		Msg  string `json:"message"`
-		Data int64  `json:"data"`
+		Code    int             `json:"code"`
+		Msg     string          `json:"message"`
+		AltMsg  string          `json:"msg"`
+		Data    json.RawMessage `json:"data"`
+		TraceID string          `json:"trace_id"`
 	}
 
 	form := url.Values{}
@@ -412,8 +419,10 @@ func (c *BiliClient) CreateSeason(title, desc, cover string) (*Season, error) {
 	form.Set("csrf", csrf)
 
 	_, err := c.ReqClient.R().
+		SetHeader("Origin", "https://member.bilibili.com").
 		SetHeader("Referer", "https://member.bilibili.com/platform/upload-manager/collection").
 		SetHeader("Content-Type", "application/x-www-form-urlencoded").
+		SetHeader("X-Requested-With", "XMLHttpRequest").
 		SetFormDataFromValues(form).
 		SetSuccessResult(&result).
 		Post("https://member.bilibili.com/x2/creative/web/season/add")
@@ -421,11 +430,37 @@ func (c *BiliClient) CreateSeason(title, desc, cover string) (*Season, error) {
 		return nil, fmt.Errorf("创建合集请求失败: %w", err)
 	}
 	if result.Code != 0 {
-		return nil, fmt.Errorf("创建合集失败: %s", result.Msg)
+		if existing, findErr := c.findSeasonByTitle(title); findErr == nil && existing != nil {
+			return existing, nil
+		}
+		msg := result.Msg
+		if msg == "" {
+			msg = result.AltMsg
+		}
+		if msg == "" {
+			msg = "请求错误"
+		}
+		if result.TraceID != "" {
+			return nil, fmt.Errorf("创建合集失败: code=%d, msg=%s, trace_id=%s", result.Code, msg, result.TraceID)
+		}
+		return nil, fmt.Errorf("创建合集失败: code=%d, msg=%s", result.Code, msg)
+	}
+	seasonID, parseErr := parseSeasonID(result.Data)
+	if parseErr != nil {
+		if existing, findErr := c.findSeasonByTitle(title); findErr == nil && existing != nil {
+			return existing, nil
+		}
+		return nil, fmt.Errorf("创建合集失败: 响应数据异常: %w", parseErr)
+	}
+	if seasonID == 0 {
+		if existing, findErr := c.findSeasonByTitle(title); findErr == nil && existing != nil {
+			return existing, nil
+		}
+		return nil, fmt.Errorf("创建合集失败: 响应未返回合集ID")
 	}
 
 	season := &Season{
-		ID:   result.Data,
+		ID:   seasonID,
 		Name: title,
 	}
 
@@ -435,12 +470,48 @@ func (c *BiliClient) CreateSeason(title, desc, cover string) (*Season, error) {
 		return season, nil
 	}
 	for _, item := range seasons {
-		if item.ID == result.Data {
+		if item.ID == seasonID {
 			season = &item
 			break
 		}
 	}
 	return season, nil
+}
+
+func (c *BiliClient) findSeasonByTitle(title string) (*Season, error) {
+	seasons, err := c.GetSeasons()
+	if err != nil {
+		return nil, err
+	}
+	normalizedTitle := strings.TrimSpace(title)
+	for _, season := range seasons {
+		if strings.TrimSpace(season.Name) == normalizedTitle {
+			item := season
+			return &item, nil
+		}
+	}
+	return nil, nil
+}
+
+func parseSeasonID(data json.RawMessage) (int64, error) {
+	if len(data) == 0 || string(data) == "null" {
+		return 0, nil
+	}
+	var id int64
+	if err := json.Unmarshal(data, &id); err == nil {
+		return id, nil
+	}
+	var dataObj struct {
+		ID       int64 `json:"id"`
+		SeasonID int64 `json:"season_id"`
+	}
+	if err := json.Unmarshal(data, &dataObj); err != nil {
+		return 0, err
+	}
+	if dataObj.ID != 0 {
+		return dataObj.ID, nil
+	}
+	return dataObj.SeasonID, nil
 }
 
 // AddToSeason 将视频加入合集
