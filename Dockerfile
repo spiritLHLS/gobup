@@ -24,6 +24,8 @@ RUN apk add --no-cache git ca-certificates
 
 # Copy backend source
 COPY server/ ./server/
+COPY scripts/install_agent.sh ./scripts/install_agent.sh
+RUN mkdir -p ./server/assets/agent && cp ./scripts/install_agent.sh ./server/assets/agent/install_agent.sh
 
 # Copy frontend dist to embed location
 COPY --from=frontend-builder /app/web/dist ./server/internal/routes/dist

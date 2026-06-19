@@ -286,6 +286,12 @@ func UpdateSystemConfig(c *gin.Context) {
 	config.PublishAgentEndpoint = strings.TrimSpace(req.PublishAgentEndpoint)
 	config.PublishAgentToken = strings.TrimSpace(req.PublishAgentToken)
 	config.PublishAgentTimeout = req.PublishAgentTimeout
+	config.AgentPurpose = strings.TrimSpace(req.AgentPurpose)
+	config.AgentInstallerSource = strings.TrimSpace(req.AgentInstallerSource)
+	config.AgentControllerBaseURL = strings.TrimRight(strings.TrimSpace(req.AgentControllerBaseURL), "/")
+	config.AgentGitHubRepo = strings.TrimSpace(req.AgentGitHubRepo)
+	config.AgentCDNBaseURL = strings.TrimRight(strings.TrimSpace(req.AgentCDNBaseURL), "/")
+	config.FileCheckMode = strings.TrimSpace(req.FileCheckMode)
 	config.DanmakuBurnStyle = strings.TrimSpace(req.DanmakuBurnStyle)
 	config.DanmakuFontSize = req.DanmakuFontSize
 	config.DanmakuFontColor = strings.TrimSpace(req.DanmakuFontColor)
@@ -375,6 +381,12 @@ func normalizeSystemConfig(config *models.SystemConfig) {
 	if config.PublishAgentTimeout > 600 {
 		config.PublishAgentTimeout = 600
 	}
+	config.AgentPurpose = models.NormalizeAgentPurpose(config.AgentPurpose)
+	config.AgentInstallerSource = models.NormalizeAgentInstallerSource(config.AgentInstallerSource)
+	if strings.TrimSpace(config.AgentGitHubRepo) == "" {
+		config.AgentGitHubRepo = "spiritlhls/gobup"
+	}
+	config.FileCheckMode = models.NormalizeFileCheckMode(config.FileCheckMode)
 	switch config.DanmakuBurnStyle {
 	case "compact", "large":
 	default:

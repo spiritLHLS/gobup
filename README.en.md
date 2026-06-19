@@ -16,6 +16,7 @@ GoBup is a Go + Vue web application for managing local Bilibili livestream recor
 - Optional FFmpeg pre-upload transcoding with H.264/H.265, preset, CRF, max width, audio bitrate settings, and History-page progress.
 - Cover extraction from the Nth second of a video.
 - Auto-publish, history filters, CSV export, and reconnecting WebSocket upload progress.
+- A Rust Agent can be installed as an upload publisher, recording-file checker, or both, with controller, GitHub, and CDN download sources.
 - DanmakuFactory + FFmpeg danmaku burn-in with default, compact, and large styles, font size/color/display-area settings, and stage progress. Burn failures do not block the original upload.
 - File operation policies after part upload, before publish, after publish, or after review: delete, move, or copy videos, danmaku files, and covers.
 - Docker deployment for amd64 and arm64 with embedded frontend assets.
@@ -51,12 +52,23 @@ Mounts:
 - `/rec`: recording directory shared with your recorder.
 - `/app/data`: GoBup data directory. The default SQLite database is `/app/data/gobup.db`.
 
+## Rust Agent
+
+The Dashboard's "Publish and Agent" section can choose the Agent purpose:
+
+- `upload`: receive controller `/agent/v1/publish` requests and forward them to the local GoBup service on the Agent machine.
+- `filescan`: scan the Agent machine's recording directory and return file counts, total size, and sample files.
+- `both`: enable both upload publishing and recording-file checking.
+
+After saving the Agent token, purpose, and source, generate the install command in the Dashboard. The controller source downloads `/agent/install-agent.sh` and `/agent/releases/gobup-agent-linux-*.tar.gz` from the current GoBup server; if release archives are not embedded, the controller redirects to GitHub Releases. The CDN source prefers `agentCdnBaseUrl` or built-in CDN mirrors for GitHub release assets.
+
 ## Build From Source
 
 Requirements:
 
 - Go 1.25+
 - Node.js 24+
+- Rust stable when building the Agent
 - FFmpeg and ffprobe
 - Optional: DanmakuFactory
 
@@ -64,6 +76,12 @@ Build frontend and backend:
 
 ```bash
 make build
+```
+
+Build Rust Agent packages:
+
+```bash
+AGENT_TARGETS="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu" ./scripts/build_agent.sh
 ```
 
 Build a production binary with embedded frontend:
@@ -116,6 +134,11 @@ GOBUP_TLS_HANDSHAKE_TIMEOUT_SECONDS=30
 GOBUP_ALLOWED_ORIGINS=https://panel.example.com
 BILI_APP_KEY=replace_with_bilibili_app_key
 BILI_APP_SECRET=replace_with_bilibili_app_secret
+GOBUP_AGENT_TOKEN=replace_with_agent_token
+GOBUP_AGENT_PURPOSE=both
+GOBUP_AGENT_LISTEN=0.0.0.0:12381
+GOBUP_AGENT_WORK_PATH=/rec
+GOBUP_AGENT_UPSTREAM_BASE_URL=http://127.0.0.1:12380
 DANMAKU_FACTORY_PATH=/usr/local/bin/danmakufactory/DanmakuFactory
 DANMAKU_FONT_NAME="WenQuanYi Zen Hei"
 DANMAKU_FONTS_DIR=/usr/share/fonts

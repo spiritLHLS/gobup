@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: write
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
@@ -66,6 +66,14 @@ jobs:
     - name: Create build directory
       run: mkdir -p build
 
+    - name: Build Rust agent release packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu
+        rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
+        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+        AGENT_TARGETS="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu" ./scripts/build_agent.sh
+
     - name: Build Vue web application
       run: |
         cd web
@@ -84,19 +92,19 @@ jobs:
         go mod download
         export CGO_ENABLED=0
         export LDFLAGS="-s -w -extldflags '-static'"
-        
+
         # Linux AMD64
         GOOS=linux GOARCH=amd64 go build -tags embed -ldflags="$LDFLAGS" -o ../build/gobup-server-linux-amd64 .
-        
+
         # Linux ARM64
         GOOS=linux GOARCH=arm64 go build -tags embed -ldflags="$LDFLAGS" -o ../build/gobup-server-linux-arm64 .
-        
+
         # Windows AMD64
         GOOS=windows GOARCH=amd64 go build -tags embed -ldflags="$LDFLAGS" -o ../build/gobup-server-windows-amd64.exe .
-        
+
         # macOS AMD64
         GOOS=darwin GOARCH=amd64 go build -tags embed -ldflags="$LDFLAGS" -o ../build/gobup-server-darwin-amd64 .
-        
+
         # macOS ARM64
         GOOS=darwin GOARCH=arm64 go build -tags embed -ldflags="$LDFLAGS" -o ../build/gobup-server-darwin-arm64 .
 
@@ -108,7 +116,7 @@ jobs:
         tar -czf gobup-server-darwin-amd64.tar.gz gobup-server-darwin-amd64
         tar -czf gobup-server-darwin-arm64.tar.gz gobup-server-darwin-arm64
         zip gobup-server-windows-amd64.zip gobup-server-windows-amd64.exe
-        
+
         # Remove uncompressed binaries
         rm gobup-server-*-amd64 gobup-server-*-arm64 gobup-server-*.exe
         ls -lh
@@ -119,25 +127,30 @@ jobs:
         PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
         echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
         echo "Previous release tag: $PREVIOUS_TAG"
-    
+
     - name: Create Release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         TAG_NAME="v${{ steps.date.outputs.date }}"
         PREVIOUS_TAG="${{ steps.get_previous_tag.outputs.previous_tag }}"
-        
+
         RELEASE_HEADER="## Gobup 自动构建发布 - ${{ steps.date.outputs.date }}
-        
+
         ### 服务器二进制文件（前端已嵌入）
         - \`gobup-server-linux-amd64.tar.gz\` - Linux AMD64 版本（单二进制文件）
         - \`gobup-server-linux-arm64.tar.gz\` - Linux ARM64 版本（单二进制文件）
         - \`gobup-server-darwin-amd64.tar.gz\` - macOS AMD64 版本（单二进制文件）
         - \`gobup-server-darwin-arm64.tar.gz\` - macOS ARM64 版本（单二进制文件）
         - \`gobup-server-windows-amd64.zip\` - Windows AMD64 版本（单二进制文件）
-        
-        > 所有二进制文件已包含嵌入的前端页面，无需额外下载Web文件。"
-        
+
+        ### Rust Agent
+        - \`gobup-agent-linux-amd64.tar.gz\` - Linux AMD64 Agent
+        - \`gobup-agent-linux-arm64.tar.gz\` - Linux ARM64 Agent
+        - \`install_agent.sh\` - Agent 一键安装脚本
+
+        > 服务器二进制文件已包含嵌入的前端页面；release 构建会同时嵌入 Agent 安装脚本和 Linux Agent 包供控制端分发。"
+
         if [ -n "$PREVIOUS_TAG" ]; then
           gh release create "$TAG_NAME" \
             --title "Release $TAG_NAME" \
@@ -148,7 +161,10 @@ jobs:
             ./build/gobup-server-linux-arm64.tar.gz \
             ./build/gobup-server-darwin-amd64.tar.gz \
             ./build/gobup-server-darwin-arm64.tar.gz \
-            ./build/gobup-server-windows-amd64.zip
+            ./build/gobup-server-windows-amd64.zip \
+            ./build/gobup-agent-linux-amd64.tar.gz \
+            ./build/gobup-agent-linux-arm64.tar.gz \
+            ./scripts/install_agent.sh
         else
           gh release create "$TAG_NAME" \
             --title "Release $TAG_NAME" \
@@ -158,18 +174,21 @@ jobs:
             ./build/gobup-server-linux-arm64.tar.gz \
             ./build/gobup-server-darwin-amd64.tar.gz \
             ./build/gobup-server-darwin-arm64.tar.gz \
-            ./build/gobup-server-windows-amd64.zip
+            ./build/gobup-server-windows-amd64.zip \
+            ./build/gobup-agent-linux-amd64.tar.gz \
+            ./build/gobup-agent-linux-arm64.tar.gz \
+            ./scripts/install_agent.sh
         fi
 
     - name: Update README with latest version
       run: |
         TAG_NAME="v${{ steps.date.outputs.date }}"
         DATE_VERSION="${TAG_NAME#v}"
-        
+
         # 更新 README 中的镜像标签说明
         sed -i "s/\`spiritlhl\/gobup:YYYYMMDD\`/\`spiritlhl\/gobup:${DATE_VERSION}\`/g" README.md 2>/dev/null || \
         sed -i "" "s/\`spiritlhl\/gobup:YYYYMMDD\`/\`spiritlhl\/gobup:${DATE_VERSION}\`/g" README.md
-        
+
         echo "README.md 已更新到版本: $TAG_NAME"
 
     - name: Commit and push README changes
@@ -178,7 +197,7 @@ jobs:
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git add README.md
-        
+
         if git diff --cached --quiet; then
           echo "README.md 没有变化，跳过提交"
         else

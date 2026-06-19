@@ -89,15 +89,41 @@ func InitDB(dbPath string) error {
 			PublishAgentEndpoint:  "",
 			PublishAgentToken:     "",
 			PublishAgentTimeout:   30,
+			AgentPurpose:          models.AgentPurposeBoth,
+			AgentInstallerSource:  models.AgentInstallerSourceController,
+			AgentGitHubRepo:       "spiritlhls/gobup",
+			FileCheckMode:         models.FileCheckModeLocal,
 			DanmakuBurnStyle:      "default",
 			DanmakuFontSize:       0,
 			DanmakuScrollArea:     0.75,
 			DanmakuDisplayArea:    0.8,
 		}
 		DB.Create(&config)
-	} else if config.WorkPath == "" && appconfig.AppConfig.WorkPath != "" {
-		config.WorkPath = appconfig.AppConfig.WorkPath
-		DB.Save(&config)
+	} else {
+		changed := false
+		if config.WorkPath == "" && appconfig.AppConfig.WorkPath != "" {
+			config.WorkPath = appconfig.AppConfig.WorkPath
+			changed = true
+		}
+		if config.AgentPurpose == "" {
+			config.AgentPurpose = models.AgentPurposeBoth
+			changed = true
+		}
+		if config.AgentInstallerSource == "" {
+			config.AgentInstallerSource = models.AgentInstallerSourceController
+			changed = true
+		}
+		if config.AgentGitHubRepo == "" {
+			config.AgentGitHubRepo = "spiritlhls/gobup"
+			changed = true
+		}
+		if config.FileCheckMode == "" {
+			config.FileCheckMode = models.FileCheckModeLocal
+			changed = true
+		}
+		if changed {
+			DB.Save(&config)
+		}
 	}
 
 	ratelimit.SetGlobalRateLimit(config.UploadSpeedLimitMBps)

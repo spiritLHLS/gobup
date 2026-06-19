@@ -203,14 +203,21 @@ func SetupRoutes(router *gin.Engine) {
 			agentConfig := auth.Group("/agent")
 			{
 				agentConfig.GET("/detect", controllers.DetectPublishAgent)
+				agentConfig.GET("/files/check", controllers.CheckAgentFiles)
+				agentConfig.GET("/install-command", controllers.GetAgentInstallCommand)
 			}
 		}
 	}
+
+	router.GET("/agent/install-agent.sh", controllers.DownloadAgentInstaller)
+	router.GET("/agent/releases/:filename", controllers.DownloadAgentRelease)
 
 	agent := router.Group("/agent/v1")
 	{
 		agent.GET("/health", controllers.AgentHealth)
 		agent.POST("/publish", controllers.AgentPublish)
+		agent.GET("/files/check", controllers.AgentFilesCheck)
+		agent.POST("/files/check", controllers.AgentFilesCheck)
 	}
 
 	// WebSocket路由

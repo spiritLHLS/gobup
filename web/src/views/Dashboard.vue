@@ -176,8 +176,14 @@
         <PublishAgentConfig
           :config="config"
           :detecting-agent="detectingAgent"
+          :checking-files="checkingAgentFiles"
+          :generating-install-command="generatingInstallCommand"
+          :install-command="agentInstallCommand"
+          :file-check-result="agentFileCheckResult"
           @toggle-feature="toggleFeature"
           @detect="detectPublishAgent"
+          @check-files="checkAgentFiles"
+          @load-install-command="loadAgentInstallCommand"
         />
 
         <el-divider />
@@ -321,6 +327,10 @@ const cleaning = ref(false)
 const cleanupPreviewing = ref(false)
 const cleaningDatabase = ref(false)
 const detectingAgent = ref(false)
+const checkingAgentFiles = ref(false)
+const generatingInstallCommand = ref(false)
+const agentInstallCommand = ref(null)
+const agentFileCheckResult = ref(null)
 const fileScanDialogRef = ref(null)
 const cleanFilesDialogRef = ref(null)
 const config = ref(createDefaultDashboardConfig())
@@ -472,10 +482,12 @@ const getFeatureName = (feature) => {
   return names[feature] || feature
 }
 
-const detectPublishAgent = async () => {
+const detectPublishAgent = async (purpose) => {
   detectingAgent.value = true
   try {
-    const response = await api.get('/agent/detect')
+    const response = await api.get('/agent/detect', {
+      params: { purpose: purpose || config.value.agentPurpose }
+    })
     if (response.type === 'success') {
       ElMessage.success(response.msg || '远程 Agent 可用')
     } else {
@@ -486,6 +498,51 @@ const detectPublishAgent = async () => {
     ElMessage.error('检测远程 Agent 失败')
   } finally {
     detectingAgent.value = false
+  }
+}
+
+const checkAgentFiles = async () => {
+  checkingAgentFiles.value = true
+  try {
+    const response = await api.get('/agent/files/check', { params: { limit: 100 } })
+    if (response.type === 'success') {
+      agentFileCheckResult.value = response.data || null
+      ElMessage.success(response.msg || '文件检查完成')
+    } else {
+      ElMessage.error(response.msg || '文件检查失败')
+    }
+  } catch (error) {
+    console.error('Agent 文件检查失败:', error)
+    ElMessage.error('Agent 文件检查失败')
+  } finally {
+    checkingAgentFiles.value = false
+  }
+}
+
+const loadAgentInstallCommand = async () => {
+  generatingInstallCommand.value = true
+  try {
+    const response = await api.get('/agent/install-command', {
+      params: {
+        purpose: config.value.agentPurpose,
+        source: config.value.agentInstallerSource
+      }
+    })
+    if (response.type === 'success') {
+      agentInstallCommand.value = response
+      if (response.tokenMissing) {
+        ElMessage.warning('请先配置并保存 Agent Token')
+      } else {
+        ElMessage.success('安装命令已生成')
+      }
+    } else {
+      ElMessage.error(response.msg || '生成安装命令失败')
+    }
+  } catch (error) {
+    console.error('生成 Agent 安装命令失败:', error)
+    ElMessage.error('生成安装命令失败')
+  } finally {
+    generatingInstallCommand.value = false
   }
 }
 

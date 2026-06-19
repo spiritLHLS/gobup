@@ -1,4 +1,4 @@
-.PHONY: help build build-embed build-cross dev-frontend dev-backend docker-build check-docker clean
+.PHONY: help build build-embed build-cross build-agent prepare-agent-assets dev-frontend dev-backend docker-build check-docker clean
 
 PACKAGE_MANAGER ?= $(shell if [ -f web/pnpm-lock.yaml ] && command -v pnpm >/dev/null 2>&1; then echo pnpm; elif [ -f web/yarn.lock ] && command -v yarn >/dev/null 2>&1; then echo yarn; else echo npm; fi)
 
@@ -20,6 +20,7 @@ help:
 	@echo "  make build          - 构建前端和后端（非嵌入模式，用于开发）"
 	@echo "  make build-embed    - 构建带嵌入前端的二进制文件（生产环境）"
 	@echo "  make build-cross    - 构建 5 个跨平台嵌入式二进制"
+	@echo "  make build-agent    - 构建 Rust Agent 并生成控制端分发包"
 	@echo "  make dev-frontend   - 启动前端开发服务器"
 	@echo "  make dev-backend    - 启动后端开发服务器"
 	@echo "  make docker-build   - 构建 Docker 镜像"
@@ -30,14 +31,23 @@ build-frontend:
 	@echo "构建前端..."
 	cd web && $(FRONTEND_INSTALL) && $(FRONTEND_RUN) build
 
+prepare-agent-assets:
+	@echo "同步 Agent 安装脚本到嵌入资产..."
+	@mkdir -p server/assets/agent
+	@cp scripts/install_agent.sh server/assets/agent/install_agent.sh
+
+build-agent:
+	@echo "构建 Rust Agent..."
+	./scripts/build_agent.sh
+
 # 构建后端（非嵌入模式）
-build-backend:
+build-backend: prepare-agent-assets
 	@echo "构建后端（非嵌入模式）..."
 	@mkdir -p bin
 	cd server && go build -o ../bin/gobup .
 
 # 构建后端（嵌入模式）
-build-backend-embed: build-frontend
+build-backend-embed: build-frontend prepare-agent-assets
 	@echo "复制前端dist到routes目录..."
 	@mkdir -p server/internal/routes/dist
 	@cp -r web/dist/* server/internal/routes/dist/
@@ -59,7 +69,7 @@ build-embed: build-backend-embed
 	@echo "二进制文件: bin/gobup-embed"
 
 # 跨平台嵌入式构建
-build-cross: build-frontend
+build-cross: build-frontend prepare-agent-assets
 	@echo "复制前端dist到routes目录..."
 	@mkdir -p server/internal/routes/dist
 	@cp -r web/dist/* server/internal/routes/dist/
@@ -98,4 +108,5 @@ clean:
 	@rm -rf web/dist
 	@rm -rf bin
 	@rm -rf server/internal/routes/dist
+	@find server/assets/agent -name 'gobup-agent-linux-*.tar.gz' -delete 2>/dev/null || true
 	@echo "清理完成！"

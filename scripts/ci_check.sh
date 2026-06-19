@@ -231,6 +231,35 @@ check_code_structure() {
     || log_fail "large file split companion files are missing"
 }
 
+check_agent_distribution() {
+  echo
+  echo "=== Rust Agent Distribution ==="
+
+  [[ -f server/agent/Cargo.toml && -f server/agent/src/main.rs ]] \
+    && log_pass "Rust agent project is present" \
+    || log_fail "Rust agent project is missing"
+
+  [[ -x scripts/install_agent.sh && -x scripts/build_agent.sh ]] \
+    && log_pass "agent install/build scripts are executable" \
+    || log_fail "agent scripts are missing executable permissions"
+
+  cmp -s scripts/install_agent.sh server/assets/agent/install_agent.sh \
+    && log_pass "embedded agent installer matches scripts/install_agent.sh" \
+    || log_fail "embedded agent installer is out of sync"
+
+  grep -q 'DownloadAgentInstaller' server/internal/routes/routes.go && grep -q 'DownloadAgentRelease' server/internal/routes/routes.go \
+    && log_pass "controller exposes public agent installer and release routes" \
+    || log_fail "controller agent distribution routes are missing"
+
+  grep -q 'AgentPurpose' server/internal/models/models.go && grep -q 'FileCheckMode' server/internal/models/models.go && grep -q 'agentPurpose' web/src/components/dashboard/PublishAgentConfig.vue \
+    && log_pass "agent purpose and file-check mode are wired across backend/frontend" \
+    || log_fail "agent purpose/file-check wiring is incomplete"
+
+  grep -q 'gobup-agent-linux-amd64.tar.gz' .github/workflows/main.yml && grep -q 'AGENT_TARGETS=' .github/workflows/main.yml \
+    && log_pass "release workflow builds and uploads Rust agent packages" \
+    || log_fail "release workflow does not build Rust agent packages"
+}
+
 check_docs() {
   echo
   echo "=== Documentation ==="
@@ -272,6 +301,7 @@ check_compose
 check_api_alignment
 check_swagger
 check_code_structure
+check_agent_distribution
 check_docs
 
 echo

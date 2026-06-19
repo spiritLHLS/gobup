@@ -9,6 +9,7 @@ GoBup 由四层组成：
 - Web 前端：`web/`，Vue 3、Vite、Element Plus。
 - HTTP 后端：`server/`，Gin 路由、控制器、服务层。
 - 数据层：GORM + SQLite，数据库默认位于 `data/gobup.db` 或 Docker 的 `/app/data/gobup.db`。
+- Rust Agent：`server/agent/`，可作为远程投稿端、录制文件检查端或两者兼用。
 - 外部工具：FFmpeg、ffprobe、DanmakuFactory、B 站 HTTP API、WxPusher。
 
 生产镜像使用 Go embed 将 `web/dist` 嵌入后端二进制。开发模式下前后端可以分别运行。
@@ -25,6 +26,9 @@ flowchart LR
     Web["Vue Web 控制台"] --> API["Gin API<br/>BasicAuth"]
     API --> DB
     API --> Queue["upload.Service<br/>账号队列 / 进度"]
+    API --> Agent["Rust Agent<br/>upload / filescan"]
+    Agent --> RemoteFiles["远端录制目录<br/>文件检查"]
+    Agent --> LocalGoBup["Agent 本机 GoBup<br/>投稿转发"]
     Queue --> FFmpeg["FFmpeg / ffprobe"]
     Queue --> Danmaku["DanmakuFactory<br/>弹幕转换/烧录"]
     Queue --> Bili["B 站 API<br/>上传 / 投稿 / 同步"]
@@ -42,6 +46,9 @@ server/internal/models       GORM 模型
 server/internal/services     扫盘、扫盘元数据、文件操作、弹幕、视频处理、同步任务
 server/internal/upload       上传队列、上传进度、投稿流程、烧录版回补追加
 server/internal/bili         B 站客户端、上传器、限流器
+server/agent                 Rust Agent HTTP 服务
+server/assets/agent          控制端嵌入的 Agent 安装脚本和 release 包
+scripts/install_agent.sh     Agent 一键安装脚本
 web/src/views                页面
 web/src/components           可复用组件
 ```
@@ -54,7 +61,7 @@ web/src/components           可复用组件
 - `record_histories`：一次直播或录制会话。
 - `record_history_parts`：分P、切分文件、弹幕烧录文件和上传状态。
 - `bili_bili_users`：管理员账号和 B 站账号，B 站账号包含 Cookie、access key、过期时间、启用状态和每日上传配额。
-- `system_configs`：扫盘、文件监控、数据修复、代理池等系统级配置。
+- `system_configs`：扫盘、文件监控、数据修复、代理池、Agent 用途、安装来源、远端地址等系统级配置。
 
 项目默认允许删除 SQLite 文件重新初始化。当前结构通过 GORM AutoMigrate 初始化，历史兼容只保留必要的字段迁移。
 
@@ -106,6 +113,16 @@ B 站 TV 二维码登录和 refresh token 刷新签名使用 `BILI_APP_KEY`、`B
 
 帧截取使用 FFmpeg，输出与视频同目录的 `.cover.jpg`。直播封面缺失时可以按房间配置退化为帧截取。
 
+## Rust Agent
+
+Rust Agent 是独立二进制 `gobup-agent`，通过 token 保护 `/agent/v1/*` 接口，并按安装用途启用能力：
+
+- `upload`：接收控制端投稿请求后，转发到 Agent 本机的 GoBup `/agent/v1/publish`，使投稿动作在拥有账号和文件上下文的机器上执行。
+- `filescan`：扫描 Agent 本机录制目录，返回文件数量、总大小、样本列表和错误列表，不会写数据库或删除文件。
+- `both`：同时启用以上两类能力。
+
+控制端提供公开下载路由 `/agent/install-agent.sh` 和 `/agent/releases/gobup-agent-linux-*.tar.gz`。Release 工作流先构建 Linux amd64/arm64 Rust Agent 包，再将包复制进 `server/assets/agent` 后构建 Go 嵌入版；如果某个包未嵌入，控制端下载路由会回退到 GitHub Releases。安装脚本支持 `controller`、`github`、`cdn` 三种来源，并把 token、用途、监听地址、录制目录和上游 GoBup 地址写入 `/opt/gobup/agent/env`。
+
 ## 弹幕处理
 
 弹幕烧录由 `DanmakuBurnService` 封装：
@@ -148,6 +165,7 @@ B 站 TV 二维码登录和 refresh token 刷新签名使用 `BILI_APP_KEY`、`B
 - `make build`：构建前端和非嵌入后端。
 - `make build-embed`：构建嵌入式生产二进制。
 - `make build-cross`：构建 linux/darwin/windows 的 amd64/arm64 生产二进制组合。
+- `make build-agent`：构建 Rust Agent 并生成 `gobup-agent-linux-*.tar.gz` 控制端分发包。
 - Dockerfile 使用 Node.js 24 和 Go 1.25。
 - GitHub Actions 使用 Node.js 24 运行环境，并设置 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`。
 - CI 会运行 `swag init --parseDependency --parseInternal` 校验 `server/docs` 中的 Swagger/OpenAPI 生成文件是否同步，并检查 API 路由覆盖率不低于 90%。

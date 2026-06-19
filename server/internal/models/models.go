@@ -10,6 +10,17 @@ import (
 const (
 	TranscodeVideoCodecH264 = "h264"
 	TranscodeVideoCodecH265 = "h265"
+
+	AgentPurposeUpload   = "upload"
+	AgentPurposeFilescan = "filescan"
+	AgentPurposeBoth     = "both"
+
+	AgentInstallerSourceController = "controller"
+	AgentInstallerSourceGitHub     = "github"
+	AgentInstallerSourceCDN        = "cdn"
+
+	FileCheckModeLocal  = "local"
+	FileCheckModeRemote = "remote"
 )
 
 func NormalizeTranscodeVideoCodec(codec string) string {
@@ -18,6 +29,56 @@ func NormalizeTranscodeVideoCodec(codec string) string {
 		return TranscodeVideoCodecH265
 	default:
 		return TranscodeVideoCodecH264
+	}
+}
+
+func NormalizeAgentPurpose(purpose string) string {
+	switch strings.ToLower(strings.TrimSpace(purpose)) {
+	case AgentPurposeUpload, "publish":
+		return AgentPurposeUpload
+	case AgentPurposeFilescan, "filecheck", "check":
+		return AgentPurposeFilescan
+	case AgentPurposeBoth:
+		return AgentPurposeBoth
+	default:
+		return AgentPurposeBoth
+	}
+}
+
+func AgentPurposeAllows(purpose, capability string) bool {
+	purpose = NormalizeAgentPurpose(purpose)
+	capability = strings.ToLower(strings.TrimSpace(capability))
+	return purpose == AgentPurposeBoth || purpose == capability
+}
+
+func AgentCapabilities(purpose string) []string {
+	switch NormalizeAgentPurpose(purpose) {
+	case AgentPurposeUpload:
+		return []string{AgentPurposeUpload}
+	case AgentPurposeFilescan:
+		return []string{AgentPurposeFilescan}
+	default:
+		return []string{AgentPurposeUpload, AgentPurposeFilescan}
+	}
+}
+
+func NormalizeAgentInstallerSource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case AgentInstallerSourceGitHub:
+		return AgentInstallerSourceGitHub
+	case AgentInstallerSourceCDN:
+		return AgentInstallerSourceCDN
+	default:
+		return AgentInstallerSourceController
+	}
+}
+
+func NormalizeFileCheckMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case FileCheckModeRemote:
+		return FileCheckModeRemote
+	default:
+		return FileCheckModeLocal
 	}
 }
 
@@ -271,32 +332,38 @@ type VideoSyncTask struct {
 
 // SystemConfig 系统全局配置
 type SystemConfig struct {
-	ID                    uint      `gorm:"primarykey" json:"id"`
-	CreatedAt             time.Time `json:"createdAt"`
-	UpdatedAt             time.Time `json:"updatedAt"`
-	AutoFileScan          bool      `gorm:"default:true" json:"autoFileScan"`           // 自动扫盘录入
-	EnableFileWatcher     bool      `gorm:"default:true" json:"enableFileWatcher"`      // 启用目录事件监控，作为扫盘的即时触发器
-	FileScanInterval      int       `gorm:"default:60" json:"fileScanInterval"`         // 文件扫描间隔（分钟）
-	FileScanMinAge        int       `gorm:"default:12" json:"fileScanMinAge"`           // 文件最小年龄（小时），避免扫描正在写入的文件
-	FileScanMinSize       int64     `gorm:"default:1048576" json:"fileScanMinSize"`     // 文件最小大小（字节）
-	FileScanMaxAge        int       `gorm:"default:720" json:"fileScanMaxAge"`          // 文件最大年龄（小时），30天
-	WorkPath              string    `gorm:"type:text" json:"workPath"`                  // 录制文件工作目录
-	CustomScanPaths       string    `gorm:"type:text" json:"customScanPaths"`           // 自定义扫盘目录，逗号分隔，优先扫描
-	EnableOrphanScan      bool      `gorm:"default:true" json:"enableOrphanScan"`       // 启用孤儿文件扫描
-	OrphanScanInterval    int       `gorm:"default:360" json:"orphanScanInterval"`      // 孤儿文件扫描间隔（分钟）
-	EnableDanmakuProxy    bool      `gorm:"default:false" json:"enableDanmakuProxy"`    // 启用弹幕代理池（全局配置）
-	DanmakuProxyList      string    `gorm:"type:text" json:"danmakuProxyList"`          // 代理列表，每行一个，格式: socks5://ip:port 或 http://user:pass@ip:port
-	AutoDataRepair        bool      `gorm:"default:true" json:"autoDataRepair"`         // 开启每日凌晨进行数据一致性修复
-	UploadSpeedLimitMBps  float64   `gorm:"default:0" json:"uploadSpeedLimitMbps"`      // 全局上传限速，MB/s，0=不限制
-	UploadWhileRecording  bool      `gorm:"default:false" json:"uploadWhileRecording"`  // 文件稳定后允许直播仍在进行时预上传
-	PublishWhileRecording bool      `gorm:"default:false" json:"publishWhileRecording"` // 分P上传完后允许直播仍在进行时投稿，后续分P自动追加
-	PublishMode           string    `gorm:"default:local" json:"publishMode"`           // local, remote
-	PublishAgentEndpoint  string    `gorm:"type:text" json:"publishAgentEndpoint"`      // 远程投稿 Agent 地址
-	PublishAgentToken     string    `gorm:"type:text" json:"publishAgentToken"`         // 远程投稿 Agent 访问令牌
-	PublishAgentTimeout   int       `gorm:"default:30" json:"publishAgentTimeout"`      // 远程投稿请求超时（秒）
-	DanmakuBurnStyle      string    `gorm:"default:default" json:"danmakuBurnStyle"`    // 全局弹幕烧录样式默认值
-	DanmakuFontSize       int       `gorm:"default:0" json:"danmakuFontSize"`           // 全局弹幕字号默认值，0=跟随样式
-	DanmakuFontColor      string    `json:"danmakuFontColor"`                           // 全局弹幕颜色默认值
-	DanmakuScrollArea     float64   `gorm:"default:0.75" json:"danmakuScrollArea"`      // 全局滚动弹幕区域比例
-	DanmakuDisplayArea    float64   `gorm:"default:0.8" json:"danmakuDisplayArea"`      // 全局弹幕显示区域比例
+	ID                     uint      `gorm:"primarykey" json:"id"`
+	CreatedAt              time.Time `json:"createdAt"`
+	UpdatedAt              time.Time `json:"updatedAt"`
+	AutoFileScan           bool      `gorm:"default:true" json:"autoFileScan"`           // 自动扫盘录入
+	EnableFileWatcher      bool      `gorm:"default:true" json:"enableFileWatcher"`      // 启用目录事件监控，作为扫盘的即时触发器
+	FileScanInterval       int       `gorm:"default:60" json:"fileScanInterval"`         // 文件扫描间隔（分钟）
+	FileScanMinAge         int       `gorm:"default:12" json:"fileScanMinAge"`           // 文件最小年龄（小时），避免扫描正在写入的文件
+	FileScanMinSize        int64     `gorm:"default:1048576" json:"fileScanMinSize"`     // 文件最小大小（字节）
+	FileScanMaxAge         int       `gorm:"default:720" json:"fileScanMaxAge"`          // 文件最大年龄（小时），30天
+	WorkPath               string    `gorm:"type:text" json:"workPath"`                  // 录制文件工作目录
+	CustomScanPaths        string    `gorm:"type:text" json:"customScanPaths"`           // 自定义扫盘目录，逗号分隔，优先扫描
+	EnableOrphanScan       bool      `gorm:"default:true" json:"enableOrphanScan"`       // 启用孤儿文件扫描
+	OrphanScanInterval     int       `gorm:"default:360" json:"orphanScanInterval"`      // 孤儿文件扫描间隔（分钟）
+	EnableDanmakuProxy     bool      `gorm:"default:false" json:"enableDanmakuProxy"`    // 启用弹幕代理池（全局配置）
+	DanmakuProxyList       string    `gorm:"type:text" json:"danmakuProxyList"`          // 代理列表，每行一个，格式: socks5://ip:port 或 http://user:pass@ip:port
+	AutoDataRepair         bool      `gorm:"default:true" json:"autoDataRepair"`         // 开启每日凌晨进行数据一致性修复
+	UploadSpeedLimitMBps   float64   `gorm:"default:0" json:"uploadSpeedLimitMbps"`      // 全局上传限速，MB/s，0=不限制
+	UploadWhileRecording   bool      `gorm:"default:false" json:"uploadWhileRecording"`  // 文件稳定后允许直播仍在进行时预上传
+	PublishWhileRecording  bool      `gorm:"default:false" json:"publishWhileRecording"` // 分P上传完后允许直播仍在进行时投稿，后续分P自动追加
+	PublishMode            string    `gorm:"default:local" json:"publishMode"`           // local, remote
+	PublishAgentEndpoint   string    `gorm:"type:text" json:"publishAgentEndpoint"`      // 远程投稿 Agent 地址
+	PublishAgentToken      string    `gorm:"type:text" json:"publishAgentToken"`         // 远程投稿 Agent 访问令牌
+	PublishAgentTimeout    int       `gorm:"default:30" json:"publishAgentTimeout"`      // 远程投稿请求超时（秒）
+	AgentPurpose           string    `gorm:"default:both" json:"agentPurpose"`           // upload, filescan, both
+	AgentInstallerSource   string    `gorm:"default:controller" json:"agentInstallerSource"`
+	AgentControllerBaseURL string    `gorm:"type:text" json:"agentControllerBaseUrl"`
+	AgentGitHubRepo        string    `gorm:"default:spiritlhls/gobup" json:"agentGitHubRepo"`
+	AgentCDNBaseURL        string    `gorm:"type:text" json:"agentCdnBaseUrl"`
+	FileCheckMode          string    `gorm:"default:local" json:"fileCheckMode"`      // local, remote
+	DanmakuBurnStyle       string    `gorm:"default:default" json:"danmakuBurnStyle"` // 全局弹幕烧录样式默认值
+	DanmakuFontSize        int       `gorm:"default:0" json:"danmakuFontSize"`        // 全局弹幕字号默认值，0=跟随样式
+	DanmakuFontColor       string    `json:"danmakuFontColor"`                        // 全局弹幕颜色默认值
+	DanmakuScrollArea      float64   `gorm:"default:0.75" json:"danmakuScrollArea"`   // 全局滚动弹幕区域比例
+	DanmakuDisplayArea     float64   `gorm:"default:0.8" json:"danmakuDisplayArea"`   // 全局弹幕显示区域比例
 }

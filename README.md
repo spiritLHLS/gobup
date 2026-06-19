@@ -16,6 +16,7 @@ GoBup 是一个 Go + Vue 实现的 B 站录播管理工具。它面向录播姬�
 - 可选上传前 FFmpeg 转码压缩，可设置 H.264/H.265、preset、CRF、宽度和音频码率，并在历史页展示转码进度。
 - 可从视频第 N 秒自动截取封面。
 - 自动投稿、历史筛选、CSV 导出和支持断线重连的 WebSocket 上传进度推送。
+- Rust Agent 可独立安装为上传投稿端、录制文件检查端或两者兼用，并支持控制端/GitHub/CDN 下载来源。
 - DanmakuFactory + FFmpeg 弹幕烧录，支持 default、compact、large 样式、字号/颜色/显示区域配置和阶段进度；烧录失败不会阻塞原始视频上传。
 - 文件操作策略：按分P上传后、投稿前、投稿后、审核后删除、移动或复制视频、弹幕、封面文件。
 - Docker amd64/arm64 部署，内置前端静态资源。
@@ -51,12 +52,23 @@ docker compose up -d
 - `/rec`：录播文件目录，必须和录播软件输出目录对应。
 - `/app/data`：GoBup 数据目录，默认数据库文件为 `/app/data/gobup.db`。
 
+## Rust Agent
+
+控制面板的「投稿与 Agent」区域可以选择 Agent 用途：
+
+- `upload`：作为远程投稿端，接收控制端 `/agent/v1/publish` 请求，并转发给 Agent 所在机器的本地 GoBup 服务执行投稿。
+- `filescan`：作为录制文件检查端，扫描 Agent 所在机器的录制目录并返回文件数量、总大小和样本列表。
+- `both`：同时启用上传投稿和录制文件检查能力。
+
+保存 Agent Token、用途和来源后，在面板生成安装命令。控制端来源会下载当前 GoBup 服务托管的 `/agent/install-agent.sh` 和 `/agent/releases/gobup-agent-linux-*.tar.gz`；如果控制端未内嵌 release 包，会回退到 GitHub Releases。CDN 来源会优先按 `agentCdnBaseUrl` 或内置 CDN 镜像下载 GitHub release 资源。
+
 ## 源码运行
 
 依赖：
 
 - Go 1.25+
 - Node.js 24+
+- Rust stable（仅构建 Agent 时需要）
 - FFmpeg 和 ffprobe
 - 可选：DanmakuFactory
 
@@ -64,6 +76,12 @@ docker compose up -d
 
 ```bash
 make build
+```
+
+构建 Rust Agent 分发包：
+
+```bash
+AGENT_TARGETS="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu" ./scripts/build_agent.sh
 ```
 
 生产单二进制构建：
@@ -116,6 +134,11 @@ GOBUP_TLS_HANDSHAKE_TIMEOUT_SECONDS=30
 GOBUP_ALLOWED_ORIGINS=https://panel.example.com
 BILI_APP_KEY=replace_with_bilibili_app_key
 BILI_APP_SECRET=replace_with_bilibili_app_secret
+GOBUP_AGENT_TOKEN=replace_with_agent_token
+GOBUP_AGENT_PURPOSE=both
+GOBUP_AGENT_LISTEN=0.0.0.0:12381
+GOBUP_AGENT_WORK_PATH=/rec
+GOBUP_AGENT_UPSTREAM_BASE_URL=http://127.0.0.1:12380
 DANMAKU_FACTORY_PATH=/usr/local/bin/danmakufactory/DanmakuFactory
 DANMAKU_FONT_NAME="WenQuanYi Zen Hei"
 DANMAKU_FONTS_DIR=/usr/share/fonts

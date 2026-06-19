@@ -122,6 +122,9 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 	if allowRemote {
 		var sysConfig models.SystemConfig
 		if err := db.First(&sysConfig).Error; err == nil && strings.TrimSpace(sysConfig.PublishMode) == "remote" {
+			if !models.AgentPurposeAllows(sysConfig.AgentPurpose, models.AgentPurposeUpload) {
+				return fmt.Errorf("当前 Agent 用途为 %s，不允许远程投稿", models.NormalizeAgentPurpose(sysConfig.AgentPurpose))
+			}
 			endpoint := strings.TrimSpace(sysConfig.PublishAgentEndpoint)
 			if endpoint == "" {
 				return fmt.Errorf("已选择远程投稿模式，但未配置远程 Agent 地址")

@@ -273,6 +273,20 @@ func swaggerDocLogRoutes() {}
 // @Router /filescan/cleanCompleted [post]
 func swaggerDocFileScanRoutes() {}
 
+// swaggerDocAgentRoutes documents agent management APIs.
+//
+// @Summary Agent management APIs
+// @Description Detects a configured Agent, checks recording files locally or remotely, and generates the installer command.
+// @Tags agent
+// @Security BasicAuth
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /agent/detect [get]
+// @Router /agent/files/check [get]
+// @Router /agent/install-command [get]
+func swaggerDocAgentRoutes() {}
+
 // swaggerDocDataRepairRoutes documents data repair APIs.
 //
 // @Summary Data repair APIs

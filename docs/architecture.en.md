@@ -9,6 +9,7 @@ GoBup has four main layers:
 - Web frontend: `web/`, Vue 3, Vite, Element Plus.
 - HTTP backend: `server/`, Gin routes, controllers, and services.
 - Data layer: GORM + SQLite. The database defaults to `data/gobup.db` or `/app/data/gobup.db` in Docker.
+- Rust Agent: `server/agent/`, installable as a remote upload publisher, recording-file checker, or both.
 - External tools: FFmpeg, ffprobe, DanmakuFactory, Bilibili HTTP APIs, and WxPusher.
 
 Production builds embed `web/dist` into the Go binary. Development mode can run frontend and backend separately.
@@ -25,6 +26,9 @@ flowchart LR
     Web["Vue web console"] --> API["Gin API<br/>BasicAuth"]
     API --> DB
     API --> Queue["upload.Service<br/>account queues / progress"]
+    API --> Agent["Rust Agent<br/>upload / filescan"]
+    Agent --> RemoteFiles["remote recording directory<br/>file check"]
+    Agent --> LocalGoBup["local GoBup on agent<br/>publish forwarding"]
     Queue --> FFmpeg["FFmpeg / ffprobe"]
     Queue --> Danmaku["DanmakuFactory<br/>convert / burn-in"]
     Queue --> Bili["Bilibili APIs<br/>upload / publish / sync"]
@@ -42,6 +46,9 @@ server/internal/models       GORM models
 server/internal/services     scanning, scan metadata, file ops, danmaku, video processing, sync jobs
 server/internal/upload       upload queues, progress, publishing flow, burned-part backfill
 server/internal/bili         Bilibili clients, uploaders, rate limiters
+server/agent                 Rust Agent HTTP service
+server/assets/agent          embedded Agent installer and release packages
+scripts/install_agent.sh     one-click Agent installer
 web/src/views                pages
 web/src/components           reusable components
 ```
@@ -54,7 +61,7 @@ Important tables:
 - `record_histories`: one recording or livestream session.
 - `record_history_parts`: parts, split files, danmaku-burned files, and upload state.
 - `bili_bili_users`: admin account and Bilibili accounts, including Cookie, access key, expiry time, enabled state, and daily upload quota.
-- `system_configs`: scan, file watcher, data repair, and proxy settings.
+- `system_configs`: scan, file watcher, data repair, proxy, Agent purpose, installer source, and remote endpoint settings.
 
 The project supports deleting the SQLite database and initializing a fresh schema. Current initialization uses GORM AutoMigrate plus only necessary compatibility adjustments.
 
@@ -106,6 +113,16 @@ Publishing lives in `server/internal/upload/publish.go`; burned danmaku part bac
 
 Frame extraction uses FFmpeg and writes a `.cover.jpg` next to the source video. Live cover can fall back to frame extraction when configured.
 
+## Rust Agent
+
+The Rust Agent is the standalone `gobup-agent` binary. It protects `/agent/v1/*` endpoints with a token and enables capabilities according to the installed purpose:
+
+- `upload`: receives publish requests from the controller and forwards them to `/agent/v1/publish` on the Agent machine's local GoBup service, so publishing runs where the account and file context live.
+- `filescan`: scans the Agent machine's recording directory and returns file count, total size, sample files, and scan errors without writing the database or deleting files.
+- `both`: enables both capabilities.
+
+The controller exposes public download routes at `/agent/install-agent.sh` and `/agent/releases/gobup-agent-linux-*.tar.gz`. The release workflow builds Linux amd64/arm64 Rust Agent packages, copies them into `server/assets/agent`, and then builds the embedded Go server. If a package is not embedded, the controller download route redirects to GitHub Releases. The installer supports `controller`, `github`, and `cdn` sources and writes token, purpose, listen address, recording path, and local upstream GoBup URL to `/opt/gobup/agent/env`.
+
 ## Danmaku Processing
 
 `DanmakuBurnService` wraps DanmakuFactory and FFmpeg:
@@ -148,6 +165,7 @@ The upload queue response includes part file, time, cooldown, temporary-file, an
 - `make build`: frontend plus non-embedded backend.
 - `make build-embed`: production binary with embedded frontend.
 - `make build-cross`: production binaries for linux/darwin/windows amd64/arm64 combinations.
+- `make build-agent`: builds the Rust Agent and produces `gobup-agent-linux-*.tar.gz` controller distribution packages.
 - Dockerfiles use Node.js 24 and Go 1.25.
 - GitHub Actions opt into Node.js 24 with `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`.
 - CI runs `swag init --parseDependency --parseInternal` to verify that Swagger/OpenAPI generated files in `server/docs` stay synchronized, and checks API route coverage stays at or above 90%.

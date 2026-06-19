@@ -253,6 +253,63 @@ info:
   title: GoBup API
   version: "1.0"
 paths:
+  /agent/detect:
+    get:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        and generates the installer command.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+  /agent/files/check:
+    get:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        and generates the installer command.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+  /agent/install-command:
+    get:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        and generates the installer command.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
   /biliUser/checkStatus/{id}:
     get:
       consumes:
