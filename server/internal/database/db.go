@@ -50,6 +50,7 @@ func InitDB(dbPath string) error {
 		&models.LiveMsg{},
 		&models.VideoSyncTask{},
 		&models.SystemConfig{},
+		&models.AgentNode{},
 	)
 	if err != nil {
 		return fmt.Errorf("数据库迁移失败: %w", err)
@@ -87,7 +88,7 @@ func InitDB(dbPath string) error {
 			PublishWhileRecording: false,
 			PublishMode:           "local",
 			PublishAgentEndpoint:  "",
-			PublishAgentToken:     "",
+			PublishAgentToken:     models.NewAgentToken(),
 			PublishAgentTimeout:   30,
 			AgentPurpose:          models.AgentPurposeBoth,
 			AgentInstallerSource:  models.AgentInstallerSourceController,
@@ -117,6 +118,14 @@ func InitDB(dbPath string) error {
 			config.AgentGitHubRepo = "spiritlhls/gobup"
 			changed = true
 		}
+		if strings.TrimSpace(config.PublishAgentToken) == "" {
+			config.PublishAgentToken = models.NewAgentToken()
+			changed = true
+		}
+		if normalizedEndpoint := models.NormalizeAgentEndpoint(config.PublishAgentEndpoint); normalizedEndpoint != config.PublishAgentEndpoint {
+			config.PublishAgentEndpoint = normalizedEndpoint
+			changed = true
+		}
 		if config.FileCheckMode == "" {
 			config.FileCheckMode = models.FileCheckModeLocal
 			changed = true
@@ -126,9 +135,36 @@ func InitDB(dbPath string) error {
 		}
 	}
 
+	seedAgentNodeFromConfig(&config)
+
 	ratelimit.SetGlobalRateLimit(config.UploadSpeedLimitMBps)
 
 	return nil
+}
+
+func seedAgentNodeFromConfig(config *models.SystemConfig) {
+	if config == nil {
+		return
+	}
+	endpoint := models.NormalizeAgentEndpoint(config.PublishAgentEndpoint)
+	if endpoint == "" {
+		return
+	}
+	var existing models.AgentNode
+	if err := DB.Where("endpoint = ?", endpoint).First(&existing).Error; err == nil {
+		return
+	}
+	node := models.AgentNode{
+		Name:     "默认 Agent",
+		Endpoint: endpoint,
+		Purpose:  models.NormalizeAgentPurpose(config.AgentPurpose),
+		Enabled:  true,
+		Blocked:  false,
+	}
+	if strings.TrimSpace(node.Purpose) == "" {
+		node.Purpose = models.AgentPurposeBoth
+	}
+	DB.Create(&node)
 }
 
 func CloseDB() {

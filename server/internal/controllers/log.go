@@ -12,6 +12,12 @@ import (
 func GetLogs(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "1000")
 	limit, _ := strconv.Atoi(limitStr)
+	if limit <= 0 {
+		limit = 1000
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
 
 	hub := websocket.GetHub()
 	logs := hub.GetLogHistory(limit)

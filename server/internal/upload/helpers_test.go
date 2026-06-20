@@ -108,8 +108,12 @@ func TestClassifyUploadError(t *testing.T) {
 	}{
 		{name: "window", err: &UploadWindowClosedError{Window: "09:00-18:00", RetryAfter: time.Hour}, want: UploadErrorTypeWindow},
 		{name: "rate limit", err: errors.New("HTTP 429 Retry-After: 60"), want: UploadErrorTypeRateLimit},
+		{name: "bili frequency limit", err: errors.New("B站返回错误: code=-702, message=请求频率过高"), want: UploadErrorTypeRateLimit},
+		{name: "title too long", err: errors.New("稿件标题过长，最多不能超过80个字符"), want: UploadErrorTypePermanent},
+		{name: "duration too short", err: errors.New("该视频时长不足 1 秒"), want: UploadErrorTypePermanent},
 		{name: "auth", err: errors.New("用户Cookie已失效"), want: UploadErrorTypeAuth},
 		{name: "file", err: errors.New("文件不存在: /rec/a.flv"), want: UploadErrorTypeFile},
+		{name: "danmaku factory", err: errors.New("DanmakuFactory 转换弹幕为ASS失败"), want: UploadErrorTypeTranscode},
 		{name: "transcode", err: errors.New("上传前转码失败: ffmpeg exited"), want: UploadErrorTypeTranscode},
 		{name: "network", err: errors.New("connection reset by peer"), want: UploadErrorTypeNetwork},
 		{name: "user", err: errors.New("用户取消上传"), want: UploadErrorTypeUser},
@@ -122,6 +126,30 @@ func TestClassifyUploadError(t *testing.T) {
 				t.Fatalf("classifyUploadError() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRetryPolicy(t *testing.T) {
+	firstDelay, ok := autoTaskCooldownDuration(UploadErrorTypeRateLimit, 1)
+	if !ok || firstDelay != 30*time.Minute {
+		t.Fatalf("first rate-limit cooldown=%s ok=%v, want 30m true", firstDelay, ok)
+	}
+	fifthDelay, ok := autoTaskCooldownDuration(UploadErrorTypeRateLimit, 5)
+	if !ok || fifthDelay != 8*time.Hour {
+		t.Fatalf("fifth rate-limit cooldown=%s ok=%v, want 8h true", fifthDelay, ok)
+	}
+	cappedDelay, ok := autoTaskCooldownDuration(UploadErrorTypeRateLimit, 20)
+	if !ok || cappedDelay != 24*time.Hour {
+		t.Fatalf("capped rate-limit cooldown=%s ok=%v, want 24h true", cappedDelay, ok)
+	}
+	if !shouldAutoStopErrorType(UploadErrorTypePermanent, 1) {
+		t.Fatal("permanent errors should stop automatically")
+	}
+	if shouldAutoStopErrorType(UploadErrorTypeUnknown, maxAutoPublishRetries-1) {
+		t.Fatal("unknown errors should not stop before max retries")
+	}
+	if !shouldAutoStopErrorType(UploadErrorTypeUnknown, maxAutoPublishRetries) {
+		t.Fatal("unknown errors should stop at max retries")
 	}
 }
 

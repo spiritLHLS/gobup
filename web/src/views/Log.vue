@@ -3,20 +3,21 @@
     <el-card class="log-card">
       <template #header>
         <div class="log-header">
-          <span class="log-title">
-            <i class="el-icon-document"></i>
+          <div class="log-title">
+            <el-icon><Document /></el-icon>
             系统日志
-          </span>
+            <span class="log-count">显示 {{ filteredLogs.length }} / {{ logs.length }} 行</span>
+          </div>
           <div class="log-controls">
             <el-input
               v-model="searchKeyword"
               placeholder="搜索日志..."
               size="small"
               clearable
-              style="width: 200px; margin-right: 10px"
+              class="control-search"
             >
               <template #prefix>
-                <i class="el-icon-search"></i>
+                <el-icon><Search /></el-icon>
               </template>
             </el-input>
             <el-select
@@ -25,15 +26,27 @@
               collapse-tags
               placeholder="日志级别"
               size="small"
-              style="width: 150px"
+              class="control-level"
             >
-              <el-option label="INFO" value="INFO">
-                <el-tag type="success" size="small">+ 2</el-tag>
-              </el-option>
+              <el-option label="INFO" value="INFO" />
               <el-option label="WARN" value="WARN" />
               <el-option label="ERROR" value="ERROR" />
               <el-option label="DEBUG" value="DEBUG" />
             </el-select>
+            <el-select v-model="lineLimit" size="small" class="control-limit" @change="fetchLogs">
+              <el-option label="最新 100 行" :value="100" />
+              <el-option label="最新 500 行" :value="500" />
+              <el-option label="最新 1000 行" :value="1000" />
+              <el-option label="最新 3000 行" :value="3000" />
+              <el-option label="最新 10000 行" :value="10000" />
+            </el-select>
+            <el-switch v-model="autoRefresh" size="small" active-text="自动刷新" inactive-text="暂停" />
+            <el-button size="small" plain :icon="Refresh" :loading="loading" @click="fetchLogs">
+              刷新
+            </el-button>
+            <el-button size="small" plain :icon="DocumentCopy" :disabled="filteredLogs.length === 0" @click="copyDisplayedLogs">
+              复制
+            </el-button>
           </div>
         </div>
       </template>
@@ -43,7 +56,7 @@
           v-for="(log, index) in filteredLogs"
           :key="index"
           class="log-line"
-          :class="`log-${log.level.toLowerCase()}`"
+          :class="`log-${String(log.level || '').toLowerCase()}`"
         >
           <span class="log-time">{{ log.timestamp }}</span>
           <span class="log-level" :class="`level-${log.level}`">
@@ -60,13 +73,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import axios from 'axios'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Document, DocumentCopy, Refresh, Search } from '@element-plus/icons-vue'
+import api from '@/api'
 
 const logs = ref([])
 const searchKeyword = ref('')
 const levelFilter = ref(['INFO', 'WARN', 'ERROR'])
+const lineLimit = ref(1000)
+const autoRefresh = ref(true)
+const loading = ref(false)
 const consoleRef = ref(null)
 let refreshTimer = null
 
@@ -82,8 +99,8 @@ const filteredLogs = computed(() => {
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase()
     result = result.filter(log =>
-      log.message.toLowerCase().includes(keyword) ||
-      log.timestamp.toLowerCase().includes(keyword)
+      String(log.message || '').toLowerCase().includes(keyword) ||
+      String(log.timestamp || '').toLowerCase().includes(keyword)
     )
   }
 
@@ -91,9 +108,10 @@ const filteredLogs = computed(() => {
 })
 
 const fetchLogs = async () => {
+  loading.value = true
   try {
-    const response = await axios.get('/api/logs?limit=1000')
-    logs.value = response.data.logs || []
+    const response = await api.get('/logs', { params: { limit: lineLimit.value } })
+    logs.value = response.logs || response.data?.logs || []
     
     // 自动滚动到底部
     nextTick(() => {
@@ -103,32 +121,49 @@ const fetchLogs = async () => {
     })
   } catch (error) {
     console.error('获取日志失败:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+const stopAutoRefresh = () => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
   }
 }
 
 const startAutoRefresh = () => {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-  }
-  
-  // 立即获取一次
-  fetchLogs()
-  
+  stopAutoRefresh()
+  if (!autoRefresh.value) return
   // 每10秒刷新一次
   refreshTimer = setInterval(() => {
     fetchLogs()
   }, 10000)
 }
 
+const copyDisplayedLogs = async () => {
+  const text = filteredLogs.value
+    .map(log => `${log.timestamp || ''} ${log.level || ''} ${log.message || ''}`.trim())
+    .join('\n')
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(`已复制 ${filteredLogs.value.length} 行日志`)
+  } catch (error) {
+    ElMessage.error('复制失败，请手动选择日志')
+  }
+}
+
+watch(autoRefresh, startAutoRefresh)
+
 onMounted(() => {
+  fetchLogs()
   startAutoRefresh()
 })
 
 onUnmounted(() => {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
+  stopAutoRefresh()
 })
 </script>
 
@@ -155,21 +190,46 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .log-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 16px;
   font-weight: 600;
 }
 
-.log-title i {
-  margin-right: 8px;
+.log-title .el-icon {
   color: #409eff;
+}
+
+.log-count {
+  color: var(--text-color-secondary);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .log-controls {
   display: flex;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.control-search {
+  width: 220px;
+}
+
+.control-level {
+  width: 160px;
+}
+
+.control-limit {
+  width: 140px;
 }
 
 .log-console {

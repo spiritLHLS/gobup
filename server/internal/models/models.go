@@ -1,6 +1,11 @@
 package models
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -71,6 +76,36 @@ func NormalizeAgentInstallerSource(source string) string {
 	default:
 		return AgentInstallerSourceController
 	}
+}
+
+func NewAgentToken() string {
+	tokenBytes := make([]byte, 24)
+	if _, err := rand.Read(tokenBytes); err == nil {
+		return hex.EncodeToString(tokenBytes)
+	}
+	return fmt.Sprintf("gobup-%d", time.Now().UnixNano())
+}
+
+func NormalizeAgentEndpoint(endpoint string) string {
+	value := strings.TrimSpace(endpoint)
+	if value == "" {
+		return ""
+	}
+	if !strings.Contains(value, "://") {
+		value = "http://" + value
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		return strings.TrimRight(value, "/")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return strings.TrimRight(value, "/")
+	}
+	if parsed.Port() == "" && parsed.Hostname() != "" {
+		parsed.Host = net.JoinHostPort(parsed.Hostname(), "12381")
+	}
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 func NormalizeFileCheckMode(mode string) string {
@@ -254,7 +289,7 @@ type RecordHistoryPart struct {
 	UploadErrorMsg      string     `gorm:"type:text" json:"uploadErrorMsg"`            // 上传错误信息
 	UploadErrorType     string     `gorm:"index" json:"uploadErrorType"`               // 错误分类：network/rate_limit/auth/file/transcode/window/user/unknown
 	UploadLine          string     `json:"uploadLine"`                                 // 实际上传使用的线路
-	RateLimitCooldownAt *time.Time `gorm:"index" json:"rateLimitCooldownAt"`           // 速率限制冷却时间（24小时后恢复）
+	RateLimitCooldownAt *time.Time `gorm:"index" json:"rateLimitCooldownAt"`           // 速率限制/临时错误的指数退避冷却时间
 	RateLimitRetryCount int        `gorm:"default:0" json:"rateLimitRetryCount"`       // 406速率限制失败次数
 	IsTempFile          bool       `gorm:"default:false;index" json:"isTempFile"`      // 是否为临时文件（自动切分、弹幕烧录等生成）
 	SourcePartID        uint       `gorm:"index" json:"sourcePartId"`                  // 源Part ID（如果是从其他Part派生）
@@ -366,4 +401,25 @@ type SystemConfig struct {
 	DanmakuFontColor       string    `json:"danmakuFontColor"`                        // 全局弹幕颜色默认值
 	DanmakuScrollArea      float64   `gorm:"default:0.75" json:"danmakuScrollArea"`   // 全局滚动弹幕区域比例
 	DanmakuDisplayArea     float64   `gorm:"default:0.8" json:"danmakuDisplayArea"`   // 全局弹幕显示区域比例
+}
+
+// AgentNode 远程 Agent 节点配置
+type AgentNode struct {
+	ID                uint           `gorm:"primarykey" json:"id"`
+	CreatedAt         time.Time      `json:"createdAt"`
+	UpdatedAt         time.Time      `json:"updatedAt"`
+	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
+	Name              string         `json:"name"`
+	Endpoint          string         `gorm:"type:text;uniqueIndex" json:"endpoint"`
+	Purpose           string         `gorm:"default:both;index" json:"purpose"`
+	Enabled           bool           `gorm:"default:true;index" json:"enabled"`
+	Blocked           bool           `gorm:"default:false;index" json:"blocked"`
+	BlockReason       string         `gorm:"type:text" json:"blockReason"`
+	LastSeenAt        *time.Time     `gorm:"index" json:"lastSeenAt"`
+	LastHealthStatus  string         `gorm:"index" json:"lastHealthStatus"`
+	LastHealthMessage string         `gorm:"type:text" json:"lastHealthMessage"`
+	LastVersion       string         `json:"lastVersion"`
+	LastPurpose       string         `json:"lastPurpose"`
+	LastCapabilities  string         `gorm:"type:text" json:"lastCapabilities"`
+	IsPrimary         bool           `gorm:"-" json:"isPrimary"`
 }

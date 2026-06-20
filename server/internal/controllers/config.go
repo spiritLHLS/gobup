@@ -381,6 +381,10 @@ func normalizeSystemConfig(config *models.SystemConfig) {
 	if config.PublishAgentTimeout > 600 {
 		config.PublishAgentTimeout = 600
 	}
+	config.PublishAgentEndpoint = models.NormalizeAgentEndpoint(config.PublishAgentEndpoint)
+	if strings.TrimSpace(config.PublishAgentToken) == "" {
+		config.PublishAgentToken = models.NewAgentToken()
+	}
 	config.AgentPurpose = models.NormalizeAgentPurpose(config.AgentPurpose)
 	config.AgentInstallerSource = models.NormalizeAgentInstallerSource(config.AgentInstallerSource)
 	if strings.TrimSpace(config.AgentGitHubRepo) == "" {

@@ -13,6 +13,7 @@ const (
 	UploadErrorTypeTranscode = "transcode"
 	UploadErrorTypeWindow    = "window"
 	UploadErrorTypeUser      = "user"
+	UploadErrorTypePermanent = "permanent"
 	UploadErrorTypeUnknown   = "unknown"
 )
 
@@ -35,15 +36,19 @@ func classifyUploadErrorText(text string) string {
 
 	switch {
 	case containsAny(normalized, []string{
-		"速率限制", "限流", "rate limit", "retry-after", "http 429", "http 406", "http 601", "上传视频过快",
+		"速率限制", "限流", "rate limit", "retry-after", "http 429", "http 406", "http 601", "上传视频过快", "请求频率过高", "请求过于频繁", "code=-702",
 	}):
 		return UploadErrorTypeRateLimit
+	case containsAny(normalized, []string{
+		"稿件标题过长", "超过80个字符", "时长不足 1 秒", "视频时长不足", "该视频时长不足", "分区不存在", "标题不能为空",
+	}):
+		return UploadErrorTypePermanent
 	case containsAny(normalized, []string{
 		"cookie", "用户未登录", "用户已禁用", "鉴权", "未授权", "unauthorized", "forbidden", "csrf", "access_key",
 	}):
 		return UploadErrorTypeAuth
 	case containsAny(normalized, []string{
-		"转码", "ffmpeg", "ffprobe", "xcode",
+		"转码", "ffmpeg", "ffprobe", "xcode", "danmakufactory", "ass文件", "ass 文件",
 	}):
 		return UploadErrorTypeTranscode
 	case containsAny(normalized, []string{

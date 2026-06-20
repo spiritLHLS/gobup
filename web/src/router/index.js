@@ -39,6 +39,12 @@ const routes = [
         meta: { title: '用户管理', requiresAuth: true }
       },
       {
+        path: 'agents',
+        name: 'Agents',
+        component: () => import('@/views/Agents.vue'),
+        meta: { title: 'Agent 管理', requiresAuth: true }
+      },
+      {
         path: 'logs',
         name: 'Logs',
         component: () => import('@/views/Log.vue'),

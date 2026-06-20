@@ -48,6 +48,25 @@ func NewDanmakuBurnService() *DanmakuBurnService {
 	return &DanmakuBurnService{}
 }
 
+func ResolveDanmakuFactoryPath() string {
+	factoryPath := os.Getenv("DANMAKU_FACTORY_PATH")
+	if factoryPath == "" {
+		factoryPath = DanmakuFactoryPath
+	}
+	return factoryPath
+}
+
+func CheckDanmakuFactoryAvailable() (string, error) {
+	factoryPath := ResolveDanmakuFactoryPath()
+	if _, err := os.Stat(factoryPath); err != nil {
+		if os.IsNotExist(err) {
+			return factoryPath, fmt.Errorf("DanmakuFactory 未安装: %s", factoryPath)
+		}
+		return factoryPath, fmt.Errorf("检查 DanmakuFactory 失败: %w", err)
+	}
+	return factoryPath, nil
+}
+
 // BurnDanmakuToVideo 将弹幕烧录到视频文件
 // 返回：生成的带弹幕视频路径，错误
 func (s *DanmakuBurnService) BurnDanmakuToVideo(part *models.RecordHistoryPart, history *models.RecordHistory, room *models.RecordRoom) (string, error) {
@@ -278,15 +297,9 @@ func (s *DanmakuBurnService) probeVideoResolution(videoPath string) string {
 // convertXMLToASSWithFactory 使用 DanmakuFactory 将XML转换为ASS。
 // 输出文件写到系统临时目录（ASCII路径），避免 libavfilter subtitles filter 因中文路径解析失败。
 func (s *DanmakuBurnService) convertXMLToASSWithFactory(xmlPath string, history *models.RecordHistory, room *models.RecordRoom, videoPath string) (string, error) {
-	// 获取 DanmakuFactory 路径
-	factoryPath := os.Getenv("DANMAKU_FACTORY_PATH")
-	if factoryPath == "" {
-		factoryPath = DanmakuFactoryPath
-	}
-
-	// 检查 DanmakuFactory 是否存在
-	if _, err := os.Stat(factoryPath); os.IsNotExist(err) {
-		return "", fmt.Errorf("DanmakuFactory 未安装: %s", factoryPath)
+	factoryPath, err := CheckDanmakuFactoryAvailable()
+	if err != nil {
+		return "", err
 	}
 
 	// 将ASS写到系统临时目录（ASCII-only路径），避免含中文/特殊字符的路径传入ffmpeg subtitles滤镜时失败

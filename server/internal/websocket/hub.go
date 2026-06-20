@@ -49,7 +49,7 @@ func GetHub() *Hub {
 			unregister: make(chan *Client),
 			broadcast:  make(chan *LogMessage, 1000),
 			logHistory: make([]*LogMessage, 0, 1000),
-			maxHistory: 1000, // 保留最近1000条日志
+			maxHistory: 10000, // 最多保留最近10000条日志，接口默认只返回1000条
 		}
 		go GlobalHub.run()
 	})

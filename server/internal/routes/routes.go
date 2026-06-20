@@ -206,6 +206,19 @@ func SetupRoutes(router *gin.Engine) {
 				agentConfig.GET("/files/check", controllers.CheckAgentFiles)
 				agentConfig.GET("/install-command", controllers.GetAgentInstallCommand)
 			}
+
+			agents := auth.Group("/agents")
+			{
+				agents.GET("", controllers.ListAgentNodes)
+				agents.POST("", controllers.CreateAgentNode)
+				agents.PUT("/:id", controllers.UpdateAgentNode)
+				agents.DELETE("/:id", controllers.DeleteAgentNode)
+				agents.POST("/:id/block", controllers.BlockAgentNode)
+				agents.POST("/:id/unblock", controllers.UnblockAgentNode)
+				agents.POST("/:id/use", controllers.UseAgentNode)
+				agents.POST("/:id/detect", controllers.DetectAgentNode)
+				agents.GET("/:id/install-command", controllers.GetAgentNodeInstallCommand)
+			}
 		}
 	}
 

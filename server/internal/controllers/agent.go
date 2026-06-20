@@ -117,6 +117,7 @@ func DetectPublishAgent(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "配置不存在"})
 		return
 	}
+	normalizeSystemConfig(&config)
 	if strings.TrimSpace(config.PublishAgentEndpoint) == "" {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "未配置 Agent 地址"})
 		return
@@ -147,6 +148,7 @@ func CheckAgentFiles(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "配置不存在"})
 		return
 	}
+	normalizeSystemConfig(&config)
 	limit := parsePositiveInt(c.DefaultQuery("limit", "100"), 100)
 	if models.NormalizeFileCheckMode(config.FileCheckMode) == models.FileCheckModeRemote {
 		if strings.TrimSpace(config.PublishAgentEndpoint) == "" {
@@ -184,16 +186,37 @@ func GetAgentInstallCommand(c *gin.Context) {
 		return
 	}
 	normalizeSystemConfig(&config)
+	db.Save(&config)
+	purpose := models.NormalizeAgentPurpose(c.DefaultQuery("purpose", config.AgentPurpose))
+	source := models.NormalizeAgentInstallerSource(c.DefaultQuery("source", config.AgentInstallerSource))
+	install := buildAgentInstallCommand(c, &config, purpose, source)
+
+	c.JSON(http.StatusOK, gin.H{
+		"type":         "success",
+		"msg":          "安装命令已生成",
+		"command":      install.Command,
+		"scriptUrl":    install.ScriptURL,
+		"purpose":      purpose,
+		"source":       source,
+		"tokenMissing": false,
+	})
+}
+
+type agentInstallCommandData struct {
+	Command   string
+	ScriptURL string
+}
+
+func buildAgentInstallCommand(c *gin.Context, config *models.SystemConfig, purpose, source string) agentInstallCommandData {
 	baseURL := strings.TrimRight(strings.TrimSpace(config.AgentControllerBaseURL), "/")
 	if baseURL == "" {
 		baseURL = requestBaseURL(c)
 	}
-	purpose := models.NormalizeAgentPurpose(c.DefaultQuery("purpose", config.AgentPurpose))
-	source := models.NormalizeAgentInstallerSource(c.DefaultQuery("source", config.AgentInstallerSource))
+	purpose = models.NormalizeAgentPurpose(purpose)
+	source = models.NormalizeAgentInstallerSource(source)
 	token := strings.TrimSpace(config.PublishAgentToken)
-	tokenMissing := token == ""
-	if tokenMissing {
-		token = "<AGENT_TOKEN>"
+	if token == "" {
+		token = models.NewAgentToken()
 	}
 	repo := strings.TrimSpace(config.AgentGitHubRepo)
 	if repo == "" {
@@ -224,17 +247,10 @@ func GetAgentInstallCommand(c *gin.Context) {
 	if cdnBase != "" {
 		args = append(args, "--cdn-base-url", cdnBase)
 	}
-	command := "curl -fsSL " + shellQuote(scriptURL) + " | sh -s -- " + shellJoin(args)
-
-	c.JSON(http.StatusOK, gin.H{
-		"type":         "success",
-		"msg":          "安装命令已生成",
-		"command":      command,
-		"scriptUrl":    scriptURL,
-		"purpose":      purpose,
-		"source":       source,
-		"tokenMissing": tokenMissing,
-	})
+	return agentInstallCommandData{
+		Command:   "curl -fsSL " + shellQuote(scriptURL) + " | sh -s -- " + shellJoin(args),
+		ScriptURL: scriptURL,
+	}
 }
 
 func DownloadAgentInstaller(c *gin.Context) {

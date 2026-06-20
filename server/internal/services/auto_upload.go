@@ -181,7 +181,6 @@ func (s *AutoUploadService) GetPendingUploadParts() ([]PendingUploadTask, error)
 
 			// 权限检查：历史记录是否允许上传
 			if !history.Upload {
-				log.Printf("[自动上传] 历史记录禁止上传，跳过: history_id=%d, part_id=%d", history.ID, part.ID)
 				continue
 			}
 			if !allowUploadWhileRecording && (history.Recording || history.Streaming) {

@@ -14,6 +14,20 @@ import (
 	"github.com/gobup/server/internal/services"
 )
 
+const maxBurnedAppendAttemptsPerRun = 3
+
+type danmakuBackfillStats struct {
+	appendAttempts      int
+	appendErrors        int
+	appendCooldownSkips int
+	appendAttemptSkips  int
+	rateLimitStops      int
+	missingSourceMarked int
+	missingXML          int
+	factoryUnavailable  int
+	startedBurns        int
+}
+
 // UpdatePublishedVideoWithBurnedParts 回补更新已投稿视频，追加弹幕版分P
 // 当弹幕版分P上传完成后，检查对应的历史记录是否已投稿，如果已投稿且没有弹幕版，则追加弹幕版分P
 func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
@@ -192,7 +206,13 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 
 	// 标记弹幕版分P为已追加到视频
 	burnedPart.AppendedToVideo = true
-	db.Save(&burnedPart)
+	db.Model(&burnedPart).Updates(map[string]interface{}{
+		"appended_to_video":      true,
+		"upload_error_msg":       "",
+		"upload_error_type":      "",
+		"rate_limit_retry_count": 0,
+		"rate_limit_cooldown_at": nil,
+	})
 	log.Printf("[回补弹幕版] 已标记 AppendedToVideo=true: burned_part_id=%d", burnedPart.ID)
 
 	// 清理已追加的弹幕烧录视频文件（物理文件已无需保留）
@@ -231,9 +251,18 @@ func (s *Service) AppendDanmakuBurnedPartsToApprovedVideos() error {
 		return nil
 	}
 
+	stats := &danmakuBackfillStats{}
 	oneHourAgo := time.Now().Add(-1 * time.Hour)
+	stopRun := false
+	factoryAvailable := true
+	if _, err := services.CheckDanmakuFactoryAvailable(); err != nil {
+		factoryAvailable = false
+	}
 
 	for _, room := range rooms {
+		if stopRun {
+			break
+		}
 		if room.UploadUserID == 0 {
 			continue
 		}
@@ -255,8 +284,17 @@ func (s *Service) AppendDanmakuBurnedPartsToApprovedVideos() error {
 		log.Printf("[弹幕回补] 房间 %s 发现 %d 条符合弹幕回补条件的历史记录", room.RoomID, len(histories))
 
 		for _, history := range histories {
-			s.appendBurnedPartsForApprovedHistory(&history, &room)
+			if !s.appendBurnedPartsForApprovedHistory(&history, &room, stats, factoryAvailable) {
+				stopRun = true
+				break
+			}
 		}
+	}
+	if stats.appendAttempts > 0 || stats.appendCooldownSkips > 0 || stats.missingSourceMarked > 0 ||
+		stats.missingXML > 0 || stats.factoryUnavailable > 0 || stats.startedBurns > 0 || stats.rateLimitStops > 0 {
+		log.Printf("[弹幕回补] 扫描完成: 追加尝试=%d, 追加失败=%d, 冷却跳过=%d, 限额跳过=%d, 限流早停=%d, 源文件缺失标记=%d, XML缺失=%d, DanmakuFactory不可用=%d, 新触发烧录=%d",
+			stats.appendAttempts, stats.appendErrors, stats.appendCooldownSkips, stats.appendAttemptSkips, stats.rateLimitStops,
+			stats.missingSourceMarked, stats.missingXML, stats.factoryUnavailable, stats.startedBurns)
 	}
 
 	return nil
@@ -267,7 +305,7 @@ func (s *Service) AppendDanmakuBurnedPartsToApprovedVideos() error {
 //  1. 原始视频文件还在磁盘上
 //  2. 同名 .xml 弹幕文件存在
 //  3. 该分P尚未有对应的已追加弹幕版（appended_to_video=false 或无记录）
-func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHistory, room *models.RecordRoom) {
+func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHistory, room *models.RecordRoom, stats *danmakuBackfillStats, factoryAvailable bool) bool {
 	db := database.GetDB()
 
 	// 获取该历史记录的所有已上传原始分P（非临时文件）
@@ -277,11 +315,11 @@ func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHist
 		history.ID, true, false, false,
 	).Find(&originalParts).Error; err != nil {
 		log.Printf("[弹幕回补] 查询历史记录 %d 的原始分P失败: %v", history.ID, err)
-		return
+		return true
 	}
 
 	if len(originalParts) == 0 {
-		return
+		return true
 	}
 
 	burnService := services.NewDanmakuBurnService()
@@ -303,15 +341,24 @@ func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHist
 			"source_part_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ? AND c_id > 0 AND appended_to_video = ?",
 			part.ID, true, "danmaku_burn", true, false,
 		).First(&pendingAppend).Error; err == nil {
-			// 已上传但未成功追加，直接重新触发 UpdatePublishedVideoWithBurnedParts
+			if pendingAppend.RateLimitCooldownAt != nil && pendingAppend.RateLimitCooldownAt.After(time.Now()) {
+				stats.appendCooldownSkips++
+				continue
+			}
+			if stats.appendAttempts >= maxBurnedAppendAttemptsPerRun {
+				stats.appendAttemptSkips++
+				return false
+			}
+			stats.appendAttempts++
 			log.Printf("[弹幕回补] 发现已上传但未追加的弹幕版，重新触发追加: burned_part_id=%d", pendingAppend.ID)
-			go func(pid uint) {
-				s.appendBurnedSem <- struct{}{}
-				defer func() { <-s.appendBurnedSem }()
-				if err := s.UpdatePublishedVideoWithBurnedParts(pid); err != nil {
-					log.Printf("[弹幕回补] 重新追加失败: burned_part_id=%d, err=%v", pid, err)
+			if err := s.UpdatePublishedVideoWithBurnedParts(pendingAppend.ID); err != nil {
+				stats.appendErrors++
+				if s.markBurnedAppendFailure(&pendingAppend, err) {
+					stats.rateLimitStops++
+					return false
 				}
-			}(pendingAppend.ID)
+				log.Printf("[弹幕回补] 重新追加失败: burned_part_id=%d, err=%v", pendingAppend.ID, err)
+			}
 			continue
 		}
 
@@ -328,19 +375,24 @@ func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHist
 
 		// 4. 检查原始视频文件是否存在
 		if part.FilePath == "" {
+			s.markDanmakuBurnSkipped(&part, "源视频文件路径为空，已停止该分P弹幕回补", UploadErrorTypeFile)
+			stats.missingSourceMarked++
 			continue
 		}
 		if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
-			log.Printf("[弹幕回补] 原始视频文件不存在，跳过: history_id=%d, part_id=%d, file=%s",
-				history.ID, part.ID, part.FilePath)
+			s.markDanmakuBurnSkipped(&part, "源视频文件不存在，已停止该分P弹幕回补: "+part.FilePath, UploadErrorTypeFile)
+			stats.missingSourceMarked++
 			continue
 		}
 
 		// 5. 检查 XML 弹幕文件是否存在
 		xmlPath := burnService.FindDanmakuXML(part.FilePath)
 		if xmlPath == "" {
-			log.Printf("[弹幕回补] XML弹幕文件不存在，跳过: history_id=%d, part_id=%d, video=%s",
-				history.ID, part.ID, part.FilePath)
+			stats.missingXML++
+			continue
+		}
+		if !factoryAvailable {
+			stats.factoryUnavailable++
 			continue
 		}
 
@@ -348,21 +400,16 @@ func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHist
 			history.ID, part.ID, part.FilePath, xmlPath)
 
 		// 异步执行烧录 → 上传 → 追加（避免阻塞定时任务）
+		stats.startedBurns++
 		go func(p models.RecordHistoryPart, h models.RecordHistory, r models.RecordRoom) {
 			bs := services.NewDanmakuBurnService()
 			burnedPath, err := bs.BurnDanmakuToVideo(&p, &h, &r)
 			if err != nil {
-				log.Printf("[弹幕回补] 烧录失败: part_id=%d, err=%v", p.ID, err)
-				// 创建失败标记，防止定时任务对同一损坏/无效XML无限重试
-				failedMarker := &models.RecordHistoryPart{
-					HistoryID:    p.HistoryID,
-					SourcePartID: p.ID,
-					IsTempFile:   true,
-					TempFileType: "danmaku_burn",
-					Upload:       false,
-				}
-				if createErr := database.GetDB().Create(failedMarker).Error; createErr != nil {
-					log.Printf("[弹幕回补] 创建失败标记出错: part_id=%d, err=%v", p.ID, createErr)
+				errorType := classifyUploadError(err)
+				if shouldAutoStopErrorType(errorType, 1) {
+					s.markDanmakuBurnSkipped(&p, "弹幕回补烧录失败，已停止该分P自动回补: "+err.Error(), errorType)
+				} else {
+					log.Printf("[弹幕回补] 烧录失败: part_id=%d, err=%v", p.ID, err)
 				}
 				return
 			}
@@ -383,4 +430,40 @@ func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHist
 			}
 		}(part, *history, *room)
 	}
+	return true
+}
+
+func (s *Service) markBurnedAppendFailure(part *models.RecordHistoryPart, err error) bool {
+	if part == nil || part.ID == 0 || err == nil {
+		return false
+	}
+	errorType := classifyUploadError(err)
+	retryCount := part.RateLimitRetryCount + 1
+	message := fmt.Sprintf("追加弹幕版分P失败: %v", err)
+	updates := map[string]interface{}{
+		"upload_error_msg":  message,
+		"upload_error_type": errorType,
+	}
+	if cooldownDelay, ok := autoTaskCooldownDuration(errorType, retryCount); ok {
+		cooldown := time.Now().Add(cooldownDelay)
+		updates["rate_limit_retry_count"] = retryCount
+		updates["rate_limit_cooldown_at"] = &cooldown
+		part.RateLimitRetryCount = retryCount
+		part.RateLimitCooldownAt = &cooldown
+		if errorType == UploadErrorTypeRateLimit {
+			log.Printf("[弹幕回补] B站接口限流，停止本轮回补并冷却至 %s: burned_part_id=%d",
+				cooldown.Format("2006-01-02 15:04:05"), part.ID)
+		}
+	} else if shouldAutoStopErrorType(errorType, retryCount) {
+		updates["upload_cancelled"] = true
+		updates["rate_limit_cooldown_at"] = nil
+		part.UploadCancelled = true
+		part.RateLimitCooldownAt = nil
+	}
+	if dbErr := database.GetDB().Model(part).Updates(updates).Error; dbErr != nil {
+		log.Printf("[弹幕回补] 记录追加失败状态失败: burned_part_id=%d, err=%v", part.ID, dbErr)
+	}
+	part.UploadErrorMsg = message
+	part.UploadErrorType = errorType
+	return errorType == UploadErrorTypeRateLimit
 }

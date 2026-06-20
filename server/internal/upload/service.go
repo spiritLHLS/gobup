@@ -21,10 +21,9 @@ const (
 )
 
 type Service struct {
-	uploadingParts       sync.Map      // partID -> true，防止同一分P并发上传
-	publishingHistories  sync.Map      // historyID -> true，防止同一历史记录并发投稿
-	appendingBurnedParts sync.Map      // burnedPartID -> true，防止同一烧录版分P并发调用 EditVideo
-	appendBurnedSem      chan struct{} // 限制弹幕回补并发数，避免批量触发时超出B站API限流
+	uploadingParts       sync.Map // partID -> true，防止同一分P并发上传
+	publishingHistories  sync.Map // historyID -> true，防止同一历史记录并发投稿
+	appendingBurnedParts sync.Map // burnedPartID -> true，防止同一烧录版分P并发调用 EditVideo
 	wxPusher             *services.WxPusherService
 	templateSvc          *services.TemplateService
 	progressTracker      *ProgressTracker
@@ -37,7 +36,6 @@ func NewService() *Service {
 		wxPusher:        services.NewWxPusherService(),
 		templateSvc:     services.NewTemplateService(),
 		progressTracker: NewProgressTracker(),
-		appendBurnedSem: make(chan struct{}, 3), // 最多3个并发追加，避免B站API限流
 	}
 	svc.queueManager = NewQueueManager(svc)
 	return svc
@@ -178,6 +176,14 @@ func (s *Service) ResetStuckUploadingParts() {
 // 对每个这样的分P重新异步触发烧录并将烧录版入队
 func (s *Service) RequeueInterruptedBurns() {
 	db := database.GetDB()
+	factoryAvailable := true
+	if _, err := services.CheckDanmakuFactoryAvailable(); err != nil {
+		factoryAvailable = false
+		log.Printf("[启动恢复-烧录] DanmakuFactory 不可用，跳过需要重新编码的烧录恢复: %v", err)
+	}
+	missingSourceCount := 0
+	requeuedCount := 0
+	factorySkippedCount := 0
 
 	// 只处理启用了弹幕烧录的房间
 	var rooms []models.RecordRoom
@@ -218,7 +224,27 @@ func (s *Service) RequeueInterruptedBurns() {
 				continue
 			}
 
+			if strings.TrimSpace(part.FilePath) == "" {
+				s.markDanmakuBurnSkipped(&part, "源视频文件路径为空，已停止该分P弹幕烧录恢复", UploadErrorTypeFile)
+				missingSourceCount++
+				continue
+			}
+			if _, err := os.Stat(part.FilePath); err != nil {
+				if os.IsNotExist(err) {
+					s.markDanmakuBurnSkipped(&part, "源视频文件不存在，已停止该分P弹幕烧录恢复: "+part.FilePath, UploadErrorTypeFile)
+					missingSourceCount++
+					continue
+				}
+				log.Printf("[启动恢复-烧录] 检查源视频失败，暂缓恢复: part_id=%d, err=%v", part.ID, err)
+				continue
+			}
+			if !factoryAvailable {
+				factorySkippedCount++
+				continue
+			}
+
 			log.Printf("[启动恢复-烧录] 发现未烧录的已上传分P，重新触发烧录: part_id=%d, file=%s", part.ID, part.FilePath)
+			requeuedCount++
 
 			// 异步烧录，避免阻塞启动流程
 			go func(p models.RecordHistoryPart, h models.RecordHistory, r models.RecordRoom) {
@@ -264,7 +290,12 @@ func (s *Service) RequeueInterruptedBurns() {
 				burnService := services.NewDanmakuBurnService()
 				burnedPath, err := burnService.BurnDanmakuToVideo(&p, &h, &r)
 				if err != nil {
-					log.Printf("[启动恢复-烧录] 烧录失败: part_id=%d, err=%v", p.ID, err)
+					errorType := classifyUploadError(err)
+					if shouldAutoStopErrorType(errorType, 1) {
+						s.markDanmakuBurnSkipped(&p, "弹幕烧录失败，已停止该分P自动恢复: "+err.Error(), errorType)
+					} else {
+						log.Printf("[启动恢复-烧录] 烧录失败: part_id=%d, err=%v", p.ID, err)
+					}
 					return
 				}
 				log.Printf("[启动恢复-烧录] 烧录完成，准备入队: part_id=%d, burned=%s", p.ID, burnedPath)
@@ -280,6 +311,10 @@ func (s *Service) RequeueInterruptedBurns() {
 				}
 			}(part, history, room)
 		}
+	}
+	if missingSourceCount > 0 || factorySkippedCount > 0 || requeuedCount > 0 {
+		log.Printf("[启动恢复-烧录] 恢复扫描完成: 已触发=%d, 源文件缺失已标记=%d, DanmakuFactory不可用跳过=%d",
+			requeuedCount, missingSourceCount, factorySkippedCount)
 	}
 }
 
@@ -307,7 +342,7 @@ func (s *Service) RecoverUnpublishedHistories() {
 
 		// 查找该房间未投稿的历史记录；默认仅处理已结束历史，开启边录制投稿时允许活动场次进入检查。
 		var histories []models.RecordHistory
-		query := db.Where("room_id = ? AND publish = ?", room.RoomID, false)
+		query := db.Where("room_id = ? AND publish = ? AND upload = ?", room.RoomID, false, true)
 		if !allowPublishWhileRecording {
 			query = query.Where("recording = ? AND streaming = ?", false, false)
 		}
@@ -317,6 +352,9 @@ func (s *Service) RecoverUnpublishedHistories() {
 		}
 
 		for _, hist := range histories {
+			if !hist.Upload {
+				continue
+			}
 			// 检查是否有已上传的原始分P
 			var uploadedCount, totalCount int64
 			db.Model(&models.RecordHistoryPart{}).Where(
@@ -578,16 +616,13 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	// 执行上传（upload_upos.go内部已经有断点续传和重试机制）
 	var uploadResult *bili.UploadResult
 	var uploadErr error
-	var is406RateLimit bool
+	var uploadErrorType string
 
 	uploadResult, uploadErr = uploader.Upload(uploadPath)
 
 	if uploadErr != nil {
-		// 检测是否为真正的406/601速率限制错误
-		// 只有明确的HTTP状态码才判定为速率限制，避免误判网络错误
-		errMsg := uploadErr.Error()
-		if contains(errMsg, "HTTP 406") || contains(errMsg, "HTTP 601") || contains(errMsg, "上传视频过快") {
-			is406RateLimit = true
+		uploadErrorType = classifyUploadError(uploadErr)
+		if uploadErrorType == UploadErrorTypeRateLimit {
 			log.Printf("检测到速率限制错误: %v", uploadErr)
 		} else {
 			log.Printf("上传失败: %v", uploadErr)
@@ -595,21 +630,26 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	}
 
 	if uploadErr != nil {
-		// 如果是406速率限制，并且所有重试都失败，设置24小时冷却期
+		// 如果是速率限制，并且所有重试都失败，设置指数退避冷却期
 		rateLimitCooldownText := ""
-		if is406RateLimit {
-			cooldownTime := time.Now().Add(24 * time.Hour)
+		if uploadErrorType == UploadErrorTypeRateLimit {
+			retryCount := part.RateLimitRetryCount + 1
+			cooldownDelay, ok := autoTaskCooldownDuration(uploadErrorType, retryCount)
+			if !ok {
+				cooldownDelay = 24 * time.Hour
+			}
+			cooldownTime := time.Now().Add(cooldownDelay)
 			part.RateLimitCooldownAt = &cooldownTime
-			part.RateLimitRetryCount++
+			part.RateLimitRetryCount = retryCount
 			rateLimitCooldownText = cooldownTime.Format("2006-01-02 15:04:05")
-			part.UploadErrorMsg = fmt.Sprintf("速率限制(406)，已设置24小时冷却期至 %s", rateLimitCooldownText)
+			part.UploadErrorMsg = fmt.Sprintf("速率限制，已设置%s冷却期至 %s", formatDurationForLog(cooldownDelay), rateLimitCooldownText)
 			part.UploadErrorType = UploadErrorTypeRateLimit
 			db.Save(part)
-			log.Printf("[速率限制] 分P %d 触发406限制，设置24小时冷却期至: %s", part.ID, rateLimitCooldownText)
+			log.Printf("[速率限制] 分P %d 触发限制，第%d次失败，冷却至: %s", part.ID, retryCount, rateLimitCooldownText)
 		} else {
 			part.UploadRetryCount++
 			part.UploadErrorMsg = uploadErr.Error()
-			part.UploadErrorType = classifyUploadError(uploadErr)
+			part.UploadErrorType = uploadErrorType
 			db.Save(part)
 		}
 
@@ -634,7 +674,7 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 
 		// 推送失败通知（使用历史记录中实际的主播名）
 		if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
-			if is406RateLimit {
+			if uploadErrorType == UploadErrorTypeRateLimit {
 				s.wxPusher.NotifyRateLimit(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, rateLimitCooldownText)
 			} else {
 				s.wxPusher.NotifyUploadFailed(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, uploadErr.Error())
@@ -777,6 +817,9 @@ func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.Re
 	}
 	// 使用freshHistory进行后续判断（替代stale的传入指针）
 	history = &freshHistory
+	if !history.Upload {
+		return
+	}
 	if history.PublishCooldownAt != nil && history.PublishCooldownAt.After(time.Now()) {
 		log.Printf("[自动投稿] 历史记录处于投稿冷却期，暂缓投稿: history_id=%d, cooldown_until=%s, error_type=%s",
 			history.ID, history.PublishCooldownAt.Format("2006-01-02 15:04:05"), history.PublishErrorType)

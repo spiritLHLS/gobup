@@ -258,7 +258,7 @@ paths:
       consumes:
       - application/json
       description: Detects a configured Agent, checks recording files locally or remotely,
-        and generates the installer command.
+        generates installer commands, and manages Agent nodes.
       produces:
       - application/json
       responses:
@@ -277,7 +277,7 @@ paths:
       consumes:
       - application/json
       description: Detects a configured Agent, checks recording files locally or remotely,
-        and generates the installer command.
+        generates installer commands, and manages Agent nodes.
       produces:
       - application/json
       responses:
@@ -296,7 +296,176 @@ paths:
       consumes:
       - application/json
       description: Detects a configured Agent, checks recording files locally or remotely,
-        and generates the installer command.
+        generates installer commands, and manages Agent nodes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+  /agents:
+    get:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        generates installer commands, and manages Agent nodes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+    post:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        generates installer commands, and manages Agent nodes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+  /agents/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        generates installer commands, and manages Agent nodes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+    put:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        generates installer commands, and manages Agent nodes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+  /agents/{id}/block:
+    post:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        generates installer commands, and manages Agent nodes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+  /agents/{id}/detect:
+    post:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        generates installer commands, and manages Agent nodes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+  /agents/{id}/install-command:
+    get:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        generates installer commands, and manages Agent nodes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+  /agents/{id}/unblock:
+    post:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        generates installer commands, and manages Agent nodes.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BasicAuth: []
+      summary: Agent management APIs
+      tags:
+      - agent
+  /agents/{id}/use:
+    post:
+      consumes:
+      - application/json
+      description: Detects a configured Agent, checks recording files locally or remotely,
+        generates installer commands, and manages Agent nodes.
       produces:
       - application/json
       responses:

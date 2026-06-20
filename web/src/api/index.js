@@ -172,4 +172,17 @@ export const dataRepairAPI = {
   repair: () => request.post('/datarepair/repair')
 }
 
+// Agent 节点管理
+export const agentAPI = {
+  list: () => request.get('/agents'),
+  create: (data) => request.post('/agents', data),
+  update: (id, data) => request.put(`/agents/${id}`, data),
+  delete: (id, force = false) => request.delete(`/agents/${id}`, { params: { force } }),
+  block: (id, blockReason = '') => request.post(`/agents/${id}/block`, { blockReason }),
+  unblock: (id) => request.post(`/agents/${id}/unblock`),
+  use: (id) => request.post(`/agents/${id}/use`),
+  detect: (id) => request.post(`/agents/${id}/detect`),
+  installCommand: (id, params = {}) => request.get(`/agents/${id}/install-command`, { params })
+}
+
 export default request

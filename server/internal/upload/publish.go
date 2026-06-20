@@ -125,12 +125,20 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 			if !models.AgentPurposeAllows(sysConfig.AgentPurpose, models.AgentPurposeUpload) {
 				return fmt.Errorf("当前 Agent 用途为 %s，不允许远程投稿", models.NormalizeAgentPurpose(sysConfig.AgentPurpose))
 			}
-			endpoint := strings.TrimSpace(sysConfig.PublishAgentEndpoint)
+			endpoint := models.NormalizeAgentEndpoint(sysConfig.PublishAgentEndpoint)
 			if endpoint == "" {
 				return fmt.Errorf("已选择远程投稿模式，但未配置远程 Agent 地址")
 			}
+			if endpoint != sysConfig.PublishAgentEndpoint {
+				db.Model(&sysConfig).Update("publish_agent_endpoint", endpoint)
+			}
+			token := strings.TrimSpace(sysConfig.PublishAgentToken)
+			if token == "" {
+				token = models.NewAgentToken()
+				db.Model(&sysConfig).Update("publish_agent_token", token)
+			}
 			timeout := time.Duration(sysConfig.PublishAgentTimeout) * time.Second
-			client := agent.NewClient(endpoint, sysConfig.PublishAgentToken, timeout)
+			client := agent.NewClient(endpoint, token, timeout)
 			result, err := client.PublishHistory(historyID, userID)
 			if err != nil {
 				return fmt.Errorf("远程 Agent 投稿失败: %w", err)

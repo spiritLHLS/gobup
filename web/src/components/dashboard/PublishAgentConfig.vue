@@ -55,26 +55,27 @@
       </div>
     </el-form-item>
 
-    <el-form-item label="Agent 地址">
+    <el-form-item label="当前 Agent 地址/IP">
       <div class="path-input-wrapper">
         <el-input
           v-model="config.publishAgentEndpoint"
-          placeholder="http://agent.example.com:12381 或 http://127.0.0.1:12381"
+          placeholder="192.0.2.10 或 agent.example.com，端口默认 12381"
           size="large"
         />
-        <span class="help-text">Agent 暴露 /agent/v1/health、/publish 和 /files/check</span>
+        <span class="help-text">可只填 IP/域名，保存后自动补全为 http://地址:12381</span>
       </div>
     </el-form-item>
 
-    <el-form-item label="Agent Token">
+    <el-form-item label="统一 Agent Token">
       <div class="path-input-wrapper">
         <el-input
           v-model="config.publishAgentToken"
           type="password"
           show-password
-          placeholder="用于保护 Agent 接口和安装命令"
+          placeholder="留空时后端自动生成"
           size="large"
         />
+        <span class="help-text">主控面板生成并复用同一个 token，各 Agent 安装命令默认使用它</span>
       </div>
     </el-form-item>
 
@@ -99,7 +100,7 @@
         <el-button plain :loading="checkingFiles" :icon="Search" @click="$emit('checkFiles')">
           检查录制文件
         </el-button>
-        <span class="help-text">保存配置后执行检测；文件检查会按文件检查模式选择本地或 Agent</span>
+        <span class="help-text">节点增删改、屏蔽和强制删除在左侧 Agent 管理中处理</span>
       </div>
     </el-form-item>
 
