@@ -51,6 +51,9 @@ build-backend-embed: build-frontend prepare-agent-assets
 	@echo "复制前端dist到routes目录..."
 	@mkdir -p server/internal/routes/dist
 	@cp -r web/dist/* server/internal/routes/dist/
+	@# Ensure at least one _-prefixed file exists for Go embed pattern dist/assets/_*
+	@mkdir -p server/internal/routes/dist/assets
+	@touch server/internal/routes/dist/assets/_embed_placeholder
 	@echo "构建后端（嵌入模式）..."
 	@mkdir -p bin
 	cd server && go build -tags embed -o ../bin/gobup-embed .
@@ -73,6 +76,9 @@ build-cross: build-frontend prepare-agent-assets
 	@echo "复制前端dist到routes目录..."
 	@mkdir -p server/internal/routes/dist
 	@cp -r web/dist/* server/internal/routes/dist/
+	@# Ensure at least one _-prefixed file exists for Go embed pattern dist/assets/_*
+	@mkdir -p server/internal/routes/dist/assets
+	@touch server/internal/routes/dist/assets/_embed_placeholder
 	@echo "构建跨平台二进制..."
 	@mkdir -p build
 	cd server && \

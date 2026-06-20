@@ -84,6 +84,9 @@ jobs:
       run: |
         mkdir -p server/internal/routes/dist
         cp -r web/dist/* server/internal/routes/dist/
+        # Ensure at least one _-prefixed file exists for Go embed pattern dist/assets/_*
+        mkdir -p server/internal/routes/dist/assets
+        touch server/internal/routes/dist/assets/_embed_placeholder
 
     - name: Build Go server binaries with embedded frontend
       working-directory: ./server

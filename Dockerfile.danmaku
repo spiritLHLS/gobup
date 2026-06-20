@@ -57,6 +57,8 @@ RUN mkdir -p ./server/assets/agent && cp ./scripts/install_agent.sh ./server/ass
 
 # Copy frontend dist to embed location
 COPY --from=frontend-builder /app/web/dist ./server/internal/routes/dist
+# Ensure at least one _-prefixed file exists for Go embed pattern dist/assets/_*
+RUN mkdir -p ./server/internal/routes/dist/assets && touch ./server/internal/routes/dist/assets/_embed_placeholder
 
 # Build backend with embed tag
 WORKDIR /app/server
