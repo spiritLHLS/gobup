@@ -184,6 +184,7 @@
 import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Connection, DocumentCopy, Refresh, Search } from '@element-plus/icons-vue'
+import { copyText } from '@/utils/clipboard'
 
 const props = defineProps({
   config: {
@@ -236,11 +237,10 @@ const formatBytes = (value) => {
 
 const copyInstallCommand = async () => {
   if (!props.installCommand?.command) return
-  try {
-    await navigator.clipboard.writeText(props.installCommand.command)
+  if (await copyText(props.installCommand.command)) {
     ElMessage.success('安装命令已复制')
-  } catch (error) {
-    ElMessage.error('复制失败，请手动选择命令')
+  } else {
+    ElMessage.error('当前浏览器禁止自动复制')
   }
 }
 </script>

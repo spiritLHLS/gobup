@@ -83,7 +83,12 @@ func GenerateWebQRCode() (*QRCodeResponse, error) {
 		SetHeader("Referer", "https://www.bilibili.com/").
 		Get(apiURL)
 	if err != nil {
+		logBiliRequestError("生成Web二维码", "GET", apiURL, err)
 		return nil, fmt.Errorf("请求二维码失败: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("生成Web二维码", "GET", apiURL, resp)
+		return nil, fmt.Errorf("请求二维码失败: HTTP %d", resp.GetStatusCode())
 	}
 
 	fmt.Printf("[WEB_QR_DEBUG] 已收到二维码响应，准备解析\n")
@@ -94,6 +99,7 @@ func GenerateWebQRCode() (*QRCodeResponse, error) {
 	}
 
 	if qrResp.Code != 0 {
+		logBiliAPIError("生成Web二维码", "GET", apiURL, qrResp.Code, qrResp.Message, resp)
 		return nil, fmt.Errorf("生成二维码失败: %s", qrResp.Message)
 	}
 
@@ -138,7 +144,12 @@ func GenerateTVQRCode() (*QRCodeResponse, error) {
 		}).
 		Post(apiURL)
 	if err != nil {
+		logBiliRequestError("生成TV二维码", "POST", apiURL, err)
 		return nil, fmt.Errorf("请求二维码失败: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("生成TV二维码", "POST", apiURL, resp)
+		return nil, fmt.Errorf("请求二维码失败: HTTP %d", resp.GetStatusCode())
 	}
 
 	fmt.Printf("[TV_QR_DEBUG] 已收到二维码响应，准备解析\n")
@@ -149,6 +160,7 @@ func GenerateTVQRCode() (*QRCodeResponse, error) {
 	}
 
 	if qrResp.Code != 0 {
+		logBiliAPIError("生成TV二维码", "POST", apiURL, qrResp.Code, qrResp.Message, resp)
 		return nil, fmt.Errorf("生成TV端二维码失败 code=%d msg=%s", qrResp.Code, qrResp.Message)
 	}
 
@@ -177,7 +189,12 @@ func PollWebQRCodeStatus(oauthKey string) (*QRCodePollResponse, error) {
 		Post(tokenurl)
 
 	if err != nil {
+		logBiliRequestError("轮询Web二维码", "POST", tokenurl, err)
 		return nil, fmt.Errorf("轮询状态失败: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("轮询Web二维码", "POST", tokenurl, resp)
+		return nil, fmt.Errorf("轮询状态失败: HTTP %d", resp.GetStatusCode())
 	}
 
 	fmt.Printf("[WEB_POLL_DEBUG] 已收到轮询响应，准备解析\n")
@@ -260,7 +277,12 @@ func PollTVQRCodeStatus(authCode string) (*QRCodePollResponse, error) {
 		}).
 		Post(apiURL)
 	if err != nil {
+		logBiliRequestError("轮询TV二维码", "POST", apiURL, err)
 		return nil, fmt.Errorf("轮询状态失败: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("轮询TV二维码", "POST", apiURL, resp)
+		return nil, fmt.Errorf("轮询状态失败: HTTP %d", resp.GetStatusCode())
 	}
 
 	fmt.Printf("[TV_POLL_DEBUG] 已收到轮询响应，准备解析\n")
@@ -315,7 +337,12 @@ func GetUserInfo(cookies string) (*UserInfoResponse, error) {
 		SetHeader("Cookie", cookies).
 		Get(apiURL)
 	if err != nil {
+		logBiliRequestError("获取用户信息", "GET", apiURL, err)
 		return nil, err
+	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("获取用户信息", "GET", apiURL, resp)
+		return nil, fmt.Errorf("获取用户信息失败: HTTP %d", resp.GetStatusCode())
 	}
 
 	fmt.Printf("[USER_INFO_DEBUG] 已收到用户信息响应，准备解析\n")
@@ -326,10 +353,12 @@ func GetUserInfo(cookies string) (*UserInfoResponse, error) {
 	}
 
 	if userInfo.Code == -101 {
+		logBiliAPIError("获取用户信息", "GET", apiURL, userInfo.Code, userInfo.Message, resp)
 		return nil, fmt.Errorf("cookie已失效")
 	}
 
 	if userInfo.Code != 0 {
+		logBiliAPIError("获取用户信息", "GET", apiURL, userInfo.Code, userInfo.Message, resp)
 		return nil, fmt.Errorf("获取用户信息失败: %s", userInfo.Message)
 	}
 
@@ -570,7 +599,12 @@ func RefreshToken(accessToken, refreshToken, cookies string) (*RefreshTokenRespo
 
 	resp, err := reqBuilder.Post(apiURL)
 	if err != nil {
+		logBiliRequestError("刷新Token", "POST", apiURL, err)
 		return nil, fmt.Errorf("刷新Token请求失败: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("刷新Token", "POST", apiURL, resp)
+		return nil, fmt.Errorf("刷新TokenHTTP错误: status=%d", resp.GetStatusCode())
 	}
 
 	fmt.Printf("[REFRESH_TOKEN_DEBUG] 已收到刷新响应，准备解析\n")
@@ -581,6 +615,7 @@ func RefreshToken(accessToken, refreshToken, cookies string) (*RefreshTokenRespo
 	}
 
 	if refreshResp.Code != 0 {
+		logBiliAPIError("刷新Token", "POST", apiURL, refreshResp.Code, refreshResp.Message, resp)
 		return nil, fmt.Errorf("刷新Token失败 code=%d msg=%s", refreshResp.Code, refreshResp.Message)
 	}
 

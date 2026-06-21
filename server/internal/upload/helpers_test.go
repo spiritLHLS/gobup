@@ -2,6 +2,7 @@ package upload
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,6 +112,7 @@ func TestClassifyUploadError(t *testing.T) {
 		{name: "bili frequency limit", err: errors.New("B站返回错误: code=-702, message=请求频率过高"), want: UploadErrorTypeRateLimit},
 		{name: "title too long", err: errors.New("稿件标题过长，最多不能超过80个字符"), want: UploadErrorTypePermanent},
 		{name: "duration too short", err: errors.New("该视频时长不足 1 秒"), want: UploadErrorTypePermanent},
+		{name: "duration less than one second", err: errors.New("视频时长不能小于1秒"), want: UploadErrorTypePermanent},
 		{name: "auth", err: errors.New("用户Cookie已失效"), want: UploadErrorTypeAuth},
 		{name: "file", err: errors.New("文件不存在: /rec/a.flv"), want: UploadErrorTypeFile},
 		{name: "danmaku factory", err: errors.New("DanmakuFactory 转换弹幕为ASS失败"), want: UploadErrorTypeTranscode},
@@ -150,6 +152,25 @@ func TestRetryPolicy(t *testing.T) {
 	}
 	if !shouldAutoStopErrorType(UploadErrorTypeUnknown, maxAutoPublishRetries) {
 		t.Fatal("unknown errors should stop at max retries")
+	}
+}
+
+func TestNormalizeBiliPublishTitleTruncates(t *testing.T) {
+	title := normalizeBiliPublishTitle("稿件标题", strings.Repeat("一", 81))
+	if got := len([]rune(title)); got != biliPublishTitleMaxRunes {
+		t.Fatalf("normalized title length=%d, want %d", got, biliPublishTitleMaxRunes)
+	}
+}
+
+func TestShouldSkipTooShortPublishPart(t *testing.T) {
+	start := time.Date(2026, 6, 21, 10, 0, 0, 0, time.UTC)
+	part := models.RecordHistoryPart{
+		StartTime: start,
+		EndTime:   start.Add(500 * time.Millisecond),
+	}
+	skip, reason := shouldSkipTooShortPublishPart(part)
+	if !skip || reason == "" {
+		t.Fatalf("shouldSkipTooShortPublishPart()=(%v,%q), want skip with reason", skip, reason)
 	}
 }
 

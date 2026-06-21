@@ -113,6 +113,11 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 			return nil
 		}
 	}
+	if skip, reason := shouldSkipTooShortPublishPart(burnedPart); skip {
+		log.Printf("[回补弹幕版] 跳过不可追加弹幕版: burned_part_id=%d, reason=%s", burnedPart.ID, reason)
+		markPublishPartSkipped(db, &burnedPart, reason)
+		return fmt.Errorf("弹幕版分P不可追加: %s", reason)
+	}
 
 	// 构建更新后的分P列表：以B站API返回的当前分P列表为基础，追加弹幕版
 	// 这样可以确保与B站实际状态严格一致，避免遗漏或重复
@@ -135,6 +140,7 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 				partTitle = s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
 			}
 		}
+		partTitle = normalizeBiliPartTitle(i+1, partTitle)
 		allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
 			Title:    partTitle,
 			Desc:     "",
@@ -154,6 +160,7 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 		"fileName":  burnedPart.FileName,
 	}
 	partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData) + "（弹幕版）"
+	partTitle = normalizeBiliPartTitle(len(allVideoParts)+1, partTitle)
 	allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
 		Title:    partTitle,
 		Desc:     "",
@@ -165,7 +172,7 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 		len(allVideoParts), len(archiveDetail.Videos))
 
 	// 使用原视频的信息进行编辑
-	title := archiveDetail.Archive.Title
+	title := normalizeBiliPublishTitle("稿件标题", archiveDetail.Archive.Title)
 	desc := archiveDetail.Archive.Desc
 	tags := strings.Join(archiveDetail.Archive.Tag, ",")
 	tid := archiveDetail.Archive.Tid

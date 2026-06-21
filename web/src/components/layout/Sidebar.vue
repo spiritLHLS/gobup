@@ -24,7 +24,17 @@
       >
         <el-menu-item index="/dashboard">
           <el-icon><Odometer /></el-icon>
-          <template #title>控制面板</template>
+          <template #title>系统概览</template>
+        </el-menu-item>
+
+        <el-menu-item index="/operations">
+          <el-icon><Operation /></el-icon>
+          <template #title>任务队列</template>
+        </el-menu-item>
+
+        <el-menu-item index="/settings">
+          <el-icon><Setting /></el-icon>
+          <template #title>系统设置</template>
         </el-menu-item>
         
         <el-menu-item index="/rooms">
@@ -65,7 +75,9 @@ import {
   DocumentCopy, 
   User, 
   Document,
-  Connection
+  Connection,
+  Operation,
+  Setting
 } from '@element-plus/icons-vue'
 
 defineProps({

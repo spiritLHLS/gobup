@@ -14,16 +14,17 @@
 import { ref } from 'vue'
 
 // 需要缓存的视图组件名称
-const cachedViews = ref(['Dashboard', 'Rooms', 'History'])
+const cachedViews = ref(['Dashboard', 'Operations', 'Settings', 'Rooms', 'History'])
 </script>
 
 <style scoped lang="scss">
 .app-main {
   width: 100%;
+  min-width: 0;
   min-height: calc(100vh - var(--navbar-height));
   padding: var(--spacing-lg);
   background-color: var(--bg-color-primary);
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 /* 页面切换动画 */

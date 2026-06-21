@@ -281,6 +281,8 @@ func GetAgentNodeInstallCommand(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "配置不存在"})
 		return
 	}
+	normalizeSystemConfig(&config)
+	db.Save(&config)
 	source := models.NormalizeAgentInstallerSource(c.DefaultQuery("source", config.AgentInstallerSource))
 	purpose := models.NormalizeAgentPurpose(c.DefaultQuery("purpose", node.Purpose))
 	install := buildAgentInstallCommand(c, &config, purpose, source)

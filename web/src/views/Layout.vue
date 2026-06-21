@@ -95,14 +95,17 @@ onBeforeUnmount(() => {
 
 .main-container {
   flex: 1;
+  width: calc(100% - var(--sidebar-width));
+  min-width: 0;
   display: flex;
   flex-direction: column;
   margin-left: var(--sidebar-width);
-  transition: margin-left var(--transition-normal);
+  transition: margin-left var(--transition-normal), width var(--transition-normal);
   min-height: 100vh;
   
   &.is-collapse {
     margin-left: var(--sidebar-width-collapsed);
+    width: calc(100% - var(--sidebar-width-collapsed));
   }
 }
 
@@ -130,6 +133,7 @@ onBeforeUnmount(() => {
 @media (max-width: 768px) {
   .main-container {
     margin-left: 0 !important;
+    width: 100% !important;
   }
 }
 </style>

@@ -17,6 +17,12 @@ func TestParseRetryAfterDelaySeconds(t *testing.T) {
 	}
 }
 
+func TestRateLimitRetryConfigStartsAtOneMinute(t *testing.T) {
+	if RateLimitRetryConfig.InitialDelay != time.Minute {
+		t.Fatalf("rate-limit initial delay = %s, want 1m", RateLimitRetryConfig.InitialDelay)
+	}
+}
+
 func TestParseRetryAfterDelayHTTPDate(t *testing.T) {
 	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
 	header := now.Add(45 * time.Second).Format(http.TimeFormat)

@@ -255,6 +255,7 @@ import {
 import { roomAPI, userAPI, configAPI } from '@/api'
 import RoomEditDialog from '@/components/rooms/RoomEditDialog.vue'
 import { useLineTest, formatLine } from '@/composables/useRooms'
+import { copyText } from '@/utils/clipboard'
 
 const privacyMode = inject('privacyMode', ref(false))
 
@@ -466,7 +467,7 @@ const handleEdit = (row) => {
 const handleCopyRoom = async (row) => {
   const config = JSON.stringify({ ...row, id: undefined, roomId: '' }, null, 2)
   try {
-    await navigator.clipboard.writeText(config)
+    await copyText(config)
     ElMessage.success('房间配置已复制到剪贴板')
   } catch {
     ElMessage.info('请手动复制：' + config.substring(0, 50) + '...')

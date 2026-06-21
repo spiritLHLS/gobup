@@ -3,10 +3,13 @@ package logging
 import (
 	"io"
 	"log"
+	"regexp"
 	"strings"
 
 	"github.com/gobup/server/internal/websocket"
 )
+
+var zeroFailureSummaryPattern = regexp.MustCompile(`失败\s*[=:：]\s*0(\D|$)`)
 
 // LogInterceptor 日志拦截器，将日志推送到WebSocket
 type LogInterceptor struct {
@@ -31,15 +34,7 @@ func (l *LogInterceptor) Write(p []byte) (n int, err error) {
 	message := string(p)
 	message = strings.TrimSuffix(message, "\n")
 
-	// 解析日志级别
-	level := "INFO"
-	if strings.Contains(message, "[ERROR]") || strings.Contains(message, "错误") || strings.Contains(message, "失败") {
-		level = "ERROR"
-	} else if strings.Contains(message, "[WARN]") || strings.Contains(message, "警告") {
-		level = "WARN"
-	} else if strings.Contains(message, "[DEBUG]") || strings.Contains(message, "调试") {
-		level = "DEBUG"
-	}
+	level := inferLogLevel(message)
 
 	// 广播到WebSocket
 	if l.hub != nil {
@@ -47,6 +42,26 @@ func (l *LogInterceptor) Write(p []byte) (n int, err error) {
 	}
 
 	return n, err
+}
+
+func inferLogLevel(message string) string {
+	normalized := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case strings.Contains(message, "[ERROR]") || strings.Contains(normalized, " error "):
+		return "ERROR"
+	case strings.Contains(message, "[WARN]") || strings.Contains(message, "警告") || strings.Contains(normalized, " warn "):
+		return "WARN"
+	case strings.Contains(message, "[DEBUG]") || strings.Contains(message, "调试") || strings.Contains(normalized, "[debug]"):
+		return "DEBUG"
+	}
+
+	withoutZeroSummaries := zeroFailureSummaryPattern.ReplaceAllString(message, "")
+	if strings.Contains(withoutZeroSummaries, "失败") ||
+		strings.Contains(withoutZeroSummaries, "错误") ||
+		strings.Contains(withoutZeroSummaries, "异常") {
+		return "ERROR"
+	}
+	return "INFO"
 }
 
 // SetupLogInterceptor 设置日志拦截器

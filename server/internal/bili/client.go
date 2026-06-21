@@ -209,7 +209,7 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 
 	// 对于转载类型，source会由调用方提供（已经处理过模板）
 
-	req := PublishVideoRequest{
+	publishReq := PublishVideoRequest{
 		Copyright:    copyright,
 		Cover:        cover,
 		Desc:         desc,
@@ -253,6 +253,8 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 
 	// 使用限流器和重试机制
 	limiter := GetAPILimiter()
+	apiURL := ""
+	var lastResp *req.Response
 	err = WithRetry(DefaultRetryConfig, func() error {
 		// 等待限流器允许
 		if err := limiter.WaitPublish(); err != nil {
@@ -260,17 +262,26 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 		}
 
 		// 构建URL，添加时间戳和csrf参数（参考biliupforjava）
-		apiURL := fmt.Sprintf("https://member.bilibili.com/x/vu/web/add/v3?t=%d&csrf=%s",
+		apiURL = fmt.Sprintf("https://member.bilibili.com/x/vu/web/add/v3?t=%d&csrf=%s",
 			time.Now().UnixMilli(), csrf)
 
-		_, err := c.ReqClient.R().
+		r, err := c.ReqClient.R().
 			SetHeader("Cookie", fullCookie).
 			SetHeader("Content-Type", "application/json").
 			SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame").
-			SetBodyJsonMarshal(req).
+			SetBodyJsonMarshal(publishReq).
 			SetSuccessResult(&resp).
 			Post(apiURL)
-		return err
+		lastResp = r
+		if err != nil {
+			logBiliRequestError("投稿", "POST", apiURL, err)
+			return err
+		}
+		if !r.IsSuccessState() {
+			logBiliHTTPError("投稿", "POST", apiURL, r)
+			return wrapRetryAfterError(fmt.Errorf("投稿HTTP错误: status=%d", r.GetStatusCode()), r.GetHeader("Retry-After"), time.Now())
+		}
+		return nil
 	})
 
 	if err != nil {
@@ -278,6 +289,7 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 	}
 
 	if resp.Code != 0 {
+		logBiliAPIError("投稿", "POST", apiURL, resp.Code, resp.Msg, lastResp)
 		// 检查是否是"稿件已成功投稿，请勿重新提交"的错误
 		// 这种情况说明投稿实际上已经成功了，需要从用户投稿列表中查找视频信息
 		if strings.Contains(resp.Msg, "稿件已成功投稿") || strings.Contains(resp.Msg, "请勿重新提交") {
@@ -348,15 +360,21 @@ func (c *BiliClient) GetSeasons() ([]Season, error) {
 		} `json:"data"`
 	}
 
-	_, err := c.ReqClient.R().
+	resp, err := c.ReqClient.R().
 		SetHeader("Referer", "https://member.bilibili.com/platform/home").
 		SetSuccessResult(&result).
 		Get(apiURL)
 	if err != nil {
+		logBiliRequestError("获取合集", "GET", apiURL, err)
 		return nil, err
+	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("获取合集", "GET", apiURL, resp)
+		return nil, fmt.Errorf("获取合集失败: HTTP %d", resp.GetStatusCode())
 	}
 
 	if result.Code != 0 {
+		logBiliAPIError("获取合集", "GET", apiURL, result.Code, result.Msg, resp)
 		return nil, fmt.Errorf("获取合集失败: %s", result.Msg)
 	}
 
@@ -402,6 +420,18 @@ func (c *BiliClient) CreateSeason(title, desc, cover string) (*Season, error) {
 	if existing, err := c.findSeasonByTitle(title); err == nil && existing != nil {
 		return existing, nil
 	}
+	if cover == "" {
+		coverData, coverErr := defaultSeasonCoverPNG()
+		if coverErr != nil {
+			return nil, fmt.Errorf("生成默认合集封面失败: %w", coverErr)
+		}
+		uploadedCover, uploadErr := c.UploadCover(coverData)
+		if uploadErr != nil {
+			return nil, fmt.Errorf("合集封面为空，默认封面上传失败: %w", uploadErr)
+		}
+		cover = uploadedCover
+		log.Printf("[合集] 未提供封面，已自动上传默认封面: %s", cover)
+	}
 
 	var result struct {
 		Code    int             `json:"code"`
@@ -418,27 +448,34 @@ func (c *BiliClient) CreateSeason(title, desc, cover string) (*Season, error) {
 	form.Set("season_price", "0")
 	form.Set("csrf", csrf)
 
-	_, err := c.ReqClient.R().
+	apiURL := "https://member.bilibili.com/x2/creative/web/season/add"
+	resp, err := c.ReqClient.R().
 		SetHeader("Origin", "https://member.bilibili.com").
 		SetHeader("Referer", "https://member.bilibili.com/platform/upload-manager/collection").
 		SetHeader("Content-Type", "application/x-www-form-urlencoded").
 		SetHeader("X-Requested-With", "XMLHttpRequest").
 		SetFormDataFromValues(form).
 		SetSuccessResult(&result).
-		Post("https://member.bilibili.com/x2/creative/web/season/add")
+		Post(apiURL)
 	if err != nil {
+		logBiliRequestError("创建合集", "POST", apiURL, err)
 		return nil, fmt.Errorf("创建合集请求失败: %w", err)
 	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("创建合集", "POST", apiURL, resp)
+		return nil, fmt.Errorf("创建合集HTTP错误: status=%d", resp.GetStatusCode())
+	}
 	if result.Code != 0 {
-		if existing, findErr := c.findSeasonByTitle(title); findErr == nil && existing != nil {
-			return existing, nil
-		}
 		msg := result.Msg
 		if msg == "" {
 			msg = result.AltMsg
 		}
 		if msg == "" {
 			msg = "请求错误"
+		}
+		logBiliAPIError("创建合集", "POST", apiURL, result.Code, msg, resp)
+		if existing, findErr := c.findSeasonByTitle(title); findErr == nil && existing != nil {
+			return existing, nil
 		}
 		if result.TraceID != "" {
 			return nil, fmt.Errorf("创建合集失败: code=%d, msg=%s, trace_id=%s", result.Code, msg, result.TraceID)
@@ -546,7 +583,7 @@ func (c *BiliClient) AddToSeason(sectionID int64, aid, cid int64, title string) 
 	apiURL := fmt.Sprintf("https://member.bilibili.com/x2/creative/web/season/section/episodes/add?t=%d&csrf=%s",
 		time.Now().UnixMilli(), csrf)
 
-	_, err := c.ReqClient.R().
+	resp, err := c.ReqClient.R().
 		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame?page_from=creative_home_top_upload").
 		SetHeader("Content-Type", "application/json").
 		SetBodyJsonMarshal(requestBody).
@@ -554,10 +591,16 @@ func (c *BiliClient) AddToSeason(sectionID int64, aid, cid int64, title string) 
 		Post(apiURL)
 
 	if err != nil {
+		logBiliRequestError("加入合集", "POST", apiURL, err)
 		return fmt.Errorf("加入合集失败: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("加入合集", "POST", apiURL, resp)
+		return fmt.Errorf("加入合集失败: HTTP %d", resp.GetStatusCode())
 	}
 
 	if result.Code != 0 {
+		logBiliAPIError("加入合集", "POST", apiURL, result.Code, result.Msg, resp)
 		return fmt.Errorf("加入合集失败: %s", result.Msg)
 	}
 
@@ -597,7 +640,7 @@ func (c *BiliClient) UploadCover(imageData []byte) (string, error) {
 	base64Data := base64.StdEncoding.EncodeToString(imageData)
 	dataURI := fmt.Sprintf("data:%s;base64,%s", imageType, base64Data)
 
-	_, err := c.ReqClient.R().
+	resp, err := c.ReqClient.R().
 		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame").
 		SetHeader("Content-Type", "application/x-www-form-urlencoded").
 		SetFormData(map[string]string{
@@ -606,10 +649,16 @@ func (c *BiliClient) UploadCover(imageData []byte) (string, error) {
 		SetSuccessResult(&result).
 		Post(apiURL)
 	if err != nil {
+		logBiliRequestError("上传封面", "POST", apiURL, err)
 		return "", fmt.Errorf("请求错误: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("上传封面", "POST", apiURL, resp)
+		return "", fmt.Errorf("上传封面失败: HTTP %d", resp.GetStatusCode())
 	}
 
 	if result.Code != 0 {
+		logBiliAPIError("上传封面", "POST", apiURL, result.Code, result.Msg, resp)
 		return "", fmt.Errorf("%s", result.Msg)
 	}
 
@@ -629,17 +678,24 @@ func (c *BiliClient) GetCSRF() string {
 
 // GetBuvId 获取buvid3和buvid4
 func (c *BiliClient) GetBuvId() (*BuvIdResponse, error) {
-	var resp BuvIdResponse
-	_, err := c.ReqClient.R().
-		SetSuccessResult(&resp).
-		Get("https://api.bilibili.com/x/frontend/finger/spi")
+	var result BuvIdResponse
+	apiURL := "https://api.bilibili.com/x/frontend/finger/spi"
+	resp, err := c.ReqClient.R().
+		SetSuccessResult(&result).
+		Get(apiURL)
 	if err != nil {
+		logBiliRequestError("获取buvid", "GET", apiURL, err)
 		return nil, fmt.Errorf("获取buvid失败: %w", err)
 	}
-	if resp.Code != 0 {
-		return nil, fmt.Errorf("获取buvid失败: %s", resp.Msg)
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("获取buvid", "GET", apiURL, resp)
+		return nil, fmt.Errorf("获取buvid失败: HTTP %d", resp.GetStatusCode())
 	}
-	return &resp, nil
+	if result.Code != 0 {
+		logBiliAPIError("获取buvid", "GET", apiURL, result.Code, result.Msg, resp)
+		return nil, fmt.Errorf("获取buvid失败: %s", result.Msg)
+	}
+	return &result, nil
 }
 
 // SendDynamic 发送动态
@@ -669,10 +725,16 @@ func (c *BiliClient) SendDynamic(content string) error {
 		Post(apiURL)
 
 	if err != nil {
+		logBiliRequestError("发送动态", "POST", apiURL, err)
 		return err
 	}
 
 	if !resp.IsSuccessState() || result.Code != 0 {
+		if !resp.IsSuccessState() {
+			logBiliHTTPError("发送动态", "POST", apiURL, resp)
+		} else {
+			logBiliAPIError("发送动态", "POST", apiURL, result.Code, result.Msg, resp)
+		}
 		return fmt.Errorf("发送动态失败: code=%d, msg=%s", result.Code, result.Msg)
 	}
 

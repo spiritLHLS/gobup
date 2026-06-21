@@ -195,13 +195,13 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 	var partsErr error
 	if room.EnableDanmakuBurn {
 		partsErr = db.Where(
-			"history_id = ? AND upload = ? AND (is_temp_file = ? OR temp_file_type = ? OR temp_file_type = ?)",
-			historyID, true, false, "danmaku_burn", "split",
+			"history_id = ? AND upload = ? AND upload_cancelled = ? AND (is_temp_file = ? OR temp_file_type = ? OR temp_file_type = ?)",
+			historyID, true, false, false, "danmaku_burn", "split",
 		).Order("start_time ASC").Find(&parts).Error
 	} else {
 		partsErr = db.Where(
-			"history_id = ? AND upload = ? AND (is_temp_file = ? OR temp_file_type = ?)",
-			historyID, true, false, "split",
+			"history_id = ? AND upload = ? AND upload_cancelled = ? AND (is_temp_file = ? OR temp_file_type = ?)",
+			historyID, true, false, false, "split",
 		).Order("start_time ASC").Find(&parts).Error
 	}
 	if partsErr != nil {
@@ -236,6 +236,7 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 
 	// 使用模板服务渲染
 	title := s.templateSvc.RenderTitle(room.TitleTemplate, templateData)
+	title = normalizeBiliPublishTitle("稿件标题", title)
 	desc := s.templateSvc.RenderDescription(room.DescTemplate, templateData)
 	dynamic := s.templateSvc.RenderDynamic(room.DynamicTemplate, templateData) // 动态模板
 	tags := s.templateSvc.BuildTags(room.Tags, templateData)
@@ -373,10 +374,16 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 	// 构建分P信息（parts已按start_time ASC排序，循环按时间顺序处理）
 	var videoParts []bili.PublishVideoPartRequest
 	log.Printf("开始构建%d个分P的投稿信息（按录制时间顺序）", len(parts))
-	for i, part := range parts {
+	for _, part := range parts {
+		if skip, reason := shouldSkipTooShortPublishPart(part); skip {
+			log.Printf("[投稿] 跳过不可投稿分P: history_id=%d, part_id=%d, reason=%s", history.ID, part.ID, reason)
+			markPublishPartSkipped(db, &part, reason)
+			continue
+		}
+		partIndex := len(videoParts) + 1
 		// 为分P标题模板构建数据，包含所有可用变量
 		partTemplateData := map[string]interface{}{
-			"index":     i + 1,
+			"index":     partIndex,
 			"startTime": part.StartTime,
 			"areaName":  part.AreaName,
 			"uname":     history.Uname,  // 主播名
@@ -391,22 +398,13 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 		if part.IsTempFile && part.TempFileType == "danmaku_burn" {
 			partTitle = partTitle + "（弹幕版）"
 		}
+		partTitle = normalizeBiliPartTitle(partIndex, partTitle)
 
 		// 获取文件名：优先使用数据库中的 FileName（从上传响应获取），如果为空则从 FilePath 提取
-		filename := part.FileName
-		if filename == "" {
-			// 兼容旧数据：从文件路径提取文件名（不含扩展名）
-			baseName := filepath.Base(part.FilePath)
-			if ext := filepath.Ext(baseName); ext != "" {
-				filename = baseName[:len(baseName)-len(ext)]
-			} else {
-				filename = baseName
-			}
-			log.Printf("警告: 分P[%d]的FileName为空，从FilePath提取: %s", i, filename)
-		}
+		filename := publishPartFilename(part, partIndex)
 
 		// 调试日志：检查关键参数
-		log.Printf("构建分P[%d]: filename=%s, cid=%d", i, filename, part.CID)
+		log.Printf("构建分P[%d]: filename=%s, cid=%d", partIndex, filename, part.CID)
 
 		// 检查CID是否为0（参考biliupforjava实现）
 		// 原来CID=0时会在当前goroutine中同步执行完整上传流程（可能耗时数小时），
@@ -417,7 +415,7 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 		if part.CID > 0 {
 			cid = int64(part.CID)
 		} else {
-			log.Printf("检测到分P[%d]的CID为0（数据异常），重置上传状态等待自动重传: part_id=%d, file=%s", i, part.ID, part.FilePath)
+			log.Printf("检测到分P[%d]的CID为0（数据异常），重置上传状态等待自动重传: part_id=%d, file=%s", partIndex, part.ID, part.FilePath)
 
 			// 重置上传状态，让自动上传调度器在下次轮询时重新上传
 			db.Model(&part).Updates(map[string]interface{}{
@@ -429,7 +427,7 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 				"upload_error_msg":   "CID为0，数据异常，已重置等待自动重传",
 				"upload_error_type":  UploadErrorTypeFile,
 			})
-			return fmt.Errorf("分P[%d](part_id=%d)的CID为0，已重置上传状态，自动上传调度器将在10分钟内重传，请稍后重试投稿", i, part.ID)
+			return fmt.Errorf("分P[%d](part_id=%d)的CID为0，已重置上传状态，自动上传调度器将在10分钟内重传，请稍后重试投稿", partIndex, part.ID)
 		}
 
 		videoParts = append(videoParts, bili.PublishVideoPartRequest{
@@ -438,6 +436,9 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 			Filename: filename,
 			Cid:      cid,
 		})
+	}
+	if len(videoParts) == 0 {
+		return fmt.Errorf("没有可投稿的有效分P，已过滤时长不足或无效的分P")
 	}
 
 	// 打印最终的分P列表，确认顺序正确
@@ -546,7 +547,7 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 	if room.SeasonID > 0 && len(videoParts) > 0 {
 		// 使用第一个分P的CID
 		cid := videoParts[0].Cid
-		if err := client.AddToSeason(room.SeasonID, avID, cid, title); err != nil {
+		if err := client.AddToSeason(room.SeasonID, avID, cid, normalizeBiliPublishTitle("合集视频标题", title)); err != nil {
 			log.Printf("加入合集失败: %v", err)
 		} else {
 			log.Printf("加入合集成功: SeasonID=%d, AID=%d", room.SeasonID, avID)
@@ -718,8 +719,8 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 	var existingParts []models.RecordHistoryPart
 	normalizedExistingTitle := normalizePublishTitle(existingHistory.Title)
 	existingPartsQuery := db.Joins("JOIN record_histories ON record_history_parts.history_id = record_histories.id").
-		Where("record_histories.room_id = ? AND record_histories.publish = ? AND record_history_parts.upload = ? AND (record_history_parts.is_temp_file = ? OR record_history_parts.temp_file_type = ?)",
-			existingHistory.RoomID, true, true, false, "split")
+		Where("record_histories.room_id = ? AND record_histories.publish = ? AND record_history_parts.upload = ? AND record_history_parts.upload_cancelled = ? AND (record_history_parts.is_temp_file = ? OR record_history_parts.temp_file_type = ?)",
+			existingHistory.RoomID, true, true, false, false, "split")
 	if normalizedExistingTitle != "" && existingHistory.SessionID != "" {
 		existingPartsQuery = existingPartsQuery.Where(
 			"(record_histories.session_id = ? OR record_histories.title = ?)",
@@ -740,8 +741,8 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 	// file_delete 不过滤：本地文件删除后CID/FileName仍有效，投稿时使用DB中保存的服务端文件名
 	var newParts []models.RecordHistoryPart
 	if err := db.Where(
-		"history_id = ? AND upload = ? AND (is_temp_file = ? OR temp_file_type = ?)",
-		newHistoryID, true, false, "split").
+		"history_id = ? AND upload = ? AND upload_cancelled = ? AND (is_temp_file = ? OR temp_file_type = ?)",
+		newHistoryID, true, false, false, "split").
 		Order("start_time ASC").
 		Find(&newParts).Error; err != nil {
 		return fmt.Errorf("查询新分P失败: %w", err)
@@ -803,6 +804,9 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 
 	// 1. 添加已存在的分P
 	for i, part := range existingParts {
+		if part.CID <= 0 {
+			return fmt.Errorf("已存在分PCID无效，无法安全编辑原稿: part_id=%d", part.ID)
+		}
 		partTemplateData := map[string]interface{}{
 			"index":     i + 1,
 			"startTime": part.StartTime,
@@ -815,20 +819,30 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 			"seq":       titleSequence,
 		}
 		partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
+		partTitle = normalizeBiliPartTitle(i+1, partTitle)
 
 		allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
 			Title:    partTitle,
 			Desc:     "",
-			Filename: part.FileName,
+			Filename: publishPartFilename(part, i+1),
 			Cid:      int64(part.CID),
 		})
 	}
 
 	// 2. 添加新分P
-	startIndex := len(existingParts)
-	for i, part := range newParts {
+	addedNewParts := 0
+	for _, part := range newParts {
+		if skip, reason := shouldSkipTooShortPublishPart(part); skip {
+			log.Printf("[追加分P] 跳过不可追加分P: new_history=%d, part_id=%d, reason=%s", newHistoryID, part.ID, reason)
+			markPublishPartSkipped(db, &part, reason)
+			continue
+		}
+		if part.CID <= 0 {
+			return fmt.Errorf("新增分PCID无效，无法追加: part_id=%d", part.ID)
+		}
+		partIndex := len(allVideoParts) + 1
 		partTemplateData := map[string]interface{}{
-			"index":     startIndex + i + 1,
+			"index":     partIndex,
 			"startTime": part.StartTime,
 			"areaName":  part.AreaName,
 			"uname":     newHistory.Uname,
@@ -839,19 +853,24 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 			"seq":       titleSequence,
 		}
 		partTitle := s.templateSvc.RenderPartTitle(room.PartTitleTemplate, partTemplateData)
+		partTitle = normalizeBiliPartTitle(partIndex, partTitle)
 
 		allVideoParts = append(allVideoParts, bili.PublishVideoPartRequest{
 			Title:    partTitle,
 			Desc:     "",
-			Filename: part.FileName,
+			Filename: publishPartFilename(part, partIndex),
 			Cid:      int64(part.CID),
 		})
+		addedNewParts++
+	}
+	if addedNewParts == 0 {
+		return fmt.Errorf("没有可追加的有效分P，已过滤时长不足或无效的分P")
 	}
 
 	log.Printf("[追加分P] 合并后总分P数: %d", len(allVideoParts))
 
 	// 使用原视频的信息进行编辑
-	title := archiveDetail.Archive.Title
+	title := normalizeBiliPublishTitle("稿件标题", archiveDetail.Archive.Title)
 	desc := archiveDetail.Archive.Desc
 	tags := strings.Join(archiveDetail.Archive.Tag, ",")
 	tid := archiveDetail.Archive.Tid

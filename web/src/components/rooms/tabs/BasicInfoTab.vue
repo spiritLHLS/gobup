@@ -283,7 +283,7 @@
           <el-input v-model="seasonForm.desc" type="textarea" :rows="3" maxlength="200" show-word-limit />
         </el-form-item>
         <el-form-item label="封面地址">
-          <el-input v-model="seasonForm.cover" placeholder="可选，建议使用已上传的封面 URL" />
+          <el-input v-model="seasonForm.cover" placeholder="可选，不填时自动上传默认封面" />
         </el-form-item>
       </el-form>
       <template #footer>

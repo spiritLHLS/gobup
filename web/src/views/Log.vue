@@ -77,6 +77,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Document, DocumentCopy, Refresh, Search } from '@element-plus/icons-vue'
 import api from '@/api'
+import { copyText } from '@/utils/clipboard'
 
 const logs = ref([])
 const searchKeyword = ref('')
@@ -147,11 +148,10 @@ const copyDisplayedLogs = async () => {
     .map(log => `${log.timestamp || ''} ${log.level || ''} ${log.message || ''}`.trim())
     .join('\n')
   if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyText(text)) {
     ElMessage.success(`已复制 ${filteredLogs.value.length} 行日志`)
-  } catch (error) {
-    ElMessage.error('复制失败，请手动选择日志')
+  } else {
+    ElMessage.error('当前浏览器禁止自动复制')
   }
 }
 

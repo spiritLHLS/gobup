@@ -105,14 +105,20 @@ func (u *AppUploader) preUpload(filename string, filesize int64) (*PreUploadResp
 	apiURL := "https://member.bilibili.com/preupload?" + buildQueryString(params)
 
 	var preResp PreUploadResp
-	_, err := u.client.ReqClient.R().
+	resp, err := u.client.ReqClient.R().
 		SetSuccessResult(&preResp).
 		Get(apiURL)
 	if err != nil {
+		logBiliRequestError("APP预上传", "GET", apiURL, err)
 		return nil, err
+	}
+	if !resp.IsSuccessState() {
+		logBiliHTTPError("APP预上传", "GET", apiURL, resp)
+		return nil, fmt.Errorf("APP预上传HTTP错误: status=%d", resp.GetStatusCode())
 	}
 
 	if preResp.OK != 1 {
+		logBiliAPIError("APP预上传", "GET", apiURL, preResp.OK, "OK不是1", resp)
 		return nil, fmt.Errorf("APP预上传失败")
 	}
 
@@ -135,10 +141,12 @@ func (u *AppUploader) uploadChunk(endpoint string, chunk []byte, chunkIndex, tot
 		SetBody(rateLimitedReader).
 		Post(uploadURL)
 	if err != nil {
+		logBiliRequestError("APP上传分片", "POST", uploadURL, err)
 		return err
 	}
 
 	if !resp.IsSuccessState() {
+		logBiliHTTPError("APP上传分片", "POST", uploadURL, resp)
 		return fmt.Errorf("APP上传分片失败: %s", resp.String())
 	}
 
@@ -161,14 +169,17 @@ func (u *AppUploader) completeUpload(endpoint string, chunks int, filesize int64
 		SetSuccessResult(&result).
 		Post(uploadURL)
 	if err != nil {
+		logBiliRequestError("APP完成上传", "POST", uploadURL, err)
 		return err
 	}
 
 	if !resp.IsSuccessState() {
+		logBiliHTTPError("APP完成上传", "POST", uploadURL, resp)
 		return fmt.Errorf("APP完成上传失败: %s", resp.String())
 	}
 
 	if ok, exists := result["OK"].(float64); !exists || ok != 1 {
+		logBiliAPIError("APP完成上传", "POST", uploadURL, 0, "OK不是1", resp)
 		return fmt.Errorf("APP上传未成功")
 	}
 

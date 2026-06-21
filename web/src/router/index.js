@@ -18,7 +18,19 @@ const routes = [
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/Dashboard.vue'),
-        meta: { title: '控制面板', requiresAuth: true }
+        meta: { title: '系统概览', requiresAuth: true }
+      },
+      {
+        path: 'operations',
+        name: 'Operations',
+        component: () => import('@/views/Operations.vue'),
+        meta: { title: '任务队列', requiresAuth: true }
+      },
+      {
+        path: 'settings',
+        name: 'Settings',
+        component: () => import('@/views/Settings.vue'),
+        meta: { title: '系统设置', requiresAuth: true }
       },
       {
         path: 'rooms',

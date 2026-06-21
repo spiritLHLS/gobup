@@ -73,6 +73,7 @@ type VideoInfoResponse struct {
 // GetVideoInfo 获取视频信息
 func (c *BiliClient) GetVideoInfo(bvid string) (*VideoInfo, error) {
 	var resp VideoInfoResponse
+	apiURL := "https://api.bilibili.com/x/web-interface/view"
 
 	// 构建请求，带上Cookie获取更准确的状态信息
 	req := c.ReqClient.R().
@@ -96,17 +97,20 @@ func (c *BiliClient) GetVideoInfo(bvid string) (*VideoInfo, error) {
 		}
 	}
 
-	r, err := req.Get("https://api.bilibili.com/x/web-interface/view")
+	r, err := req.Get(apiURL)
 
 	if err != nil {
+		logBiliRequestError("获取视频信息", "GET", apiURL, err)
 		return nil, fmt.Errorf("获取视频信息失败: %w", err)
 	}
 
 	if !r.IsSuccessState() {
+		logBiliHTTPError("获取视频信息", "GET", apiURL, r)
 		return nil, fmt.Errorf("获取视频信息失败: HTTP %d", r.StatusCode)
 	}
 
 	if resp.Code != 0 {
+		logBiliAPIError("获取视频信息", "GET", apiURL, resp.Code, resp.Message, r)
 		return nil, fmt.Errorf("获取视频信息失败: %s (code=%d)", resp.Message, resp.Code)
 	}
 
@@ -116,6 +120,7 @@ func (c *BiliClient) GetVideoInfo(bvid string) (*VideoInfo, error) {
 // GetVideoInfoByAid 通过aid获取视频信息
 func (c *BiliClient) GetVideoInfoByAid(aid int64) (*VideoInfo, error) {
 	var resp VideoInfoResponse
+	apiURL := "https://api.bilibili.com/x/web-interface/view"
 
 	// 构建请求，带上Cookie获取更准确的状态信息
 	req := c.ReqClient.R().
@@ -139,17 +144,20 @@ func (c *BiliClient) GetVideoInfoByAid(aid int64) (*VideoInfo, error) {
 		}
 	}
 
-	r, err := req.Get("https://api.bilibili.com/x/web-interface/view")
+	r, err := req.Get(apiURL)
 
 	if err != nil {
+		logBiliRequestError("获取视频信息", "GET", apiURL, err)
 		return nil, fmt.Errorf("获取视频信息失败: %w", err)
 	}
 
 	if !r.IsSuccessState() {
+		logBiliHTTPError("获取视频信息", "GET", apiURL, r)
 		return nil, fmt.Errorf("获取视频信息失败: HTTP %d", r.StatusCode)
 	}
 
 	if resp.Code != 0 {
+		logBiliAPIError("获取视频信息", "GET", apiURL, resp.Code, resp.Message, r)
 		return nil, fmt.Errorf("获取视频信息失败: %s (code=%d)", resp.Message, resp.Code)
 	}
 
@@ -194,23 +202,27 @@ type VideoArchiveDetailResponse struct {
 // GetArchiveDetailByAid 获取视频稿件详细信息（包含desc, tag, copyright, source等）
 func (c *BiliClient) GetArchiveDetailByAid(aid int64) (*VideoArchiveDetail, error) {
 	var resp VideoArchiveDetailResponse
+	apiURL := "https://member.bilibili.com/x/vupre/web/archive/view"
 	r, err := c.ReqClient.R().
 		SetQueryParams(map[string]string{
 			"aid":        fmt.Sprintf("%d", aid),
 			"topic_grey": "1",
 		}).
 		SetSuccessResult(&resp).
-		Get("https://member.bilibili.com/x/vupre/web/archive/view")
+		Get(apiURL)
 
 	if err != nil {
+		logBiliRequestError("获取稿件详细信息", "GET", apiURL, err)
 		return nil, fmt.Errorf("获取稿件详细信息失败: %w", err)
 	}
 
 	if !r.IsSuccessState() {
+		logBiliHTTPError("获取稿件详细信息", "GET", apiURL, r)
 		return nil, fmt.Errorf("获取稿件详细信息失败: HTTP %d", r.StatusCode)
 	}
 
 	if resp.Code != 0 {
+		logBiliAPIError("获取稿件详细信息", "GET", apiURL, resp.Code, resp.Message, r)
 		return nil, fmt.Errorf("获取稿件详细信息失败: %s (code=%d)", resp.Message, resp.Code)
 	}
 
@@ -245,23 +257,27 @@ type VideoPartInfoResponse struct {
 // GetVideoPartInfo 获取视频分P详细信息（需要登录）
 func (c *BiliClient) GetVideoPartInfo(bvid string) (*VideoPartInfo, error) {
 	var resp VideoPartInfoResponse
+	apiURL := "https://member.bilibili.com/x/vupre/web/archive/view"
 	r, err := c.ReqClient.R().
 		SetQueryParams(map[string]string{
 			"bvid":       bvid,
 			"topic_grey": "1",
 		}).
 		SetSuccessResult(&resp).
-		Get("https://member.bilibili.com/x/vupre/web/archive/view")
+		Get(apiURL)
 
 	if err != nil {
+		logBiliRequestError("获取分P信息", "GET", apiURL, err)
 		return nil, fmt.Errorf("获取分P信息失败: %w", err)
 	}
 
 	if !r.IsSuccessState() {
+		logBiliHTTPError("获取分P信息", "GET", apiURL, r)
 		return nil, fmt.Errorf("获取分P信息失败: HTTP %d", r.StatusCode)
 	}
 
 	if resp.Code != 0 {
+		logBiliAPIError("获取分P信息", "GET", apiURL, resp.Code, resp.Message, r)
 		return nil, fmt.Errorf("获取分P信息失败: %s (code=%d)", resp.Message, resp.Code)
 	}
 
@@ -323,14 +339,17 @@ func (c *BiliClient) EditVideo(aid int64, title, desc, tags string, tid, copyrig
 		Post(apiURL)
 
 	if err != nil {
+		logBiliRequestError("编辑视频", "POST", apiURL, err)
 		return fmt.Errorf("编辑视频失败: %w", err)
 	}
 
 	if !r.IsSuccessState() {
+		logBiliHTTPError("编辑视频", "POST", apiURL, r)
 		return fmt.Errorf("编辑视频失败: HTTP %d", r.StatusCode)
 	}
 
 	if resp.Code != 0 {
+		logBiliAPIError("编辑视频", "POST", apiURL, resp.Code, resp.Message, r)
 		return fmt.Errorf("编辑视频失败: %s (code=%d)", resp.Message, resp.Code)
 	}
 
@@ -354,6 +373,7 @@ func (c *BiliClient) UpdateVideoVisibility(aid int64, isOnlySelf bool) error {
 		Message string `json:"message"`
 	}
 
+	apiURL := "https://member.bilibili.com/x/vu/web/edit/visibility"
 	r, err := c.ReqClient.R().
 		SetHeader("Content-Type", "application/x-www-form-urlencoded").
 		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame").
@@ -363,17 +383,20 @@ func (c *BiliClient) UpdateVideoVisibility(aid int64, isOnlySelf bool) error {
 			"csrf":         csrf,
 		}).
 		SetSuccessResult(&resp).
-		Post("https://member.bilibili.com/x/vu/web/edit/visibility")
+		Post(apiURL)
 
 	if err != nil {
+		logBiliRequestError("更新可见性", "POST", apiURL, err)
 		return fmt.Errorf("更新可见性失败: %w", err)
 	}
 
 	if !r.IsSuccessState() {
+		logBiliHTTPError("更新可见性", "POST", apiURL, r)
 		return fmt.Errorf("更新可见性失败: HTTP %d", r.StatusCode)
 	}
 
 	if resp.Code != 0 {
+		logBiliAPIError("更新可见性", "POST", apiURL, resp.Code, resp.Message, r)
 		return fmt.Errorf("更新可见性失败: %s (code=%d)", resp.Message, resp.Code)
 	}
 
@@ -422,19 +445,22 @@ type UAPIArchiveListResponse struct {
 // GetUserArchiveList 获取用户投稿列表（使用UAPI接口）
 func (c *BiliClient) GetUserArchiveList(mid int64, pn, ps int) ([]UserArchive, error) {
 	var resp UAPIArchiveListResponse
+	apiURL := "https://uapis.cn/api/v1/social/bilibili/archives"
 
 	r, err := c.ReqClient.R().
 		SetQueryParams(map[string]string{
 			"mid": fmt.Sprintf("%d", mid),
 		}).
 		SetSuccessResult(&resp).
-		Get("https://uapis.cn/api/v1/social/bilibili/archives")
+		Get(apiURL)
 
 	if err != nil {
+		logBiliRequestError("获取用户投稿列表", "GET", apiURL, err)
 		return nil, fmt.Errorf("获取用户投稿列表失败: %w", err)
 	}
 
 	if !r.IsSuccessState() {
+		logBiliHTTPError("获取用户投稿列表", "GET", apiURL, r)
 		return nil, fmt.Errorf("获取用户投稿列表失败: HTTP %d", r.StatusCode)
 	}
 
@@ -470,6 +496,7 @@ func (c *BiliClient) GetBvidByAid(mid int64, aid int64) (string, error) {
 // 用于在投稿后验证视频是否真的提交成功
 func (c *BiliClient) CheckVideoExistsInArchive(mid int64, aid int64, bvid string) (bool, error) {
 	var resp UAPIArchiveListResponse
+	apiURL := "https://uapis.cn/api/v1/social/bilibili/archives"
 
 	// 使用新的UAPI接口获取用户投稿列表
 	r, err := c.ReqClient.R().
@@ -477,13 +504,15 @@ func (c *BiliClient) CheckVideoExistsInArchive(mid int64, aid int64, bvid string
 			"mid": fmt.Sprintf("%d", mid),
 		}).
 		SetSuccessResult(&resp).
-		Get("https://uapis.cn/api/v1/social/bilibili/archives")
+		Get(apiURL)
 
 	if err != nil {
+		logBiliRequestError("获取用户投稿列表", "GET", apiURL, err)
 		return false, fmt.Errorf("获取用户投稿列表失败: %w", err)
 	}
 
 	if !r.IsSuccessState() {
+		logBiliHTTPError("获取用户投稿列表", "GET", apiURL, r)
 		return false, fmt.Errorf("获取用户投稿列表失败: HTTP %d", r.StatusCode)
 	}
 
@@ -500,6 +529,7 @@ func (c *BiliClient) CheckVideoExistsInArchive(mid int64, aid int64, bvid string
 // GetBuvid 获取buvid
 func GetBuvid() (*BuvIdResponse, error) {
 	var resp BuvIdResponse
+	apiURL := "https://api.bilibili.com/x/frontend/finger/spi"
 
 	// 创建新的req客户端
 	client := req.C().
@@ -508,17 +538,20 @@ func GetBuvid() (*BuvIdResponse, error) {
 
 	r, err := client.R().
 		SetSuccessResult(&resp).
-		Get("https://api.bilibili.com/x/frontend/finger/spi")
+		Get(apiURL)
 
 	if err != nil {
+		logBiliRequestError("获取buvid", "GET", apiURL, err)
 		return nil, err
 	}
 
 	if !r.IsSuccessState() {
+		logBiliHTTPError("获取buvid", "GET", apiURL, r)
 		return nil, fmt.Errorf("获取buvid失败: HTTP %d", r.StatusCode)
 	}
 
 	if resp.Code != 0 {
+		logBiliAPIError("获取buvid", "GET", apiURL, resp.Code, resp.Msg, r)
 		return nil, fmt.Errorf("获取buvid失败: code=%d", resp.Code)
 	}
 

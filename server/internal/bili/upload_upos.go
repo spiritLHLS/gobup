@@ -203,6 +203,7 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 			Get(apiURL)
 
 		if err != nil {
+			logBiliRequestError("UPOS预上传", "GET", apiURL, err)
 			log.Printf("[UPOS] 预上传请求失败: err=%v", err)
 			return err
 		}
@@ -210,7 +211,7 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 		if !resp.IsSuccessState() {
 			body := resp.String()
 			statusCode := resp.GetStatusCode()
-			log.Printf("[UPOS] 预上传HTTP错误: status=%d, body=%s", statusCode, body)
+			logBiliHTTPError("UPOS预上传", "GET", apiURL, resp)
 
 			// 检测是否为B站限流错误
 			if statusCode == 429 || statusCode == 406 || contains(body, "601") || contains(body, "上传视频过快") {
@@ -226,7 +227,7 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 
 	// 如果检测到限流，使用限流专用重试配置再试一次
 	if err != nil && isRateLimited {
-		log.Printf("[UPOS] 使用限流重试配置重新尝试，首次等待15秒...")
+		log.Printf("[UPOS] 使用限流重试配置重新尝试，首次等待1分钟...")
 		err = WithRetry(RateLimitRetryConfig, func() error {
 			if err := limiter.WaitPreUpload(); err != nil {
 				return err
@@ -238,12 +239,13 @@ func (u *UposUploader) preUpload(filename string, filesize int64) (*PreUploadRes
 				Get(apiURL)
 
 			if err != nil {
+				logBiliRequestError("UPOS预上传限流重试", "GET", apiURL, err)
 				return err
 			}
 
 			if !resp.IsSuccessState() {
 				statusCode := resp.GetStatusCode()
-				log.Printf("[UPOS] 预上传仍然被限流: status=%d", statusCode)
+				logBiliHTTPError("UPOS预上传限流重试", "GET", apiURL, resp)
 				return wrapRetryAfterError(fmt.Errorf("HTTP错误: status=%d", statusCode), resp.GetHeader("Retry-After"), time.Now())
 			}
 
@@ -300,13 +302,14 @@ func (u *UposUploader) lineUpload(pre *PreUploadResp) (*LineUploadResp, error) {
 			SetSuccessResult(&lineResp).
 			Post(uploadURL)
 		if err != nil {
+			logBiliRequestError("UPOS线路上传", "POST", uploadURL, err)
 			log.Printf("[UPOS] 线路上传请求失败: err=%v", err)
 			return err
 		}
 
 		if !resp.IsSuccessState() {
 			statusCode := resp.GetStatusCode()
-			log.Printf("[UPOS] 线路上传HTTP错误: status=%d, body=%s", statusCode, resp.String())
+			logBiliHTTPError("UPOS线路上传", "POST", uploadURL, resp)
 			return wrapRetryAfterError(fmt.Errorf("HTTP错误: status=%d", statusCode), resp.GetHeader("Retry-After"), time.Now())
 		}
 
@@ -396,6 +399,7 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 			SetBody(rateLimitedReader).
 			Put(uploadURL)
 		if err != nil {
+			logBiliRequestError(fmt.Sprintf("UPOS上传分片%d", partNum), "PUT", uploadURL, err)
 			lastErr = err
 			// 检测是否为连接被重置的错误，如果是则增加额外延迟
 			if strings.Contains(err.Error(), "connection reset") || strings.Contains(err.Error(), "broken pipe") {
@@ -410,7 +414,7 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 
 		statusCode := resp.GetStatusCode()
 		if !resp.IsSuccessState() {
-			log.Printf("[UPOS] 上传分片%d HTTP错误: status=%d, body=%s", partNum, statusCode, resp.String())
+			logBiliHTTPError(fmt.Sprintf("UPOS上传分片%d", partNum), "PUT", uploadURL, resp)
 			if statusCode == 429 {
 				if delay, ok := parseRetryAfterDelay(resp.GetHeader("Retry-After"), time.Now()); ok {
 					retryAfterDelay = delay
@@ -497,11 +501,13 @@ func (u *UposUploader) completeUpload(pre *PreUploadResp, line *LineUploadResp, 
 			SetSuccessResult(&result).
 			Post(uploadURL)
 		if err != nil {
+			logBiliRequestError("UPOS完成上传", "POST", uploadURL, err)
 			return err
 		}
 
 		if !resp.IsSuccessState() {
 			statusCode := resp.GetStatusCode()
+			logBiliHTTPError("UPOS完成上传", "POST", uploadURL, resp)
 			return wrapRetryAfterError(fmt.Errorf("完成上传失败: status=%d, body=%s", statusCode, resp.String()), resp.GetHeader("Retry-After"), time.Now())
 		}
 

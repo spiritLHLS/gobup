@@ -32,6 +32,7 @@ func (c *BiliClient) AddVideoComment(aid int64, bvid, message string) (int64, er
 	}
 
 	var result replyActionResponse
+	apiURL := "https://api.bilibili.com/x/v2/reply/add"
 	resp, err := c.ReqClient.R().
 		SetHeader("Referer", videoReferer(aid, bvid)).
 		SetFormData(map[string]string{
@@ -44,14 +45,17 @@ func (c *BiliClient) AddVideoComment(aid int64, bvid, message string) (int64, er
 			"csrf_token": csrf,
 		}).
 		SetSuccessResult(&result).
-		Post("https://api.bilibili.com/x/v2/reply/add")
+		Post(apiURL)
 	if err != nil {
+		logBiliRequestError("发送评论", "POST", apiURL, err)
 		return 0, fmt.Errorf("发送评论失败: %w", err)
 	}
 	if resp.IsErrorState() {
+		logBiliHTTPError("发送评论", "POST", apiURL, resp)
 		return 0, fmt.Errorf("发送评论HTTP错误: %s", resp.Status)
 	}
 	if result.Code != 0 {
+		logBiliAPIError("发送评论", "POST", apiURL, result.Code, result.Message, resp)
 		return 0, fmt.Errorf("发送评论失败(code=%d): %s", result.Code, result.Message)
 	}
 	if result.Data.RPID <= 0 {
@@ -72,6 +76,7 @@ func (c *BiliClient) PinVideoComment(aid int64, bvid string, rpid int64) error {
 	}
 
 	var result replyActionResponse
+	apiURL := "https://api.bilibili.com/x/v2/reply/top"
 	resp, err := c.ReqClient.R().
 		SetHeader("Referer", videoReferer(aid, bvid)).
 		SetFormData(map[string]string{
@@ -83,14 +88,17 @@ func (c *BiliClient) PinVideoComment(aid int64, bvid string, rpid int64) error {
 			"csrf_token": csrf,
 		}).
 		SetSuccessResult(&result).
-		Post("https://api.bilibili.com/x/v2/reply/top")
+		Post(apiURL)
 	if err != nil {
+		logBiliRequestError("置顶评论", "POST", apiURL, err)
 		return fmt.Errorf("置顶评论失败: %w", err)
 	}
 	if resp.IsErrorState() {
+		logBiliHTTPError("置顶评论", "POST", apiURL, resp)
 		return fmt.Errorf("置顶评论HTTP错误: %s", resp.Status)
 	}
 	if result.Code != 0 {
+		logBiliAPIError("置顶评论", "POST", apiURL, result.Code, result.Message, resp)
 		return fmt.Errorf("置顶评论失败(code=%d): %s", result.Code, result.Message)
 	}
 	return nil

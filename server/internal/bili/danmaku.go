@@ -75,6 +75,7 @@ func (c *BiliClient) sendDanmakuInternal(cid int64, bvid string, progress int, m
 	}
 
 	var resp SendDanmakuResponse
+	apiURL := "https://api.bilibili.com/x/v2/dm/post"
 	r, err := c.ReqClient.R().
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
 		SetHeader("Referer", "https://www.bilibili.com/video/"+bvid).
@@ -94,17 +95,20 @@ func (c *BiliClient) sendDanmakuInternal(cid int64, bvid string, progress int, m
 			"csrf":     req.CSRF,
 		}).
 		SetSuccessResult(&resp).
-		Post("https://api.bilibili.com/x/v2/dm/post")
+		Post(apiURL)
 
 	if err != nil {
+		logBiliRequestError("发送弹幕", "POST", apiURL, err)
 		return fmt.Errorf("发送弹幕失败: %w", err)
 	}
 
 	if !r.IsSuccessState() {
+		logBiliHTTPError("发送弹幕", "POST", apiURL, r)
 		return fmt.Errorf("发送弹幕失败: HTTP %d", r.StatusCode)
 	}
 
 	if resp.Code != 0 {
+		logBiliAPIError("发送弹幕", "POST", apiURL, resp.Code, resp.Message, r)
 		// 详细的错误码处理
 		switch resp.Code {
 		case 36701:

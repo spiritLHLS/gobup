@@ -176,6 +176,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Connection, Delete, DocumentCopy, Edit, Lock, Plus, Refresh, Unlock } from '@element-plus/icons-vue'
 import { agentAPI } from '@/api'
+import { copyText } from '@/utils/clipboard'
 
 const agents = ref([])
 const loading = ref(false)
@@ -369,11 +370,10 @@ const loadInstallCommand = async () => {
 
 const copyInstallCommand = async () => {
   if (!installCommand.value) return
-  try {
-    await navigator.clipboard.writeText(installCommand.value)
+  if (await copyText(installCommand.value)) {
     ElMessage.success('安装命令已复制')
-  } catch (error) {
-    ElMessage.error('复制失败，请手动选择命令')
+  } else {
+    ElMessage.error('当前浏览器禁止自动复制')
   }
 }
 

@@ -481,8 +481,10 @@ func (s *AutoUploadService) CleanOrphanedTempParts() {
 	db := database.GetDB()
 
 	var stuckParts []models.RecordHistoryPart
-	if err := db.Where("is_temp_file = ? AND upload = ? AND uploading = ? AND file_delete = ?",
-		true, false, false, false).Find(&stuckParts).Error; err != nil {
+	if err := db.Where(
+		"is_temp_file = ? AND upload = ? AND uploading = ? AND file_delete = ? AND upload_cancelled = ?",
+		true, false, false, false, false,
+	).Find(&stuckParts).Error; err != nil {
 		log.Printf("[自动上传] 查询孤立临时分P失败: %v", err)
 		return
 	}
@@ -492,21 +494,27 @@ func (s *AutoUploadService) CleanOrphanedTempParts() {
 	}
 
 	cleaned := 0
+	samples := make([]uint, 0, 5)
 	for _, part := range stuckParts {
 		if part.FilePath == "" {
 			continue
 		}
+		if strings.HasPrefix(part.FilePath, "__gobup_danmaku_burn_failed_") {
+			continue
+		}
 		if _, err := os.Stat(part.FilePath); os.IsNotExist(err) {
-			log.Printf("[自动上传] 临时分P文件不存在，标记为已删除: part_id=%d, file=%s", part.ID, part.FilePath)
 			part.FileDelete = true
 			part.UploadErrorMsg = "临时文件不存在，已自动清理"
 			part.UploadErrorType = "file"
 			db.Save(&part)
 			cleaned++
+			if len(samples) < cap(samples) {
+				samples = append(samples, part.ID)
+			}
 		}
 	}
 
 	if cleaned > 0 {
-		log.Printf("[自动上传] 清理孤立临时分P完成: 共清理 %d 条记录", cleaned)
+		log.Printf("[自动上传] 清理孤立临时分P完成: 共清理 %d 条记录, 示例part_id=%v", cleaned, samples)
 	}
 }

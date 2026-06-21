@@ -40,7 +40,9 @@ func classifyUploadErrorText(text string) string {
 	}):
 		return UploadErrorTypeRateLimit
 	case containsAny(normalized, []string{
-		"稿件标题过长", "超过80个字符", "时长不足 1 秒", "视频时长不足", "该视频时长不足", "分区不存在", "标题不能为空",
+		"稿件标题过长", "超过80个字符", "时长不足 1 秒", "视频时长不足", "该视频时长不足",
+		"不能小于1秒", "不能小于 1 秒", "小于1秒", "小于 1 秒", "少于1秒", "少于 1 秒",
+		"分区不存在", "标题不能为空",
 	}):
 		return UploadErrorTypePermanent
 	case containsAny(normalized, []string{
