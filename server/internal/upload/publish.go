@@ -62,22 +62,28 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 		historyID, history.RoomID, history.SessionID, room.MergeBySession)
 
 	if room.MergeBySession && history.SessionID != "" {
-		log.Printf("[投稿] SessionID合并已启用，查询同SessionID的已投稿记录 (session_id=%s)", history.SessionID)
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(history.StartTime); ok {
+			log.Printf("[投稿] SessionID合并已启用，查询同日同SessionID的已投稿记录 (session_id=%s, day=%s)",
+				history.SessionID, models.LiveSessionDayKey(history.StartTime))
 
-		var existingHistory models.RecordHistory
-		err := db.Where("session_id = ? AND publish = ? AND id != ?",
-			history.SessionID, true, historyID).
-			First(&existingHistory).Error
+			var existingHistory models.RecordHistory
+			err := db.Where(
+				"session_id = ? AND publish = ? AND id != ? AND room_id = ? AND start_time >= ? AND start_time < ?",
+				history.SessionID, true, historyID, history.RoomID, dayStart, dayEnd,
+			).First(&existingHistory).Error
 
-		if err == nil {
-			// 找到同SessionID的已投稿记录，执行追加分P逻辑
-			log.Printf("[投稿] 检测到同SessionID已有投稿 (session_id=%s, existing_history_id=%d, bv_id=%s, aid=%s)，执行追加分P",
-				history.SessionID, existingHistory.ID, existingHistory.BvID, existingHistory.AvID)
+			if err == nil {
+				// 找到同日同SessionID的已投稿记录，执行追加分P逻辑
+				log.Printf("[投稿] 检测到同日同SessionID已有投稿 (session_id=%s, existing_history_id=%d, bv_id=%s, aid=%s)，执行追加分P",
+					history.SessionID, existingHistory.ID, existingHistory.BvID, existingHistory.AvID)
 
-			return s.AppendPartsToExisting(historyID, &existingHistory, userID)
+				return s.AppendPartsToExisting(historyID, &existingHistory, userID)
+			}
+			// 未找到已投稿记录，继续执行新建投稿逻辑
+			log.Printf("[投稿] 同日同SessionID无已投稿记录，执行新建投稿 (session_id=%s, query_error=%v)", history.SessionID, err)
+		} else {
+			log.Printf("[投稿] 历史记录缺少有效开始时间，跳过SessionID合并: history_id=%d", history.ID)
 		}
-		// 未找到已投稿记录，继续执行新建投稿逻辑
-		log.Printf("[投稿] 同SessionID无已投稿记录，执行新建投稿 (session_id=%s, query_error=%v)", history.SessionID, err)
 	} else {
 		if !room.MergeBySession {
 			log.Printf("[投稿] SessionID合并未启用 (MergeBySession=false)")
@@ -90,18 +96,23 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 	if room.MergeBySession {
 		normalizedTitle := normalizePublishTitle(history.Title)
 		if normalizedTitle != "" {
-			log.Printf("[投稿] 查询同标题已投稿记录 (room_id=%s, title=%s)", history.RoomID, normalizedTitle)
-			var existingHistory models.RecordHistory
-			err := db.Where(
-				"room_id = ? AND title = ? AND publish = ? AND id != ? AND is_highlight = ?",
-				history.RoomID, normalizedTitle, true, historyID, false,
-			).Order("start_time ASC").First(&existingHistory).Error
-			if err == nil {
-				log.Printf("[投稿] 检测到同标题已有投稿 (existing_history_id=%d, bv_id=%s)，执行追加分P",
-					existingHistory.ID, existingHistory.BvID)
-				return s.AppendPartsToExisting(historyID, &existingHistory, userID)
+			if dayStart, dayEnd, ok := models.LiveSessionDayRange(history.StartTime); ok {
+				log.Printf("[投稿] 查询同日同标题已投稿记录 (room_id=%s, title=%s, day=%s)",
+					history.RoomID, normalizedTitle, models.LiveSessionDayKey(history.StartTime))
+				var existingHistory models.RecordHistory
+				err := db.Where(
+					"room_id = ? AND title = ? AND publish = ? AND id != ? AND is_highlight = ? AND start_time >= ? AND start_time < ?",
+					history.RoomID, normalizedTitle, true, historyID, false, dayStart, dayEnd,
+				).Order("start_time ASC").First(&existingHistory).Error
+				if err == nil {
+					log.Printf("[投稿] 检测到同日同标题已有投稿 (existing_history_id=%d, bv_id=%s)，执行追加分P",
+						existingHistory.ID, existingHistory.BvID)
+					return s.AppendPartsToExisting(historyID, &existingHistory, userID)
+				}
+				log.Printf("[投稿] 同日同标题无已投稿记录，继续新建投稿 (query_error=%v)", err)
+			} else {
+				log.Printf("[投稿] 历史记录缺少有效开始时间，跳过同标题合并: history_id=%d", history.ID)
 			}
-			log.Printf("[投稿] 同标题无已投稿记录，继续新建投稿 (query_error=%v)", err)
 		}
 	}
 
@@ -214,12 +225,14 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 
 	titleSequence := 1
 	if strings.TrimSpace(history.Title) != "" {
-		var previousCount int64
-		db.Model(&models.RecordHistory{}).Where(
-			"room_id = ? AND title = ? AND id != ? AND start_time <= ?",
-			history.RoomID, history.Title, history.ID, history.StartTime,
-		).Count(&previousCount)
-		titleSequence = int(previousCount) + 1
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(history.StartTime); ok {
+			var previousCount int64
+			db.Model(&models.RecordHistory{}).Where(
+				"room_id = ? AND title = ? AND id != ? AND start_time >= ? AND start_time < ? AND start_time <= ?",
+				history.RoomID, history.Title, history.ID, dayStart, dayEnd, history.StartTime,
+			).Count(&previousCount)
+			titleSequence = int(previousCount) + 1
+		}
 	}
 
 	// 构建模板数据（优先使用历史记录中的实际数据）
@@ -281,9 +294,11 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 		// 根据直播标题查找同一房间内最早录制的封面文件
 		// 查找同一房间、同一直播标题的最早一次录制分P
 		var oldestPart models.RecordHistoryPart
-		err := db.Where("room_id = ? AND live_title = ?", history.RoomID, history.Title).
-			Order("start_time ASC").
-			First(&oldestPart).Error
+		oldestPartQuery := db.Where("room_id = ? AND live_title = ?", history.RoomID, history.Title)
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(history.StartTime); ok {
+			oldestPartQuery = oldestPartQuery.Where("start_time >= ? AND start_time < ?", dayStart, dayEnd)
+		}
+		err := oldestPartQuery.Order("start_time ASC").First(&oldestPart).Error
 
 		if err == nil && oldestPart.FilePath != "" {
 			// 使用最早录制的分P文件路径查找封面
@@ -722,14 +737,32 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 		Where("record_histories.room_id = ? AND record_histories.publish = ? AND record_history_parts.upload = ? AND record_history_parts.upload_cancelled = ? AND (record_history_parts.is_temp_file = ? OR record_history_parts.temp_file_type = ?)",
 			existingHistory.RoomID, true, true, false, false, "split")
 	if normalizedExistingTitle != "" && existingHistory.SessionID != "" {
-		existingPartsQuery = existingPartsQuery.Where(
-			"(record_histories.session_id = ? OR record_histories.title = ?)",
-			existingHistory.SessionID, normalizedExistingTitle,
-		)
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(existingHistory.StartTime); ok {
+			existingPartsQuery = existingPartsQuery.Where(
+				"(record_histories.session_id = ? OR record_histories.title = ?) AND record_histories.start_time >= ? AND record_histories.start_time < ?",
+				existingHistory.SessionID, normalizedExistingTitle, dayStart, dayEnd,
+			)
+		} else {
+			existingPartsQuery = existingPartsQuery.Where("record_histories.session_id = ?", existingHistory.SessionID)
+		}
 	} else if existingHistory.SessionID != "" {
-		existingPartsQuery = existingPartsQuery.Where("record_histories.session_id = ?", existingHistory.SessionID)
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(existingHistory.StartTime); ok {
+			existingPartsQuery = existingPartsQuery.Where(
+				"record_histories.session_id = ? AND record_histories.start_time >= ? AND record_histories.start_time < ?",
+				existingHistory.SessionID, dayStart, dayEnd,
+			)
+		} else {
+			existingPartsQuery = existingPartsQuery.Where("record_histories.session_id = ?", existingHistory.SessionID)
+		}
 	} else {
-		existingPartsQuery = existingPartsQuery.Where("record_histories.title = ?", normalizedExistingTitle)
+		dayStart, dayEnd, ok := models.LiveSessionDayRange(existingHistory.StartTime)
+		if !ok {
+			return fmt.Errorf("已有投稿缺少有效开始时间，无法安全按标题追加: history_id=%d", existingHistory.ID)
+		}
+		existingPartsQuery = existingPartsQuery.Where(
+			"record_histories.title = ? AND record_histories.start_time >= ? AND record_histories.start_time < ?",
+			normalizedExistingTitle, dayStart, dayEnd,
+		)
 	}
 	if err := existingPartsQuery.
 		Order("record_history_parts.start_time ASC").
@@ -756,12 +789,14 @@ func (s *Service) AppendPartsToExisting(newHistoryID uint, existingHistory *mode
 
 	titleSequence := 1
 	if strings.TrimSpace(existingHistory.Title) != "" {
-		var previousCount int64
-		db.Model(&models.RecordHistory{}).Where(
-			"room_id = ? AND title = ? AND id != ? AND start_time <= ?",
-			existingHistory.RoomID, existingHistory.Title, existingHistory.ID, existingHistory.StartTime,
-		).Count(&previousCount)
-		titleSequence = int(previousCount) + 1
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(existingHistory.StartTime); ok {
+			var previousCount int64
+			db.Model(&models.RecordHistory{}).Where(
+				"room_id = ? AND title = ? AND id != ? AND start_time >= ? AND start_time < ? AND start_time <= ?",
+				existingHistory.RoomID, existingHistory.Title, existingHistory.ID, dayStart, dayEnd, existingHistory.StartTime,
+			).Count(&previousCount)
+			titleSequence = int(previousCount) + 1
+		}
 	}
 
 	// 构建模板数据

@@ -84,28 +84,46 @@ func (s *DataRepairService) repairOrphanParts(result *RepairResult, dryRun bool)
 
 	log.Printf("[DataRepair] 发现 %d 个孤儿分P，准备修复", len(orphanParts))
 
-	// 按 session_id 分组孤儿分P
+	// 按 session_id + 录制日分组孤儿分P，避免不同日期的录制被修复到同一场直播。
 	sessionGroups := make(map[string][]models.RecordHistoryPart)
 	for _, part := range orphanParts {
-		sessionGroups[part.SessionID] = append(sessionGroups[part.SessionID], part)
+		groupKey := part.SessionID
+		if dayKey := models.LiveSessionDayKey(part.StartTime); dayKey != "" {
+			groupKey += "\x00" + dayKey
+		}
+		sessionGroups[groupKey] = append(sessionGroups[groupKey], part)
 	}
 
 	// 为每个session创建或查找历史记录
-	for sessionID, parts := range sessionGroups {
+	for _, parts := range sessionGroups {
 		if len(parts) == 0 {
 			continue
 		}
 
 		firstPart := parts[0]
+		sessionID := firstPart.SessionID
 
 		// 尝试查找同一session的历史记录
 		var history models.RecordHistory
-		err := db.Where("session_id = ?", sessionID).First(&history).Error
+		historyQuery := db.Where("session_id = ?", sessionID)
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(firstPart.StartTime); ok {
+			historyQuery = historyQuery.Where("start_time >= ? AND start_time < ?", dayStart, dayEnd)
+		}
+		err := historyQuery.First(&history).Error
 
 		if err == gorm.ErrRecordNotFound {
 			// 历史记录不存在，创建新的
 			if !dryRun {
 				history = s.createHistoryFromPart(&firstPart, parts)
+				if dayStart, dayEnd, ok := models.LiveSessionDayRange(firstPart.StartTime); ok && history.SessionID != "" {
+					var conflict models.RecordHistory
+					if err := db.Where(
+						"session_id = ? AND NOT (start_time >= ? AND start_time < ?)",
+						history.SessionID, dayStart, dayEnd,
+					).First(&conflict).Error; err == nil {
+						history.SessionID = fmt.Sprintf("%s_%s", history.SessionID, models.LiveSessionDayKey(firstPart.StartTime))
+					}
+				}
 				if err := db.Create(&history).Error; err != nil {
 					errMsg := fmt.Sprintf("为session %s 创建历史记录失败: %v", sessionID, err)
 					result.Errors = append(result.Errors, errMsg)
@@ -128,7 +146,10 @@ func (s *DataRepairService) repairOrphanParts(result *RepairResult, dryRun bool)
 		// 将孤儿分P重新分配给历史记录
 		if !dryRun && history.ID > 0 {
 			for _, part := range parts {
-				if err := db.Model(&part).Update("history_id", history.ID).Error; err != nil {
+				if err := db.Model(&part).Updates(map[string]interface{}{
+					"history_id": history.ID,
+					"session_id": history.SessionID,
+				}).Error; err != nil {
 					errMsg := fmt.Sprintf("更新分P %d 的history_id失败: %v", part.ID, err)
 					result.Errors = append(result.Errors, errMsg)
 					log.Printf("[DataRepair] %s", errMsg)

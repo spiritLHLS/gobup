@@ -187,9 +187,21 @@ func ImportConfig(c *gin.Context) {
 
 				// 检查是否已存在
 				var existing models.RecordHistory
-				result := db.Where("session_id = ?", history.SessionID).First(&existing)
+				existingQuery := db.Where("session_id = ?", history.SessionID)
+				if dayStart, dayEnd, ok := models.LiveSessionDayRange(history.StartTime); ok {
+					existingQuery = existingQuery.Where("start_time >= ? AND start_time < ?", dayStart, dayEnd)
+				}
+				result := existingQuery.First(&existing)
 				if result.Error == nil {
 					history.ID = existing.ID
+				} else if dayStart, dayEnd, ok := models.LiveSessionDayRange(history.StartTime); ok && history.SessionID != "" {
+					var conflict models.RecordHistory
+					if err := db.Where(
+						"session_id = ? AND NOT (start_time >= ? AND start_time < ?)",
+						history.SessionID, dayStart, dayEnd,
+					).First(&conflict).Error; err == nil {
+						history.SessionID = fmt.Sprintf("%s_%s", history.SessionID, models.LiveSessionDayKey(history.StartTime))
+					}
 				}
 
 				db.Save(&history)

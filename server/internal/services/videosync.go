@@ -239,8 +239,12 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 
 			// 查询同SessionID的其他历史记录（未投稿的）
 			var pendingHistories []models.RecordHistory
-			if err := db.Where("session_id = ? AND publish = ? AND id != ?",
-				history.SessionID, false, historyID).Find(&pendingHistories).Error; err == nil && len(pendingHistories) > 0 {
+			pendingQuery := db.Where("session_id = ? AND publish = ? AND id != ?",
+				history.SessionID, false, historyID)
+			if dayStart, dayEnd, ok := models.LiveSessionDayRange(history.StartTime); ok {
+				pendingQuery = pendingQuery.Where("start_time >= ? AND start_time < ?", dayStart, dayEnd)
+			}
+			if err := pendingQuery.Find(&pendingHistories).Error; err == nil && len(pendingHistories) > 0 {
 
 				log.Printf("[审核通过] 发现 %d 个同SessionID的未投稿记录，检查是否有已上传分P", len(pendingHistories))
 

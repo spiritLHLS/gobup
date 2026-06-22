@@ -134,8 +134,12 @@ func (s *RoomAutoTaskService) processRoomTasks(room *models.RecordRoom) {
 
 					// 查询同SessionID的其他历史记录（未投稿但有已上传分P的）
 					var pendingHistories []models.RecordHistory
-					if err := db.Where("session_id = ? AND publish = ? AND room_id = ? AND id != ?",
-						history.SessionID, false, room.RoomID, history.ID).Find(&pendingHistories).Error; err == nil {
+					pendingQuery := db.Where("session_id = ? AND publish = ? AND room_id = ? AND id != ?",
+						history.SessionID, false, room.RoomID, history.ID)
+					if dayStart, dayEnd, ok := models.LiveSessionDayRange(history.StartTime); ok {
+						pendingQuery = pendingQuery.Where("start_time >= ? AND start_time < ?", dayStart, dayEnd)
+					}
+					if err := pendingQuery.Find(&pendingHistories).Error; err == nil {
 
 						for _, pendingHistory := range pendingHistories {
 							// 检查是否有已上传的分P（与 checkAndPublish 保持完全一致的计数逻辑）

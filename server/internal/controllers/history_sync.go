@@ -35,10 +35,11 @@ func SyncLiveSessions(c *gin.Context) {
 	groups := make(map[string][]models.RecordHistory)
 	for _, history := range histories {
 		title := normalizeHistorySyncTitle(history.Title)
-		if history.RoomID == "" || title == "" {
+		dayKey := models.LiveSessionDayKey(history.StartTime)
+		if history.RoomID == "" || title == "" || dayKey == "" {
 			continue
 		}
-		key := history.RoomID + "\x00" + title
+		key := history.RoomID + "\x00" + title + "\x00" + dayKey
 		groups[key] = append(groups[key], history)
 	}
 
@@ -89,9 +90,9 @@ func SyncLiveSessions(c *gin.Context) {
 			})
 			target := published[0]
 			for _, pending := range unpublished {
-				msg := "同步完成：同标题已有投稿"
+				msg := "同步完成：同日同标题已有投稿"
 				if target.BvID != "" {
-					msg = fmt.Sprintf("同步完成：同标题已有投稿 %s，投稿时将自动追加为新分P", target.BvID)
+					msg = fmt.Sprintf("同步完成：同日同标题已有投稿 %s，投稿时将自动追加为新分P", target.BvID)
 				}
 				if err := db.Model(&models.RecordHistory{}).Where("id = ? AND publish = ?", pending.ID, false).
 					Update("message", msg).Error; err == nil {
@@ -148,7 +149,7 @@ func mergeHistoryInto(db *gorm.DB, target, source *models.RecordHistory) (int64,
 			Updates(map[string]interface{}{
 				"start_time": startTime,
 				"end_time":   endTime,
-				"message":    "同步完成：已按同标题合并为同一场直播",
+				"message":    "同步完成：已按同日同标题合并为同一场直播",
 			}).Error; err != nil {
 			return err
 		}

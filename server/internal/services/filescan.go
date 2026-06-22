@@ -594,7 +594,11 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 
 		// 额外检查：如果存在相同SessionID的历史记录，确保该场直播已经完全结束
 		var existingHistory models.RecordHistory
-		if err := db.Where("session_id = ?", metadata.SessionID).First(&existingHistory).Error; err == nil {
+		existingHistoryQuery := db.Where("session_id = ?", metadata.SessionID)
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(metadata.StartTime); ok {
+			existingHistoryQuery = existingHistoryQuery.Where("start_time >= ? AND start_time < ?", dayStart, dayEnd)
+		}
+		if err := existingHistoryQuery.First(&existingHistory).Error; err == nil {
 			// 检查该历史记录是否标记为正在录制或直播中
 			if existingHistory.Recording || existingHistory.Streaming {
 				log.Printf("[FileScan] 拒绝导入：该Session的历史记录显示仍在录制/直播中: SessionID=%s, Recording=%v, Streaming=%v",

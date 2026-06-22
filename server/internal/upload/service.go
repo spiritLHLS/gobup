@@ -646,11 +646,30 @@ func (s *Service) checkAndAppendPendingHistories(publishedHistory *models.Record
 	pendingQuery := db.Where("publish = ? AND room_id = ? AND id != ?", false, room.RoomID, publishedHistory.ID)
 	normalizedTitle := normalizePublishTitle(publishedHistory.Title)
 	if publishedHistory.SessionID != "" && normalizedTitle != "" {
-		pendingQuery = pendingQuery.Where("(session_id = ? OR title = ?)", publishedHistory.SessionID, normalizedTitle)
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(publishedHistory.StartTime); ok {
+			pendingQuery = pendingQuery.Where(
+				"(session_id = ? OR title = ?) AND start_time >= ? AND start_time < ?",
+				publishedHistory.SessionID, normalizedTitle, dayStart, dayEnd,
+			)
+		} else {
+			pendingQuery = pendingQuery.Where("session_id = ?", publishedHistory.SessionID)
+		}
 	} else if publishedHistory.SessionID != "" {
-		pendingQuery = pendingQuery.Where("session_id = ?", publishedHistory.SessionID)
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(publishedHistory.StartTime); ok {
+			pendingQuery = pendingQuery.Where(
+				"session_id = ? AND start_time >= ? AND start_time < ?",
+				publishedHistory.SessionID, dayStart, dayEnd,
+			)
+		} else {
+			pendingQuery = pendingQuery.Where("session_id = ?", publishedHistory.SessionID)
+		}
 	} else if normalizedTitle != "" {
-		pendingQuery = pendingQuery.Where("title = ?", normalizedTitle)
+		dayStart, dayEnd, ok := models.LiveSessionDayRange(publishedHistory.StartTime)
+		if !ok {
+			log.Printf("[投稿后检查] 历史记录缺少有效开始时间，跳过同标题待追加检查: history_id=%d", publishedHistory.ID)
+			return
+		}
+		pendingQuery = pendingQuery.Where("title = ? AND start_time >= ? AND start_time < ?", normalizedTitle, dayStart, dayEnd)
 	} else {
 		log.Printf("[投稿后检查] SessionID和标题均为空，跳过")
 		return

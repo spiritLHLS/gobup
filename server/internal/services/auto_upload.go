@@ -420,8 +420,11 @@ func (s *AutoUploadService) isFileStable(filePath string, stableDuration time.Du
 func (s *AutoUploadService) isLiveStreamInProgress(part *models.RecordHistoryPart, db *gorm.DB) bool {
 	// 1. 检查该SessionID的历史记录状态
 	var history models.RecordHistory
-	err := db.Where("session_id = ? AND room_id = ?", part.SessionID, part.RoomID).
-		First(&history).Error
+	historyQuery := db.Where("session_id = ? AND room_id = ?", part.SessionID, part.RoomID)
+	if dayStart, dayEnd, ok := models.LiveSessionDayRange(part.StartTime); ok {
+		historyQuery = historyQuery.Where("start_time >= ? AND start_time < ?", dayStart, dayEnd)
+	}
+	err := historyQuery.First(&history).Error
 
 	if err == nil {
 		// 找到历史记录，检查是否正在录制/直播
@@ -434,9 +437,11 @@ func (s *AutoUploadService) isLiveStreamInProgress(part *models.RecordHistoryPar
 
 	// 2. 查询同一SessionID的所有分P（包括正在录制的），按结束时间倒序
 	var latestPart models.RecordHistoryPart
-	err = db.Where("session_id = ? AND room_id = ?", part.SessionID, part.RoomID).
-		Order("end_time DESC").
-		First(&latestPart).Error
+	latestPartQuery := db.Where("session_id = ? AND room_id = ?", part.SessionID, part.RoomID)
+	if dayStart, dayEnd, ok := models.LiveSessionDayRange(part.StartTime); ok {
+		latestPartQuery = latestPartQuery.Where("start_time >= ? AND start_time < ?", dayStart, dayEnd)
+	}
+	err = latestPartQuery.Order("end_time DESC").First(&latestPart).Error
 
 	if err != nil {
 		// 没有找到同SessionID的分P，可能是第一个分P或数据异常
@@ -456,8 +461,11 @@ func (s *AutoUploadService) isLiveStreamInProgress(part *models.RecordHistoryPar
 
 	// 4. 检查是否有正在录制的分P
 	var recordingPart models.RecordHistoryPart
-	err = db.Where("session_id = ? AND room_id = ? AND recording = ?", part.SessionID, part.RoomID, true).
-		First(&recordingPart).Error
+	recordingPartQuery := db.Where("session_id = ? AND room_id = ? AND recording = ?", part.SessionID, part.RoomID, true)
+	if dayStart, dayEnd, ok := models.LiveSessionDayRange(part.StartTime); ok {
+		recordingPartQuery = recordingPartQuery.Where("start_time >= ? AND start_time < ?", dayStart, dayEnd)
+	}
+	err = recordingPartQuery.First(&recordingPart).Error
 
 	if err == nil {
 		log.Printf("[自动上传] 检测到有正在录制的分P: session_id=%s, part_id=%d",

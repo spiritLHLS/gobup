@@ -175,7 +175,11 @@ func (s *FileScanService) parseFileMetadata(filePath string, info os.FileInfo) *
 func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata, room *models.RecordRoom) (*models.RecordHistory, error) {
 	// 先尝试通过 SessionID 查找
 	var history models.RecordHistory
-	if err := db.Where("session_id = ?", metadata.SessionID).First(&history).Error; err == nil {
+	sessionQuery := db.Where("session_id = ?", metadata.SessionID)
+	if dayStart, dayEnd, ok := models.LiveSessionDayRange(metadata.StartTime); ok {
+		sessionQuery = sessionQuery.Where("start_time >= ? AND start_time < ?", dayStart, dayEnd)
+	}
+	if err := sessionQuery.First(&history).Error; err == nil {
 		// 找到已有记录，检查是否已投稿
 		if history.Publish {
 			// 已投稿的记录不应该被重复使用，创建新的历史记录
@@ -218,31 +222,35 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 	}
 
 	if title := normalizeLiveTitle(metadata.Title); title != "" {
-		var exactTitleHistory models.RecordHistory
-		if err := db.Where(
-			"room_id = ? AND title = ? AND publish = ? AND is_highlight = ?",
-			metadata.RoomID, title, false, false,
-		).Order("start_time ASC").First(&exactTitleHistory).Error; err == nil {
-			updates := map[string]interface{}{}
-			if strings.TrimSpace(exactTitleHistory.SessionID) == "" {
-				updates["session_id"] = metadata.SessionID
-				exactTitleHistory.SessionID = metadata.SessionID
+		if dayStart, dayEnd, ok := models.LiveSessionDayRange(metadata.StartTime); ok {
+			var exactTitleHistory models.RecordHistory
+			if err := db.Where(
+				"room_id = ? AND title = ? AND publish = ? AND is_highlight = ? AND start_time >= ? AND start_time < ?",
+				metadata.RoomID, title, false, false, dayStart, dayEnd,
+			).Order("start_time ASC").First(&exactTitleHistory).Error; err == nil {
+				updates := map[string]interface{}{}
+				if strings.TrimSpace(exactTitleHistory.SessionID) == "" {
+					updates["session_id"] = metadata.SessionID
+					exactTitleHistory.SessionID = metadata.SessionID
+				}
+				if metadata.EndTime.After(exactTitleHistory.EndTime) {
+					updates["end_time"] = metadata.EndTime
+				}
+				if metadata.StartTime.Before(exactTitleHistory.StartTime) {
+					updates["start_time"] = metadata.StartTime
+				}
+				if len(updates) > 0 {
+					db.Model(&exactTitleHistory).Updates(updates)
+				}
+				if exactTitleHistory.SessionID != "" {
+					metadata.SessionID = exactTitleHistory.SessionID
+				}
+				log.Printf("[FileScan] 同日标题完全相同，合并到同场直播历史记录: ID=%d, Title=%s, Day=%s, SessionID=%s",
+					exactTitleHistory.ID, title, models.LiveSessionDayKey(metadata.StartTime), exactTitleHistory.SessionID)
+				return &exactTitleHistory, nil
 			}
-			if metadata.EndTime.After(exactTitleHistory.EndTime) {
-				updates["end_time"] = metadata.EndTime
-			}
-			if metadata.StartTime.Before(exactTitleHistory.StartTime) {
-				updates["start_time"] = metadata.StartTime
-			}
-			if len(updates) > 0 {
-				db.Model(&exactTitleHistory).Updates(updates)
-			}
-			if exactTitleHistory.SessionID != "" {
-				metadata.SessionID = exactTitleHistory.SessionID
-			}
-			log.Printf("[FileScan] 标题完全相同，合并到同场直播历史记录: ID=%d, Title=%s, SessionID=%s",
-				exactTitleHistory.ID, title, exactTitleHistory.SessionID)
-			return &exactTitleHistory, nil
+		} else {
+			log.Printf("[FileScan] 缺少有效开始时间，跳过按标题复用历史记录: RoomID=%s, Title=%s", metadata.RoomID, title)
 		}
 	}
 
@@ -254,6 +262,14 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 	// 搜索范围：文件开始时间前后各9小时
 	searchStart := metadata.StartTime.Add(-9 * time.Hour)
 	searchEnd := metadata.StartTime.Add(9 * time.Hour)
+	if dayStart, dayEnd, ok := models.LiveSessionDayRange(metadata.StartTime); ok {
+		if searchStart.Before(dayStart) {
+			searchStart = dayStart
+		}
+		if searchEnd.After(dayEnd) {
+			searchEnd = dayEnd
+		}
+	}
 
 	err := db.Where("room_id = ? AND start_time >= ? AND start_time < ? AND publish = ?",
 		metadata.RoomID, searchStart, searchEnd, false).
@@ -309,6 +325,7 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 						h.Title = metadata.Title
 					}
 					db.Save(&h)
+					metadata.SessionID = h.SessionID
 					log.Printf("[FileScan] 合并到已有历史记录(时间重叠): ID=%d, SessionID=%s", h.ID, h.SessionID)
 					return &h, nil
 				} else {
@@ -350,6 +367,7 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 					h.Title = metadata.Title
 				}
 				db.Save(&h)
+				metadata.SessionID = h.SessionID
 				log.Printf("[FileScan] 合并到已有历史记录: ID=%d, SessionID=%s (基于时间连续性: 间隔%.1f分钟<30分钟)",
 					h.ID, h.SessionID, timeDiff.Minutes())
 				return &h, nil
@@ -391,6 +409,18 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 		Streaming: false,
 		Upload:    room.Upload,
 		Publish:   false,
+	}
+	if dayStart, dayEnd, ok := models.LiveSessionDayRange(metadata.StartTime); ok && metadata.SessionID != "" {
+		var conflictingHistory models.RecordHistory
+		if err := db.Where(
+			"session_id = ? AND NOT (start_time >= ? AND start_time < ?)",
+			metadata.SessionID, dayStart, dayEnd,
+		).First(&conflictingHistory).Error; err == nil {
+			metadata.SessionID = fmt.Sprintf("%s_%s", metadata.SessionID, models.LiveSessionDayKey(metadata.StartTime))
+			history.SessionID = metadata.SessionID
+			log.Printf("[FileScan] SessionID 已被其他日期使用，按录制日期生成新 SessionID: old=%s, new=%s",
+				conflictingHistory.SessionID, metadata.SessionID)
+		}
 	}
 
 	// 创建前清理同 session_id 的软删除记录（避免 UNIQUE 约束冲突）
