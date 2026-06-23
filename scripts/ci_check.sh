@@ -263,7 +263,7 @@ check_agent_distribution() {
     && log_pass "agent release packages are guarded against new glibc runtime requirements" \
     || log_fail "agent release packages are not guarded against glibc runtime drift"
 
-  grep -q 'mlugg/setup-zig@v2' .github/workflows/main.yml && grep -q 'zig cc -target' scripts/build_agent.sh \
+  grep -q 'mlugg/setup-zig@v2' .github/workflows/main.yml && grep -Fq 'os.execvp("zig", ["zig", "cc", "-target"' scripts/build_agent.sh \
     && log_pass "agent musl cross builds have a Zig C toolchain fallback" \
     || log_fail "agent musl cross builds are missing Zig C toolchain wiring"
 }

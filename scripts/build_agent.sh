@@ -61,8 +61,24 @@ zig_cc_wrapper() {
   wrapper="$TOOLCHAIN_DIR/zig-cc-$target"
   mkdir -p "$TOOLCHAIN_DIR"
   cat > "$wrapper" <<EOF
-#!/bin/sh
-exec zig cc -target $zig_target "\$@"
+#!/usr/bin/env python3
+import os
+import sys
+
+args = []
+skip_next = False
+for arg in sys.argv[1:]:
+    if skip_next:
+        skip_next = False
+        continue
+    if arg in ("--target", "-target"):
+        skip_next = True
+        continue
+    if arg.startswith("--target=") or arg.startswith("-target="):
+        continue
+    args.append(arg)
+
+os.execvp("zig", ["zig", "cc", "-target", "$zig_target", *args])
 EOF
   chmod +x "$wrapper"
   printf '%s\n' "$wrapper"
