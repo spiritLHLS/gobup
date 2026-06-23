@@ -38,6 +38,11 @@ jobs:
         cache: 'npm'
         cache-dependency-path: web/package-lock.json
 
+    - name: Set up Zig
+      uses: mlugg/setup-zig@v2
+      with:
+        version: latest
+
     - name: Get current date
       id: date
       run: echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
@@ -69,8 +74,6 @@ jobs:
     - name: Build Rust agent release packages
       run: |
         rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
-        export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld
-        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld
         AGENT_TARGETS="x86_64-unknown-linux-musl aarch64-unknown-linux-musl" ./scripts/build_agent.sh
 
     - name: Build Vue web application

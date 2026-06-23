@@ -262,6 +262,10 @@ check_agent_distribution() {
   grep -q 'x86_64-unknown-linux-musl' .github/workflows/main.yml && grep -q 'aarch64-unknown-linux-musl' .github/workflows/main.yml && grep -Fq 'libc\.so\.6' scripts/build_agent.sh \
     && log_pass "agent release packages are guarded against new glibc runtime requirements" \
     || log_fail "agent release packages are not guarded against glibc runtime drift"
+
+  grep -q 'mlugg/setup-zig@v2' .github/workflows/main.yml && grep -q 'zig cc -target' scripts/build_agent.sh \
+    && log_pass "agent musl cross builds have a Zig C toolchain fallback" \
+    || log_fail "agent musl cross builds are missing Zig C toolchain wiring"
 }
 
 check_docs() {

@@ -6,6 +6,7 @@ MANIFEST="$ROOT_DIR/server/agent/Cargo.toml"
 ASSET_DIR="$ROOT_DIR/server/assets/agent"
 BUILD_DIR="$ROOT_DIR/build"
 INSTALLER_SRC="$ROOT_DIR/scripts/install_agent.sh"
+TOOLCHAIN_DIR="$BUILD_DIR/agent-toolchain"
 
 mkdir -p "$ASSET_DIR" "$BUILD_DIR"
 cp "$INSTALLER_SRC" "$ASSET_DIR/install_agent.sh"
@@ -29,6 +30,75 @@ ensure_rust_target() {
   fi
   if command -v rustup >/dev/null 2>&1; then
     rustup target add "$target"
+  fi
+}
+
+find_rust_lld() {
+  if command -v rust-lld >/dev/null 2>&1; then
+    command -v rust-lld
+    return 0
+  fi
+  sysroot="$(rustc --print sysroot)"
+  found="$(find "$sysroot/lib/rustlib" -path '*/bin/rust-lld' -type f | head -1)"
+  if [ -n "$found" ]; then
+    printf '%s\n' "$found"
+    return 0
+  fi
+  printf '%s\n' "rust-lld"
+}
+
+zig_target_for() {
+  case "$1" in
+    x86_64-unknown-linux-musl) printf '%s\n' "x86_64-linux-musl" ;;
+    aarch64-unknown-linux-musl) printf '%s\n' "aarch64-linux-musl" ;;
+    *) return 1 ;;
+  esac
+}
+
+zig_cc_wrapper() {
+  target="$1"
+  zig_target="$(zig_target_for "$target")"
+  wrapper="$TOOLCHAIN_DIR/zig-cc-$target"
+  mkdir -p "$TOOLCHAIN_DIR"
+  cat > "$wrapper" <<EOF
+#!/bin/sh
+exec zig cc -target $zig_target "\$@"
+EOF
+  chmod +x "$wrapper"
+  printf '%s\n' "$wrapper"
+}
+
+zig_ar_wrapper() {
+  wrapper="$TOOLCHAIN_DIR/zig-ar"
+  mkdir -p "$TOOLCHAIN_DIR"
+  cat > "$wrapper" <<'EOF'
+#!/bin/sh
+exec zig ar "$@"
+EOF
+  chmod +x "$wrapper"
+  printf '%s\n' "$wrapper"
+}
+
+set_env_if_empty() {
+  name="$1"
+  value="$2"
+  eval "current=\${$name:-}"
+  if [ -z "$current" ]; then
+    export "$name=$value"
+  fi
+}
+
+configure_musl_target() {
+  target="$1"
+  target_env="$(printf '%s' "$target" | tr '-' '_')"
+  target_env_upper="$(printf '%s' "$target" | tr '[:lower:]-' '[:upper:]_')"
+
+  if command -v zig >/dev/null 2>&1; then
+    set_env_if_empty "CC_${target_env}" "$(zig_cc_wrapper "$target")"
+    set_env_if_empty "AR_${target_env}" "$(zig_ar_wrapper)"
+    set_env_if_empty "CARGO_TARGET_${target_env_upper}_LINKER" "$(zig_cc_wrapper "$target")"
+  else
+    set_env_if_empty "CARGO_TARGET_${target_env_upper}_LINKER" "$(find_rust_lld)"
   fi
 }
 
@@ -78,12 +148,7 @@ for target in $TARGETS; do
   echo "building gobup-agent for $target"
   ensure_rust_target "$target"
   case "$target" in
-    x86_64-unknown-linux-musl)
-      export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="${CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER:-rust-lld}"
-      ;;
-    aarch64-unknown-linux-musl)
-      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER:-rust-lld}"
-      ;;
+    *-unknown-linux-musl) configure_musl_target "$target" ;;
   esac
   "$CARGO_BIN" build --release --manifest-path "$MANIFEST" --target "$target"
 
