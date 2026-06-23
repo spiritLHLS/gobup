@@ -112,10 +112,8 @@ configure_musl_target() {
   if command -v zig >/dev/null 2>&1; then
     set_env_if_empty "CC_${target_env}" "$(zig_cc_wrapper "$target")"
     set_env_if_empty "AR_${target_env}" "$(zig_ar_wrapper)"
-    set_env_if_empty "CARGO_TARGET_${target_env_upper}_LINKER" "$(zig_cc_wrapper "$target")"
-  else
-    set_env_if_empty "CARGO_TARGET_${target_env_upper}_LINKER" "$(find_rust_lld)"
   fi
+  set_env_if_empty "CARGO_TARGET_${target_env_upper}_LINKER" "$(find_rust_lld)"
 }
 
 check_linux_agent_binary() {

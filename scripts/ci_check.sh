@@ -266,6 +266,10 @@ check_agent_distribution() {
   grep -q 'mlugg/setup-zig@v2' .github/workflows/main.yml && grep -Fq 'os.execvp("zig", ["zig", "cc", "-target"' scripts/build_agent.sh \
     && log_pass "agent musl cross builds have a Zig C toolchain fallback" \
     || log_fail "agent musl cross builds are missing Zig C toolchain wiring"
+
+  grep -q 'CARGO_TARGET_${target_env_upper}_LINKER.*find_rust_lld' scripts/build_agent.sh && ! grep -q 'CARGO_TARGET_${target_env_upper}_LINKER.*zig_cc_wrapper' scripts/build_agent.sh \
+    && log_pass "agent musl final linking stays on rust-lld" \
+    || log_fail "agent musl final linking may use zig cc and duplicate CRT startup objects"
 }
 
 check_docs() {
