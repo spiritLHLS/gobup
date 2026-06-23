@@ -66,6 +66,7 @@ func InitDB(dbPath string) error {
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_part_history_time ON record_history_parts(history_id, start_time)")
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_part_file_path ON record_history_parts(file_path)")
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_part_room_time ON record_history_parts(room_id, end_time)")
+	DB.Exec("CREATE INDEX IF NOT EXISTS idx_agent_upload_priority ON agent_nodes(blocked, enabled, priority DESC)")
 
 	// 初始化系统配置（如果不存在）
 	var config models.SystemConfig
@@ -158,6 +159,7 @@ func seedAgentNodeFromConfig(config *models.SystemConfig) {
 		Name:     "默认 Agent",
 		Endpoint: endpoint,
 		Purpose:  models.NormalizeAgentPurpose(config.AgentPurpose),
+		Priority: 50,
 		Enabled:  true,
 		Blocked:  false,
 	}

@@ -294,16 +294,6 @@ func UpdateSystemConfig(c *gin.Context) {
 	config.UploadSpeedLimitMBps = req.UploadSpeedLimitMBps
 	config.UploadWhileRecording = req.UploadWhileRecording
 	config.PublishWhileRecording = req.PublishWhileRecording
-	config.PublishMode = strings.TrimSpace(req.PublishMode)
-	config.PublishAgentEndpoint = strings.TrimSpace(req.PublishAgentEndpoint)
-	config.PublishAgentToken = strings.TrimSpace(req.PublishAgentToken)
-	config.PublishAgentTimeout = req.PublishAgentTimeout
-	config.AgentPurpose = strings.TrimSpace(req.AgentPurpose)
-	config.AgentInstallerSource = strings.TrimSpace(req.AgentInstallerSource)
-	config.AgentControllerBaseURL = strings.TrimRight(strings.TrimSpace(req.AgentControllerBaseURL), "/")
-	config.AgentGitHubRepo = strings.TrimSpace(req.AgentGitHubRepo)
-	config.AgentCDNBaseURL = strings.TrimRight(strings.TrimSpace(req.AgentCDNBaseURL), "/")
-	config.FileCheckMode = strings.TrimSpace(req.FileCheckMode)
 	config.DanmakuBurnStyle = strings.TrimSpace(req.DanmakuBurnStyle)
 	config.DanmakuFontSize = req.DanmakuFontSize
 	config.DanmakuFontColor = strings.TrimSpace(req.DanmakuFontColor)

@@ -26,6 +26,11 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="优先级" width="100">
+          <template #default="{ row }">
+            {{ row.priority ?? 50 }}
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="190">
           <template #default="{ row }">
             <div class="status-tags">
@@ -57,7 +62,7 @@
               <el-button size="small" :icon="Connection" :loading="row.detecting" @click="detectAgent(row)">
                 检测
               </el-button>
-              <el-button size="small" type="primary" plain :disabled="row.blocked || !row.enabled" @click="useAgent(row)">
+              <el-button size="small" type="primary" plain :disabled="!canUseAgent(row)" @click="useAgent(row)">
                 设为当前
               </el-button>
               <el-button size="small" :icon="DocumentCopy" @click="openInstallDialog(row)">
@@ -122,6 +127,9 @@
             <el-radio-button value="filescan">文件检查</el-radio-button>
             <el-radio-button value="both">两者</el-radio-button>
           </el-radio-group>
+        </el-form-item>
+        <el-form-item label="优先级">
+          <el-input-number v-model="agentForm.priority" :min="0" :max="100" :step="5" />
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="agentForm.enabled" :disabled="agentForm.blocked" />
@@ -193,6 +201,7 @@ const agentForm = reactive({
   name: '',
   endpoint: '',
   purpose: 'both',
+  priority: 50,
   enabled: true,
   blocked: false,
   blockReason: ''
@@ -203,6 +212,7 @@ const resetForm = (agent = null) => {
   agentForm.name = agent?.name || ''
   agentForm.endpoint = agent?.endpoint || ''
   agentForm.purpose = agent?.purpose || 'both'
+  agentForm.priority = agent?.priority ?? 50
   agentForm.enabled = agent?.enabled ?? true
   agentForm.blocked = agent?.blocked ?? false
   agentForm.blockReason = agent?.blockReason || ''
@@ -281,6 +291,10 @@ const detectAgent = async (agent) => {
 }
 
 const useAgent = async (agent) => {
+  if (!canUseAgent(agent)) {
+    ElMessage.warning('请先检测该 Agent，确认健康状态正常')
+    return
+  }
   const response = await agentAPI.use(agent.id)
   if (response.type === 'success') {
     ElMessage.success(response.msg || '已设为当前 Agent')
@@ -400,6 +414,10 @@ const healthTagType = (status) => {
   if (status === 'success') return 'success'
   if (status === 'error') return 'danger'
   return 'info'
+}
+
+const canUseAgent = (agent) => {
+  return Boolean(agent?.enabled && !agent?.blocked && agent?.lastHealthStatus === 'success')
 }
 
 const formatTime = (value) => {

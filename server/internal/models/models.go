@@ -412,6 +412,7 @@ type AgentNode struct {
 	Name              string         `json:"name"`
 	Endpoint          string         `gorm:"type:text;uniqueIndex" json:"endpoint"`
 	Purpose           string         `gorm:"default:both;index" json:"purpose"`
+	Priority          int            `gorm:"default:50;index" json:"priority"` // 上传目标优先级，0-100，数值越大越优先
 	Enabled           bool           `gorm:"default:true;index" json:"enabled"`
 	Blocked           bool           `gorm:"default:false;index" json:"blocked"`
 	BlockReason       string         `gorm:"type:text" json:"blockReason"`

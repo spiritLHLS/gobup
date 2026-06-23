@@ -14,6 +14,7 @@ import (
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/services"
+	"gorm.io/gorm"
 )
 
 func (s *Service) PublishHistory(historyID uint, userID uint) error {
@@ -132,13 +133,24 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 
 	if allowRemote {
 		var sysConfig models.SystemConfig
-		if err := db.First(&sysConfig).Error; err == nil && strings.TrimSpace(sysConfig.PublishMode) == "remote" {
+		if err := db.First(&sysConfig).Error; err == nil && strings.EqualFold(strings.TrimSpace(sysConfig.PublishMode), "remote") {
 			if !models.AgentPurposeAllows(sysConfig.AgentPurpose, models.AgentPurposeUpload) {
 				return fmt.Errorf("当前 Agent 用途为 %s，不允许远程投稿", models.NormalizeAgentPurpose(sysConfig.AgentPurpose))
 			}
 			endpoint := models.NormalizeAgentEndpoint(sysConfig.PublishAgentEndpoint)
 			if endpoint == "" {
+				if selectedEndpoint, ok := selectPreferredPublishAgentEndpoint(db); ok {
+					endpoint = selectedEndpoint
+					sysConfig.PublishAgentEndpoint = selectedEndpoint
+					_ = db.Model(&sysConfig).Update("publish_agent_endpoint", selectedEndpoint).Error
+				}
+			}
+			if endpoint == "" {
 				return fmt.Errorf("已选择远程投稿模式，但未配置远程 Agent 地址")
+			}
+			if err := validatePublishAgentEndpointForUpload(db, endpoint); err != nil {
+				markPublishFailure(db, &history, err)
+				return err
 			}
 			if endpoint != sysConfig.PublishAgentEndpoint {
 				db.Model(&sysConfig).Update("publish_agent_endpoint", endpoint)
@@ -148,11 +160,21 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 				token = models.NewAgentToken()
 				db.Model(&sysConfig).Update("publish_agent_token", token)
 			}
-			timeout := time.Duration(sysConfig.PublishAgentTimeout) * time.Second
+			timeoutSeconds := sysConfig.PublishAgentTimeout
+			if timeoutSeconds < 3 {
+				timeoutSeconds = 30
+			}
+			if timeoutSeconds > 600 {
+				timeoutSeconds = 600
+			}
+			timeout := time.Duration(timeoutSeconds) * time.Second
 			client := agent.NewClient(endpoint, token, timeout)
 			result, err := client.PublishHistory(historyID, userID)
 			if err != nil {
-				return fmt.Errorf("远程 Agent 投稿失败: %w", err)
+				wrappedErr := fmt.Errorf("远程 Agent 投稿失败: %w", err)
+				markPublishAgentEndpointError(endpoint, wrappedErr)
+				markPublishFailure(db, &history, wrappedErr)
+				return wrappedErr
 			}
 			if result != nil {
 				updates := map[string]interface{}{
@@ -169,6 +191,7 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 				}
 				db.Model(&history).Updates(updates)
 			}
+			markPublishAgentEndpointSuccess(endpoint)
 			log.Printf("[Agent] 已通过远程 Agent 完成投稿: history_id=%d, endpoint=%s", historyID, endpoint)
 			return nil
 		}
@@ -609,6 +632,77 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 	// 见 videosync.go 中的审核通过逻辑
 
 	return nil
+}
+
+func selectPreferredPublishAgentEndpoint(db *gorm.DB) (string, bool) {
+	if db == nil {
+		return "", false
+	}
+	var node models.AgentNode
+	err := db.Where("enabled = ? AND blocked = ?", true, false).
+		Where("purpose IN ?", []string{models.AgentPurposeUpload, models.AgentPurposeBoth, ""}).
+		Order("CASE WHEN last_health_status = 'success' THEN 0 ELSE 1 END, priority DESC, updated_at DESC").
+		First(&node).Error
+	if err != nil {
+		return "", false
+	}
+	endpoint := models.NormalizeAgentEndpoint(node.Endpoint)
+	return endpoint, endpoint != ""
+}
+
+func validatePublishAgentEndpointForUpload(db *gorm.DB, endpoint string) error {
+	if db == nil {
+		return nil
+	}
+	endpoint = models.NormalizeAgentEndpoint(endpoint)
+	var node models.AgentNode
+	if err := db.Where("endpoint = ?", endpoint).First(&node).Error; err != nil {
+		return nil
+	}
+	if node.Blocked {
+		if strings.TrimSpace(node.BlockReason) != "" {
+			return fmt.Errorf("当前远程 Agent 已屏蔽: %s", strings.TrimSpace(node.BlockReason))
+		}
+		return fmt.Errorf("当前远程 Agent 已屏蔽")
+	}
+	if !node.Enabled {
+		return fmt.Errorf("当前远程 Agent 已停用")
+	}
+	if !models.AgentPurposeAllows(node.Purpose, models.AgentPurposeUpload) {
+		return fmt.Errorf("当前远程 Agent 用途为 %s，不允许上传投稿", models.NormalizeAgentPurpose(node.Purpose))
+	}
+	return nil
+}
+
+func markPublishAgentEndpointError(endpoint string, err error) {
+	if err == nil {
+		return
+	}
+	endpoint = models.NormalizeAgentEndpoint(endpoint)
+	if endpoint == "" {
+		return
+	}
+	_ = database.GetDB().Model(&models.AgentNode{}).
+		Where("endpoint = ?", endpoint).
+		Updates(map[string]interface{}{
+			"last_health_status":  "error",
+			"last_health_message": err.Error(),
+		}).Error
+}
+
+func markPublishAgentEndpointSuccess(endpoint string) {
+	endpoint = models.NormalizeAgentEndpoint(endpoint)
+	if endpoint == "" {
+		return
+	}
+	now := time.Now()
+	_ = database.GetDB().Model(&models.AgentNode{}).
+		Where("endpoint = ?", endpoint).
+		Updates(map[string]interface{}{
+			"last_seen_at":        &now,
+			"last_health_status":  "success",
+			"last_health_message": "最近投稿请求成功",
+		}).Error
 }
 
 func normalizePublishTitle(title string) string {

@@ -182,7 +182,9 @@ export const agentAPI = {
   unblock: (id) => request.post(`/agents/${id}/unblock`),
   use: (id) => request.post(`/agents/${id}/use`),
   detect: (id) => request.post(`/agents/${id}/detect`),
-  installCommand: (id, params = {}) => request.get(`/agents/${id}/install-command`, { params })
+  installCommand: (id, params = {}) => request.get(`/agents/${id}/install-command`, { params }),
+  uploadTargets: (refresh = false) => request.get('/agents/upload-targets', { params: { refresh } }),
+  selectUploadTarget: (data) => request.post('/agents/upload-target', data)
 }
 
 export default request

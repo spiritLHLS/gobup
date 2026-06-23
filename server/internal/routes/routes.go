@@ -211,6 +211,8 @@ func SetupRoutes(router *gin.Engine) {
 			{
 				agents.GET("", controllers.ListAgentNodes)
 				agents.POST("", controllers.CreateAgentNode)
+				agents.GET("/upload-targets", controllers.ListUploadTargets)
+				agents.POST("/upload-target", controllers.SelectUploadTarget)
 				agents.PUT("/:id", controllers.UpdateAgentNode)
 				agents.DELETE("/:id", controllers.DeleteAgentNode)
 				agents.POST("/:id/block", controllers.BlockAgentNode)

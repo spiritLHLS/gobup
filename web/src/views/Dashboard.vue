@@ -7,6 +7,8 @@
 
     <DashboardStats :stats="stats" />
 
+    <UploadTargetCard />
+
     <div class="quick-grid">
       <el-card v-for="item in quickLinks" :key="item.path" class="quick-card" shadow="never" @click="go(item.path)">
         <div class="quick-icon">
@@ -27,6 +29,7 @@ import { useRouter } from 'vue-router'
 import { Connection, Document, Operation, Setting, VideoCamera } from '@element-plus/icons-vue'
 import api from '@/api'
 import DashboardStats from '@/components/dashboard/DashboardStats.vue'
+import UploadTargetCard from '@/components/dashboard/UploadTargetCard.vue'
 
 const router = useRouter()
 const stats = ref({
@@ -39,7 +42,7 @@ let statsTimer = null
 
 const quickLinks = [
   { title: '任务队列', desc: '上传队列、后台任务、暂停和重试操作', path: '/operations', icon: Operation },
-  { title: '系统设置', desc: '扫盘、维护、弹幕烧录、Agent 运行配置', path: '/settings', icon: Setting },
+  { title: '系统设置', desc: '扫盘、维护、弹幕烧录和全局运行配置', path: '/settings', icon: Setting },
   { title: 'Agent 管理', desc: 'Agent 节点增删改、检测、屏蔽和强制删除', path: '/agents', icon: Connection },
   { title: '录制历史', desc: '查看分P、投稿、追加和同步状态', path: '/history', icon: VideoCamera },
   { title: '系统日志', desc: '按级别筛选、手动刷新和复制当前显示日志', path: '/logs', icon: Document }

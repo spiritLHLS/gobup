@@ -3,7 +3,7 @@
     <!-- 页面标题 -->
     <div class="page-header">
       <h2>系统设置</h2>
-      <p>管理扫盘、维护、弹幕烧录、Agent 和全局运行配置</p>
+      <p>管理扫盘、维护、弹幕烧录和全局运行配置</p>
     </div>
 
     <!-- 功能开关 -->
@@ -159,18 +159,31 @@
 
         <el-divider />
 
-        <PublishAgentConfig
-          :config="config"
-          :detecting-agent="detectingAgent"
-          :checking-files="checkingAgentFiles"
-          :generating-install-command="generatingInstallCommand"
-          :install-command="agentInstallCommand"
-          :file-check-result="agentFileCheckResult"
-          @toggle-feature="toggleFeature"
-          @detect="detectPublishAgent"
-          @check-files="checkAgentFiles"
-          @load-install-command="loadAgentInstallCommand"
-        />
+        <div class="form-section">
+          <div class="section-title">上传与投稿</div>
+
+          <el-form-item label="边录制边上传">
+            <div class="switch-item">
+              <el-switch
+                v-model="config.uploadWhileRecording"
+                @change="toggleFeature('uploadWhileRecording', $event)"
+                size="large"
+              />
+              <span class="help-text">开启后，文件稳定即可预上传；关闭时必须等待对应直播结束</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="边录制边投稿">
+            <div class="switch-item">
+              <el-switch
+                v-model="config.publishWhileRecording"
+                @change="toggleFeature('publishWhileRecording', $event)"
+                size="large"
+              />
+              <span class="help-text">开启后，已上传分P可先投稿，后续同场次分P会自动追加</span>
+            </div>
+          </el-form-item>
+        </div>
 
         <el-divider />
 
@@ -298,7 +311,6 @@ import FileScanDialog from '../components/filescan/FileScanDialog.vue'
 import CleanFilesDialog from '../components/filescan/CleanFilesDialog.vue'
 import DanmakuBurnGlobalConfig from '../components/dashboard/DanmakuBurnGlobalConfig.vue'
 import DanmakuProxyConfig from '../components/dashboard/DanmakuProxyConfig.vue'
-import PublishAgentConfig from '../components/dashboard/PublishAgentConfig.vue'
 import { createDefaultDashboardConfig, normalizeDashboardConfig } from '../utils/dashboardConfig'
 
 const loading = ref(false)
@@ -309,11 +321,6 @@ const repairing = ref(false)
 const cleaning = ref(false)
 const cleanupPreviewing = ref(false)
 const cleaningDatabase = ref(false)
-const detectingAgent = ref(false)
-const checkingAgentFiles = ref(false)
-const generatingInstallCommand = ref(false)
-const agentInstallCommand = ref(null)
-const agentFileCheckResult = ref(null)
 const fileScanDialogRef = ref(null)
 const cleanFilesDialogRef = ref(null)
 const config = ref(createDefaultDashboardConfig())
@@ -355,6 +362,30 @@ const loadConfig = async () => {
   }
 }
 
+const buildSettingsPayload = () => ({
+  autoFileScan: config.value.autoFileScan,
+  enableFileWatcher: config.value.enableFileWatcher,
+  fileScanInterval: config.value.fileScanInterval,
+  fileScanMinAge: config.value.fileScanMinAge,
+  fileScanMinSize: config.value.fileScanMinSize,
+  fileScanMaxAge: config.value.fileScanMaxAge,
+  workPath: config.value.workPath,
+  customScanPaths: config.value.customScanPaths,
+  enableOrphanScan: config.value.enableOrphanScan,
+  orphanScanInterval: config.value.orphanScanInterval,
+  enableDanmakuProxy: config.value.enableDanmakuProxy,
+  danmakuProxyList: config.value.danmakuProxyList,
+  autoDataRepair: config.value.autoDataRepair,
+  uploadSpeedLimitMbps: config.value.uploadSpeedLimitMbps,
+  uploadWhileRecording: config.value.uploadWhileRecording,
+  publishWhileRecording: config.value.publishWhileRecording,
+  danmakuBurnStyle: config.value.danmakuBurnStyle,
+  danmakuFontSize: config.value.danmakuFontSize,
+  danmakuFontColor: config.value.danmakuFontColor,
+  danmakuScrollArea: config.value.danmakuScrollArea,
+  danmakuDisplayArea: config.value.danmakuDisplayArea
+})
+
 // 切换功能开关（实时生效）
 const toggleFeature = async (feature, enabled) => {
   try {
@@ -381,7 +412,7 @@ const toggleFeature = async (feature, enabled) => {
 const saveConfig = async () => {
   saving.value = true
   try {
-    const response = await api.put('/config/system', config.value)
+    const response = await api.put('/config/system', buildSettingsPayload())
     if (response.type === 'success') {
       ElMessage.success('配置保存成功')
       // 使用后端返回的最新配置更新前端
@@ -411,70 +442,6 @@ const getFeatureName = (feature) => {
     publishWhileRecording: '边录制边投稿'
   }
   return names[feature] || feature
-}
-
-const detectPublishAgent = async (purpose) => {
-  detectingAgent.value = true
-  try {
-    const response = await api.get('/agent/detect', {
-      params: { purpose: purpose || config.value.agentPurpose }
-    })
-    if (response.type === 'success') {
-      ElMessage.success(response.msg || '远程 Agent 可用')
-    } else {
-      ElMessage.error(response.msg || '远程 Agent 不可用')
-    }
-  } catch (error) {
-    console.error('检测远程 Agent 失败:', error)
-    ElMessage.error('检测远程 Agent 失败')
-  } finally {
-    detectingAgent.value = false
-  }
-}
-
-const checkAgentFiles = async () => {
-  checkingAgentFiles.value = true
-  try {
-    const response = await api.get('/agent/files/check', { params: { limit: 100 } })
-    if (response.type === 'success') {
-      agentFileCheckResult.value = response.data || null
-      ElMessage.success(response.msg || '文件检查完成')
-    } else {
-      ElMessage.error(response.msg || '文件检查失败')
-    }
-  } catch (error) {
-    console.error('Agent 文件检查失败:', error)
-    ElMessage.error('Agent 文件检查失败')
-  } finally {
-    checkingAgentFiles.value = false
-  }
-}
-
-const loadAgentInstallCommand = async () => {
-  generatingInstallCommand.value = true
-  try {
-    const response = await api.get('/agent/install-command', {
-      params: {
-        purpose: config.value.agentPurpose,
-        source: config.value.agentInstallerSource
-      }
-    })
-    if (response.type === 'success') {
-      agentInstallCommand.value = response
-      if (response.tokenMissing) {
-        ElMessage.warning('请先配置并保存 Agent Token')
-      } else {
-        ElMessage.success('安装命令已生成')
-      }
-    } else {
-      ElMessage.error(response.msg || '生成安装命令失败')
-    }
-  } catch (error) {
-    console.error('生成 Agent 安装命令失败:', error)
-    ElMessage.error('生成安装命令失败')
-  } finally {
-    generatingInstallCommand.value = false
-  }
 }
 
 // 触发文件扫描

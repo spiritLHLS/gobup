@@ -228,8 +228,10 @@ func ResumeUploadPart(c *gin.Context) {
 	part.UploadCancelled = false
 	part.Uploading = false
 	msg := "任务已恢复"
-	if err := enqueuePartIfReady(&part); err != nil {
+	if queued, err := enqueuePartIfReady(&part); err != nil {
 		msg = msg + "，等待自动调度重新入队: " + err.Error()
+	} else if !queued {
+		msg = msg + "，当前条件不满足，等待自动调度重新入队"
 	}
 
 	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": msg})
@@ -299,8 +301,11 @@ func RetryUploadPart(c *gin.Context) {
 	part.UploadErrorType = ""
 	part.RateLimitCooldownAt = nil
 	part.RateLimitRetryCount = 0
-	if err := enqueuePartIfReady(&part); err != nil {
+	if queued, err := enqueuePartIfReady(&part); err != nil {
 		c.JSON(http.StatusOK, gin.H{"type": "warning", "msg": "状态已重置，等待自动调度重新入队: " + err.Error()})
+		return
+	} else if !queued {
+		c.JSON(http.StatusOK, gin.H{"type": "warning", "msg": "状态已重置，当前条件不满足，等待自动调度重新入队"})
 		return
 	}
 
@@ -319,10 +324,56 @@ func PauseAllPendingUploads(c *gin.Context) {
 // ResumeAllPausedUploads 恢复所有暂停的分P。
 func ResumeAllPausedUploads(c *gin.Context) {
 	db := database.GetDB()
+	var parts []models.RecordHistoryPart
+	if err := db.Where(
+		"upload = ? AND upload_paused = ? AND upload_cancelled = ? AND recording = ? AND file_delete = ?",
+		false, true, false, false, false,
+	).Order("start_time ASC").Find(&parts).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "查询暂停任务失败"})
+		return
+	}
+
 	result := db.Model(&models.RecordHistoryPart{}).
 		Where("upload = ? AND upload_paused = ? AND upload_cancelled = ?", false, true, false).
-		Updates(map[string]interface{}{"upload_paused": false, "upload_error_msg": "", "upload_error_type": ""})
-	c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "已批量恢复暂停任务，自动调度会重新入队", "count": result.RowsAffected})
+		Updates(map[string]interface{}{
+			"upload_paused":     false,
+			"uploading":         false,
+			"upload_error_msg":  "",
+			"upload_error_type": "",
+		})
+
+	enqueued := 0
+	skipped := 0
+	failed := 0
+	for i := range parts {
+		parts[i].UploadPaused = false
+		parts[i].Uploading = false
+		parts[i].UploadErrorMsg = ""
+		parts[i].UploadErrorType = ""
+		queued, err := enqueuePartIfReady(&parts[i])
+		if err != nil {
+			failed++
+			continue
+		}
+		if !queued {
+			skipped++
+			continue
+		}
+		enqueued++
+	}
+
+	msg := "已批量恢复暂停任务并重新入队"
+	if failed > 0 || skipped > 0 {
+		msg = msg + "，部分任务等待下次自动调度"
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"type":     "success",
+		"msg":      msg,
+		"count":    result.RowsAffected,
+		"enqueued": enqueued,
+		"skipped":  skipped,
+		"failed":   failed,
+	})
 }
 
 // CancelAllPendingUploads 取消所有未开始或已暂停的待上传分P。
@@ -406,31 +457,40 @@ func loadQueuePart(c *gin.Context) (models.RecordHistoryPart, bool) {
 	return part, true
 }
 
-func enqueuePartIfReady(part *models.RecordHistoryPart) error {
+func enqueuePartIfReady(part *models.RecordHistoryPart) (bool, error) {
 	if historyUploadService == nil {
-		return nil
+		return false, nil
 	}
 	if part == nil || part.Recording || part.FileDelete || part.FilePath == "" {
-		return nil
+		return false, nil
+	}
+	if part.Upload || part.Uploading || part.UploadPaused || part.UploadCancelled {
+		return false, nil
+	}
+	if part.RateLimitCooldownAt != nil && part.RateLimitCooldownAt.After(time.Now()) {
+		return false, nil
 	}
 
 	db := database.GetDB()
 	var history models.RecordHistory
 	if err := db.First(&history, part.HistoryID).Error; err != nil {
-		return err
+		return false, err
 	}
 	if !history.Upload {
-		return nil
+		return false, nil
 	}
 
 	var room models.RecordRoom
 	if err := db.Where("room_id = ?", part.RoomID).First(&room).Error; err != nil {
-		return err
+		return false, err
 	}
 	if !room.Upload {
-		return nil
+		return false, nil
 	}
-	return historyUploadService.UploadPart(part, &history, &room)
+	if err := historyUploadService.UploadPart(part, &history, &room); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func queuePartStatus(part models.RecordHistoryPart) string {
