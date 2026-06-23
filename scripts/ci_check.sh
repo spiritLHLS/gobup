@@ -258,6 +258,10 @@ check_agent_distribution() {
   grep -q 'gobup-agent-linux-amd64.tar.gz' .github/workflows/main.yml && grep -q 'AGENT_TARGETS=' .github/workflows/main.yml \
     && log_pass "release workflow builds and uploads Rust agent packages" \
     || log_fail "release workflow does not build Rust agent packages"
+
+  grep -q 'x86_64-unknown-linux-musl' .github/workflows/main.yml && grep -q 'aarch64-unknown-linux-musl' .github/workflows/main.yml && grep -Fq 'libc\.so\.6' scripts/build_agent.sh \
+    && log_pass "agent release packages are guarded against new glibc runtime requirements" \
+    || log_fail "agent release packages are not guarded against glibc runtime drift"
 }
 
 check_docs() {

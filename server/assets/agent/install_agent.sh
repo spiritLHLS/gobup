@@ -199,6 +199,28 @@ install_binary() {
   log_success "Installed gobup-agent to $BIN_PATH"
 }
 
+check_binary_compatibility() {
+  [ "${ALLOW_GLIBC_AGENT:-0}" = "1" ] && return 0
+
+  if command -v strings >/dev/null 2>&1; then
+    if strings "$BIN_PATH" 2>/dev/null | grep -q 'GLIBC_[0-9]'; then
+      log_error "Downloaded gobup-agent requires glibc. This package may fail on older Linux hosts."
+      log_error "Use a newer musl/static gobup-agent release, or set ALLOW_GLIBC_AGENT=1 only if this host is known compatible."
+      exit 1
+    fi
+  fi
+
+  if command -v ldd >/dev/null 2>&1; then
+    ldd_output="$(ldd "$BIN_PATH" 2>&1 || true)"
+    if printf '%s' "$ldd_output" | grep -Eq 'GLIBC_[0-9.]+.*not found|version .* not found|required by'; then
+      log_error "gobup-agent is not compatible with this host libc:"
+      printf '%s\n' "$ldd_output" >&2
+      log_error "Install a musl/static gobup-agent package and rerun this command."
+      exit 1
+    fi
+  fi
+}
+
 write_env() {
   mkdir -p "$INSTALL_DIR"
   [ -z "$UPSTREAM_TOKEN" ] && UPSTREAM_TOKEN="$TOKEN"
@@ -272,6 +294,7 @@ EOF
       return 0
     fi
     log_error "GoBup Agent failed to start. Check: journalctl -u ${SERVICE_NAME} -xe"
+    journalctl -u "$SERVICE_NAME" -n 30 --no-pager 2>/dev/null || true
     exit 1
   fi
 
@@ -286,4 +309,5 @@ if ! download_archive; then
   exit 1
 fi
 install_binary
+check_binary_compatibility
 install_service

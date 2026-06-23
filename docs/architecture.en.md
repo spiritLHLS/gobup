@@ -165,7 +165,7 @@ The upload queue response includes part file, time, cooldown, temporary-file, an
 - `make build`: frontend plus non-embedded backend.
 - `make build-embed`: production binary with embedded frontend.
 - `make build-cross`: production binaries for linux/darwin/windows amd64/arm64 combinations.
-- `make build-agent`: builds the Rust Agent and produces `gobup-agent-linux-*.tar.gz` controller distribution packages.
+- `make build-agent`: builds musl/static Rust Agent packages and produces `gobup-agent-linux-*.tar.gz` controller distribution archives so older glibc hosts can start the Agent.
 - Dockerfiles use Node.js 24 and Go 1.25.
 - GitHub Actions opt into Node.js 24 with `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`.
 - CI runs `swag init --parseDependency --parseInternal` to verify that Swagger/OpenAPI generated files in `server/docs` stay synchronized, and checks API route coverage stays at or above 90%.

@@ -165,7 +165,7 @@ Rust Agent 是独立二进制 `gobup-agent`，通过 token 保护 `/agent/v1/*` 
 - `make build`：构建前端和非嵌入后端。
 - `make build-embed`：构建嵌入式生产二进制。
 - `make build-cross`：构建 linux/darwin/windows 的 amd64/arm64 生产二进制组合。
-- `make build-agent`：构建 Rust Agent 并生成 `gobup-agent-linux-*.tar.gz` 控制端分发包。
+- `make build-agent`：构建 musl/static Rust Agent，并生成 `gobup-agent-linux-*.tar.gz` 控制端分发包，避免旧版 glibc 主机无法启动 Agent。
 - Dockerfile 使用 Node.js 24 和 Go 1.25。
 - GitHub Actions 使用 Node.js 24 运行环境，并设置 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`。
 - CI 会运行 `swag init --parseDependency --parseInternal` 校验 `server/docs` 中的 Swagger/OpenAPI 生成文件是否同步，并检查 API 路由覆盖率不低于 90%。

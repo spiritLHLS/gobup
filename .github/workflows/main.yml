@@ -68,11 +68,10 @@ jobs:
 
     - name: Build Rust agent release packages
       run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc-aarch64-linux-gnu
-        rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
-        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-        AGENT_TARGETS="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu" ./scripts/build_agent.sh
+        rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+        export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld
+        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld
+        AGENT_TARGETS="x86_64-unknown-linux-musl aarch64-unknown-linux-musl" ./scripts/build_agent.sh
 
     - name: Build Vue web application
       run: |
@@ -148,8 +147,8 @@ jobs:
         - \`gobup-server-windows-amd64.zip\` - Windows AMD64 版本（单二进制文件）
 
         ### Rust Agent
-        - \`gobup-agent-linux-amd64.tar.gz\` - Linux AMD64 Agent
-        - \`gobup-agent-linux-arm64.tar.gz\` - Linux ARM64 Agent
+        - \`gobup-agent-linux-amd64.tar.gz\` - Linux AMD64 Agent（musl/static，兼容旧版 glibc）
+        - \`gobup-agent-linux-arm64.tar.gz\` - Linux ARM64 Agent（musl/static，兼容旧版 glibc）
         - \`install_agent.sh\` - Agent 一键安装脚本
 
         > 服务器二进制文件已包含嵌入的前端页面；release 构建会同时嵌入 Agent 安装脚本和 Linux Agent 包供控制端分发。"

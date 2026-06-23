@@ -81,7 +81,7 @@ make build
 Build Rust Agent packages:
 
 ```bash
-AGENT_TARGETS="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu" ./scripts/build_agent.sh
+AGENT_TARGETS="x86_64-unknown-linux-musl aarch64-unknown-linux-musl" ./scripts/build_agent.sh
 ```
 
 Build a production binary with embedded frontend:
