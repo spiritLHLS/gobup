@@ -28,7 +28,7 @@ jobs:
       - name: Check trigger type and status
         run: |
           echo "Event name: ${{ github.event_name }}"
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Manually triggered workflow"
           else
             echo "Triggered by workflow_run event"
@@ -36,13 +36,30 @@ jobs:
             echo "Conclusion: ${{ github.event.workflow_run.conclusion }}"
           fi
 
+  prepare-image-tags:
+    runs-on: ubuntu-latest
+    needs: check-workflow-success
+    timeout-minutes: 5
+    outputs:
+      candidate_tag: ${{ steps.tags.outputs.candidate_tag }}
+      release_tag: ${{ steps.tags.outputs.release_tag }}
+      date_tag: ${{ steps.tags.outputs.date_tag }}
+    steps:
+      - name: Prepare image tags
+        id: tags
+        run: |
+          stamp="$(date -u +'%Y%m%d-%H%M%S')"
+          day="$(date -u +'%Y%m%d')"
+          echo "candidate_tag=candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v${stamp}" >> "$GITHUB_OUTPUT"
+          echo "date_tag=${day}" >> "$GITHUB_OUTPUT"
+
   build-dockerhub:
     runs-on: ${{ matrix.runner }}
-    needs: check-workflow-success
+    needs: prepare-image-tags
     timeout-minutes: 120
     permissions:
       contents: read
-      packages: write
     strategy:
       matrix:
         include:
@@ -52,41 +69,26 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
         with:
           driver-opts: |
             image=moby/buildkit:latest
             network=host
-      
+
       - name: Login to Docker Hub
-        id: login-dockerhub
-        continue-on-error: true
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
-      - name: Extract metadata for Docker Hub
-        if: steps.login-dockerhub.outcome == 'success'
-        id: meta-dockerhub
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.DOCKER_IMAGE }}
-          tags: |
-            type=raw,value=latest
-          flavor: |
-            suffix=-${{ matrix.arch }}
-      
-      - name: Build and push to Docker Hub
-        if: steps.login-dockerhub.outcome == 'success'
+
+      - name: Build and push Docker Hub digest
         id: build-dockerhub
-        continue-on-error: true
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -97,26 +99,35 @@ jobs:
           cache-from: |
             type=gha,scope=dockerhub-danmaku-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=dockerhub-danmaku-${{ matrix.arch }}
-      
+
+      - name: Verify Docker Hub digest is pullable
+        env:
+          DIGEST: ${{ steps.build-dockerhub.outputs.digest }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          test -n "$DIGEST"
+          docker buildx imagetools inspect "${DOCKER_IMAGE}@${DIGEST}" >/dev/null
+          docker pull --platform "$PLATFORM" "${DOCKER_IMAGE}@${DIGEST}"
+          docker image rm "${DOCKER_IMAGE}@${DIGEST}" >/dev/null 2>&1 || true
+
       - name: Export Docker Hub digest
-        if: steps.build-dockerhub.outcome == 'success'
+        env:
+          DIGEST: ${{ steps.build-dockerhub.outputs.digest }}
         run: |
           mkdir -p /tmp/digests-dockerhub
-          digest="${{ steps.build-dockerhub.outputs.digest }}"
-          touch "/tmp/digests-dockerhub/${digest#sha256:}"
-      
+          printf '%s\n' "$DIGEST" > "/tmp/digests-dockerhub/${{ matrix.arch }}.digest"
+
       - name: Upload Docker Hub digest
-        if: steps.build-dockerhub.outcome == 'success'
         uses: actions/upload-artifact@v6
         with:
           name: digests-dockerhub-${{ matrix.arch }}
-          path: /tmp/digests-dockerhub/*
+          path: /tmp/digests-dockerhub/*.digest
           if-no-files-found: error
           retention-days: 1
 
   build-ghcr:
     runs-on: ${{ matrix.runner }}
-    needs: check-workflow-success
+    needs: prepare-image-tags
     timeout-minutes: 120
     permissions:
       contents: read
@@ -130,36 +141,26 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
         with:
           driver-opts: |
             image=moby/buildkit:latest
             network=host
-      
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Extract metadata for GHCR
-        id: meta-ghcr
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.GHCR_IMAGE }}
-          tags: |
-            type=raw,value=latest
-          flavor: |
-            suffix=-${{ matrix.arch }}
-      
-      - name: Build and push to GHCR
+
+      - name: Build and push GHCR digest
         id: build-ghcr
         uses: docker/build-push-action@v7
         with:
@@ -171,91 +172,237 @@ jobs:
           cache-from: |
             type=gha,scope=ghcr-danmaku-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=ghcr-danmaku-${{ matrix.arch }}
-      
+
+      - name: Verify GHCR digest is pullable
+        env:
+          DIGEST: ${{ steps.build-ghcr.outputs.digest }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          test -n "$DIGEST"
+          docker buildx imagetools inspect "${GHCR_IMAGE}@${DIGEST}" >/dev/null
+          docker pull --platform "$PLATFORM" "${GHCR_IMAGE}@${DIGEST}"
+          docker image rm "${GHCR_IMAGE}@${DIGEST}" >/dev/null 2>&1 || true
+
       - name: Export GHCR digest
-        if: steps.build-ghcr.outcome == 'success'
+        env:
+          DIGEST: ${{ steps.build-ghcr.outputs.digest }}
         run: |
           mkdir -p /tmp/digests-ghcr
-          digest="${{ steps.build-ghcr.outputs.digest }}"
-          touch "/tmp/digests-ghcr/${digest#sha256:}"
-      
+          printf '%s\n' "$DIGEST" > "/tmp/digests-ghcr/${{ matrix.arch }}.digest"
+
       - name: Upload GHCR digest
-        if: steps.build-ghcr.outcome == 'success'
         uses: actions/upload-artifact@v6
         with:
           name: digests-ghcr-${{ matrix.arch }}
-          path: /tmp/digests-ghcr/*
+          path: /tmp/digests-ghcr/*.digest
           if-no-files-found: error
           retention-days: 1
 
-  merge-dockerhub:
+  merge-dockerhub-candidate:
     runs-on: ubuntu-latest
-    needs: build-dockerhub
-    if: always()
+    needs:
+      - prepare-image-tags
+      - build-dockerhub
     timeout-minutes: 45
     permissions:
       contents: read
-      packages: write
-    
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-      
+
       - name: Login to Docker Hub
-        id: login-dockerhub
-        continue-on-error: true
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
-      - name: Get current date
-        id: date
-        run: echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-      
+
       - name: Download Docker Hub digests
-        id: download-dockerhub
-        continue-on-error: true
         uses: actions/download-artifact@v6
         with:
           pattern: digests-dockerhub-*
           merge-multiple: true
           path: /tmp/digests-dockerhub
 
-      - name: Ensure digest dir exists (Docker Hub)
-        run: mkdir -p /tmp/digests-dockerhub
-      
-      - name: Extract metadata for Docker Hub
-        if: steps.login-dockerhub.outcome == 'success' && steps.download-dockerhub.outcome == 'success'
-        id: meta-dockerhub
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.DOCKER_IMAGE }}
-          tags: |
-            type=raw,value=latest
-            type=raw,value=v${{ steps.date.outputs.date }}
-            type=raw,value={{date 'YYYYMMDD'}}
-      
-      - name: Create manifest list and push to Docker Hub
-        if: steps.login-dockerhub.outcome == 'success' && steps.download-dockerhub.outcome == 'success'
-        continue-on-error: true
+      - name: Create Docker Hub candidate manifest
         working-directory: /tmp/digests-dockerhub
+        env:
+          CANDIDATE_TAG: ${{ needs.prepare-image-tags.outputs.candidate_tag }}
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.DOCKER_IMAGE }}@sha256:%s ' *)
-      
-      - name: Inspect Docker Hub image
-        if: steps.login-dockerhub.outcome == 'success' && steps.download-dockerhub.outcome == 'success'
-        continue-on-error: true
+          mapfile -t files < <(find . -maxdepth 1 -type f -name '*.digest' | sort)
+          if [ "${#files[@]}" -ne 2 ]; then
+            echo "Expected 2 Docker Hub digests, found ${#files[@]}" >&2
+            exit 1
+          fi
+
+          refs=()
+          for file in "${files[@]}"; do
+            digest="$(tr -d '[:space:]' < "$file")"
+            case "$digest" in
+              sha256:*) ;;
+              *) echo "Invalid digest in $file: $digest" >&2; exit 1 ;;
+            esac
+            docker buildx imagetools inspect "${DOCKER_IMAGE}@${digest}" >/dev/null
+            refs+=("${DOCKER_IMAGE}@${digest}")
+          done
+
+          docker buildx imagetools create -t "${DOCKER_IMAGE}:${CANDIDATE_TAG}" "${refs[@]}"
+          docker buildx imagetools inspect "${DOCKER_IMAGE}:${CANDIDATE_TAG}"
+
+  merge-ghcr-candidate:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare-image-tags
+      - build-ghcr
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download GHCR digests
+        uses: actions/download-artifact@v6
+        with:
+          pattern: digests-ghcr-*
+          merge-multiple: true
+          path: /tmp/digests-ghcr
+
+      - name: Create GHCR candidate manifest
+        working-directory: /tmp/digests-ghcr
+        env:
+          CANDIDATE_TAG: ${{ needs.prepare-image-tags.outputs.candidate_tag }}
         run: |
-          docker buildx imagetools inspect ${{ env.DOCKER_IMAGE }}:latest
-      
-      - name: Update Docker Hub Description
-        if: steps.login-dockerhub.outcome == 'success'
-        continue-on-error: true
+          mapfile -t files < <(find . -maxdepth 1 -type f -name '*.digest' | sort)
+          if [ "${#files[@]}" -ne 2 ]; then
+            echo "Expected 2 GHCR digests, found ${#files[@]}" >&2
+            exit 1
+          fi
+
+          refs=()
+          for file in "${files[@]}"; do
+            digest="$(tr -d '[:space:]' < "$file")"
+            case "$digest" in
+              sha256:*) ;;
+              *) echo "Invalid digest in $file: $digest" >&2; exit 1 ;;
+            esac
+            docker buildx imagetools inspect "${GHCR_IMAGE}@${digest}" >/dev/null
+            refs+=("${GHCR_IMAGE}@${digest}")
+          done
+
+          docker buildx imagetools create -t "${GHCR_IMAGE}:${CANDIDATE_TAG}" "${refs[@]}"
+          docker buildx imagetools inspect "${GHCR_IMAGE}:${CANDIDATE_TAG}"
+
+  validate-dockerhub-candidate:
+    runs-on: ${{ matrix.runner }}
+    needs:
+      - prepare-image-tags
+      - merge-dockerhub-candidate
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Pull and smoke-test Docker Hub candidate
+        env:
+          CANDIDATE_TAG: ${{ needs.prepare-image-tags.outputs.candidate_tag }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          docker pull --platform "$PLATFORM" "${DOCKER_IMAGE}:${CANDIDATE_TAG}"
+          docker run --rm --platform "$PLATFORM" "${DOCKER_IMAGE}:${CANDIDATE_TAG}" /app/gobup -help >/dev/null
+
+  validate-ghcr-candidate:
+    runs-on: ${{ matrix.runner }}
+    needs:
+      - prepare-image-tags
+      - merge-ghcr-candidate
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and smoke-test GHCR candidate
+        env:
+          CANDIDATE_TAG: ${{ needs.prepare-image-tags.outputs.candidate_tag }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          docker pull --platform "$PLATFORM" "${GHCR_IMAGE}:${CANDIDATE_TAG}"
+          docker run --rm --platform "$PLATFORM" "${GHCR_IMAGE}:${CANDIDATE_TAG}" /app/gobup -help >/dev/null
+
+  promote-dockerhub:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare-image-tags
+      - merge-dockerhub-candidate
+      - validate-dockerhub-candidate
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Promote Docker Hub candidate
+        env:
+          CANDIDATE_TAG: ${{ needs.prepare-image-tags.outputs.candidate_tag }}
+          RELEASE_TAG: ${{ needs.prepare-image-tags.outputs.release_tag }}
+          DATE_TAG: ${{ needs.prepare-image-tags.outputs.date_tag }}
+        run: |
+          docker buildx imagetools create \
+            -t "${DOCKER_IMAGE}:latest" \
+            -t "${DOCKER_IMAGE}:${RELEASE_TAG}" \
+            -t "${DOCKER_IMAGE}:${DATE_TAG}" \
+            "${DOCKER_IMAGE}:${CANDIDATE_TAG}"
+          docker buildx imagetools inspect "${DOCKER_IMAGE}:latest"
+
+      - name: Update Docker Hub description
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -263,66 +410,37 @@ jobs:
           repository: spiritlhl/gobup
           readme-filepath: ./README.md
 
-  merge-ghcr:
+  promote-ghcr:
     runs-on: ubuntu-latest
-    needs: build-ghcr
-    if: always()
-    timeout-minutes: 45
+    needs:
+      - prepare-image-tags
+      - merge-ghcr-candidate
+      - validate-ghcr-candidate
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
-    
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-      
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Get current date
-        id: date
-        run: echo "date=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-      
-      - name: Download GHCR digests
-        id: download-ghcr
-        continue-on-error: true
-        uses: actions/download-artifact@v6
-        with:
-          pattern: digests-ghcr-*
-          merge-multiple: true
-          path: /tmp/digests-ghcr
 
-      - name: Ensure digest dir exists (GHCR)
-        run: mkdir -p /tmp/digests-ghcr
-      
-      - name: Extract metadata for GHCR
-        if: steps.download-ghcr.outcome == 'success'
-        id: meta-ghcr
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.GHCR_IMAGE }}
-          tags: |
-            type=raw,value=latest
-            type=raw,value=v${{ steps.date.outputs.date }}
-            type=raw,value={{date 'YYYYMMDD'}}
-
-      - name: Create manifest list and push to GHCR
-        if: steps.download-ghcr.outcome == 'success'
-        continue-on-error: true
-        working-directory: /tmp/digests-ghcr
+      - name: Promote GHCR candidate
+        env:
+          CANDIDATE_TAG: ${{ needs.prepare-image-tags.outputs.candidate_tag }}
+          RELEASE_TAG: ${{ needs.prepare-image-tags.outputs.release_tag }}
+          DATE_TAG: ${{ needs.prepare-image-tags.outputs.date_tag }}
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
-
-      - name: Inspect GHCR image
-        if: steps.download-ghcr.outcome == 'success'
-        continue-on-error: true
-        run: |
-          docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:latest
+          docker buildx imagetools create \
+            -t "${GHCR_IMAGE}:latest" \
+            -t "${GHCR_IMAGE}:${RELEASE_TAG}" \
+            -t "${GHCR_IMAGE}:${DATE_TAG}" \
+            "${GHCR_IMAGE}:${CANDIDATE_TAG}"
+          docker buildx imagetools inspect "${GHCR_IMAGE}:latest"

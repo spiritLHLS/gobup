@@ -28,6 +28,24 @@ check_workflows() {
     log_pass "core action versions are upgraded"
   fi
 
+  if grep -q 'continue-on-error: true' .github/workflows/build_docker.yml; then
+    log_fail "Docker image publishing workflow still masks errors"
+  else
+    log_pass "Docker image publishing workflow fails on publish/validation errors"
+  fi
+
+  grep -q 'candidate_tag' .github/workflows/build_docker.yml \
+    && grep -q 'validate-dockerhub-candidate' .github/workflows/build_docker.yml \
+    && grep -q 'validate-ghcr-candidate' .github/workflows/build_docker.yml \
+    && grep -q 'docker pull --platform "$PLATFORM"' .github/workflows/build_docker.yml \
+    && log_pass "Docker latest tags are promoted only after cross-platform candidate pulls" \
+    || log_fail "Docker latest promotion is missing candidate pull validation"
+
+  grep -q 'Expected 2 Docker Hub digests' .github/workflows/build_docker.yml \
+    && grep -q 'Expected 2 GHCR digests' .github/workflows/build_docker.yml \
+    && log_pass "Docker manifest merge requires both architecture digests" \
+    || log_fail "Docker manifest merge does not require both architecture digests"
+
   grep -q "go-version: '1.25'" .github/workflows/main.yml \
     && log_pass "CI uses Go 1.25" \
     || log_fail "CI Go version is not aligned with go.mod"
