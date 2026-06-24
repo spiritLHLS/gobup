@@ -13,6 +13,7 @@ env:
   DOCKER_IMAGE: spiritlhl/gobup
   GHCR_IMAGE: ghcr.io/spiritlhls/gobup
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  BUILDX_NO_DEFAULT_ATTESTATIONS: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
@@ -91,6 +92,7 @@ jobs:
           context: .
           file: ./Dockerfile.danmaku
           platforms: ${{ matrix.platform }}
+          provenance: false
           outputs: type=image,name=${{ env.DOCKER_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: |
             type=gha,scope=dockerhub-danmaku-${{ matrix.arch }}
@@ -164,6 +166,7 @@ jobs:
           context: .
           file: ./Dockerfile.danmaku
           platforms: ${{ matrix.platform }}
+          provenance: false
           outputs: type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: |
             type=gha,scope=ghcr-danmaku-${{ matrix.arch }}
