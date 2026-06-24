@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
 	"gorm.io/gorm"
 )
@@ -79,4 +81,35 @@ func buildAgentProxyURL(endpoint, token string) (string, error) {
 		proxy.User = url.User(strings.TrimSpace(token))
 	}
 	return proxy.String(), nil
+}
+
+func markUploadAgentEndpointError(endpoint string, err error) {
+	if err == nil {
+		return
+	}
+	endpoint = models.NormalizeAgentEndpoint(endpoint)
+	if endpoint == "" {
+		return
+	}
+	_ = database.GetDB().Model(&models.AgentNode{}).
+		Where("endpoint = ?", endpoint).
+		Updates(map[string]interface{}{
+			"last_health_status":  "error",
+			"last_health_message": err.Error(),
+		}).Error
+}
+
+func markUploadAgentEndpointSuccess(endpoint string) {
+	endpoint = models.NormalizeAgentEndpoint(endpoint)
+	if endpoint == "" {
+		return
+	}
+	now := time.Now()
+	_ = database.GetDB().Model(&models.AgentNode{}).
+		Where("endpoint = ?", endpoint).
+		Updates(map[string]interface{}{
+			"last_seen_at":        &now,
+			"last_health_status":  "success",
+			"last_health_message": "最近上传出口请求成功",
+		}).Error
 }

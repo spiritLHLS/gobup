@@ -1,10 +1,26 @@
 package upload
 
 import (
+	"fmt"
 	"time"
 )
 
 const maxAutoPublishRetries = 6
+
+type UploadCooldownActiveError struct {
+	PartID    uint
+	ErrorType string
+	RetryAt   time.Time
+	Remaining time.Duration
+}
+
+func (e *UploadCooldownActiveError) Error() string {
+	if e == nil {
+		return "upload cooldown active"
+	}
+	return fmt.Sprintf("upload cooldown active: part_id=%d, error_type=%s, retry_at=%s, remaining=%s",
+		e.PartID, e.ErrorType, e.RetryAt.Format("2006-01-02 15:04:05"), formatDurationForLog(e.Remaining))
+}
 
 func retryBackoffDuration(retryCount int, base, max time.Duration) time.Duration {
 	if retryCount < 1 {

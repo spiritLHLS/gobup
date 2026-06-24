@@ -12,6 +12,7 @@ import (
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/ratelimit"
 	"github.com/gobup/server/internal/services"
+	"gorm.io/gorm"
 )
 
 const (
@@ -101,23 +102,6 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		return fmt.Errorf("房间未配置上传用户")
 	}
 
-	// 检查是否在速率限制冷却期内
-	if part.RateLimitCooldownAt != nil && time.Now().Before(*part.RateLimitCooldownAt) {
-		remainingTime := time.Until(*part.RateLimitCooldownAt)
-		log.Printf("[速率限制] 分P %d 仍在冷却期内，剩余时间: %.0f分钟", part.ID, remainingTime.Minutes())
-		return fmt.Errorf("速率限制冷却期中，剩余时间: %.0f分钟", remainingTime.Minutes())
-	}
-
-	// 如果冷却期已过，重置相关字段
-	if part.RateLimitCooldownAt != nil && time.Now().After(*part.RateLimitCooldownAt) {
-		log.Printf("[速率限制] 分P %d 冷却期已过，重置限制状态", part.ID)
-		part.RateLimitCooldownAt = nil
-		part.RateLimitRetryCount = 0
-		part.UploadErrorMsg = ""
-		part.UploadErrorType = ""
-		db.Save(part)
-	}
-
 	// 防止重复上传（内存级锁，防止同一进程内并发）
 	if _, loaded := s.uploadingParts.LoadOrStore(part.ID, true); loaded {
 		return fmt.Errorf("分P %d 正在上传中", part.ID)
@@ -145,8 +129,14 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		// 跳过逻辑由 uploadingParts.LoadOrStore 唯一保证——持有锁则继续，否则返回 "正在上传中"。
 		// 用DB最新数据更新内存中的part，确保后续逻辑基于最新状态
 		*part = freshPart
+		if err := refreshPartUploadCooldownState(db, part, time.Now()); err != nil {
+			return err
+		}
 	} else {
 		log.Printf("[Upload] 无法从DB读取分P %d 的最新状态，使用传入数据继续: %v", part.ID, err)
+		if err := refreshPartUploadCooldownState(db, part, time.Now()); err != nil {
+			return err
+		}
 	}
 
 	if windowErr := newUploadWindowClosedError(room, time.Now()); windowErr != nil {
@@ -156,7 +146,12 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	// 标记为上传中
 	part.Uploading = true
 	part.UploadUserID = room.UploadUserID
-	db.Save(part)
+	db.Model(&models.RecordHistoryPart{}).
+		Where("id = ?", part.ID).
+		Updates(map[string]interface{}{
+			"uploading":      true,
+			"upload_user_id": room.UploadUserID,
+		})
 
 	// 更新历史记录的上传状态为“上传中”
 	if history.UploadStatus == 0 {
@@ -166,7 +161,11 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 
 	defer func() {
 		part.Uploading = false
-		db.Save(part)
+		if err := db.Model(&models.RecordHistoryPart{}).
+			Where("id = ?", part.ID).
+			Update("uploading", false).Error; err != nil {
+			log.Printf("[Upload] 清理 uploading 状态失败: part_id=%d, err=%v", part.ID, err)
+		}
 	}()
 
 	// 获取用户信息
@@ -243,7 +242,12 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 			part.UploadErrorMsg = fmt.Sprintf("上传前转码失败: %v", err)
 			part.UploadErrorType = UploadErrorTypeTranscode
 			s.progressTracker.MarkFailed(int64(part.ID), part.UploadErrorMsg)
-			db.Save(part)
+			db.Model(&models.RecordHistoryPart{}).
+				Where("id = ?", part.ID).
+				Updates(map[string]interface{}{
+					"upload_error_msg":  part.UploadErrorMsg,
+					"upload_error_type": part.UploadErrorType,
+				})
 			return fmt.Errorf("上传前转码失败: %w", err)
 		}
 		uploadPath = processedPath
@@ -353,26 +357,9 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 
 	if uploadErr != nil {
 		// 如果是速率限制，并且所有重试都失败，设置指数退避冷却期
-		rateLimitCooldownText := ""
-		if uploadErrorType == UploadErrorTypeRateLimit {
-			retryCount := part.RateLimitRetryCount + 1
-			cooldownDelay, ok := autoTaskCooldownDuration(uploadErrorType, retryCount)
-			if !ok {
-				cooldownDelay = 24 * time.Hour
-			}
-			cooldownTime := time.Now().Add(cooldownDelay)
-			part.RateLimitCooldownAt = &cooldownTime
-			part.RateLimitRetryCount = retryCount
-			rateLimitCooldownText = cooldownTime.Format("2006-01-02 15:04:05")
-			part.UploadErrorMsg = fmt.Sprintf("速率限制，已设置%s冷却期至 %s", formatDurationForLog(cooldownDelay), rateLimitCooldownText)
-			part.UploadErrorType = UploadErrorTypeRateLimit
-			db.Save(part)
-			log.Printf("[速率限制] 分P %d 触发限制，第%d次失败，冷却至: %s", part.ID, retryCount, rateLimitCooldownText)
-		} else {
-			part.UploadRetryCount++
-			part.UploadErrorMsg = uploadErr.Error()
-			part.UploadErrorType = uploadErrorType
-			db.Save(part)
+		cooldownText := persistUploadFailure(db, part, uploadErrorType, uploadErr)
+		if uploadRoute.Mode == "agent" && shouldMarkUploadAgentEndpointError(uploadErrorType) {
+			markUploadAgentEndpointError(uploadRoute.Endpoint, fmt.Errorf("Agent 上传出口失败: %w", uploadErr))
 		}
 
 		// 标记上传失败
@@ -397,8 +384,8 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 		// 推送失败通知（使用历史记录中实际的主播名）
 		if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
 			if uploadErrorType == UploadErrorTypeRateLimit {
-				s.wxPusher.NotifyRateLimit(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, rateLimitCooldownText)
-			} else {
+				s.wxPusher.NotifyRateLimit(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, cooldownText)
+			} else if uploadErrorType != UploadErrorTypeUser {
 				s.wxPusher.NotifyUploadFailed(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, uploadErr.Error())
 			}
 		}
@@ -414,7 +401,22 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 	part.CID = uploadResult.BizID
 	part.UploadErrorMsg = ""
 	part.UploadErrorType = ""
-	db.Save(part)
+	db.Model(&models.RecordHistoryPart{}).
+		Where("id = ?", part.ID).
+		Updates(map[string]interface{}{
+			"upload":                 true,
+			"uploaded_at":            &uploadedAt,
+			"upload_user_id":         room.UploadUserID,
+			"file_name":              uploadResult.FileName,
+			"cid":                    uploadResult.BizID,
+			"upload_error_msg":       "",
+			"upload_error_type":      "",
+			"rate_limit_cooldown_at": nil,
+			"rate_limit_retry_count": 0,
+		})
+	if uploadRoute.Mode == "agent" {
+		markUploadAgentEndpointSuccess(uploadRoute.Endpoint)
+	}
 
 	log.Printf("上传完成: part_id=%d, cid=%d", part.ID, part.CID)
 
@@ -525,6 +527,116 @@ func formatUploadRetryWaitMessage(attempt, maxAttempts int, delay time.Duration,
 		return fmt.Sprintf("%s，已完成分片 %d/%d", base, chunkDone, chunkTotal)
 	}
 	return base
+}
+
+func refreshPartUploadCooldownState(db *gorm.DB, part *models.RecordHistoryPart, now time.Time) error {
+	if part == nil || part.RateLimitCooldownAt == nil {
+		return nil
+	}
+
+	if now.Before(*part.RateLimitCooldownAt) {
+		remaining := part.RateLimitCooldownAt.Sub(now)
+		if remaining < 0 {
+			remaining = 0
+		}
+		log.Printf("[上传退避] 分P %d 仍在冷却期内，错误类型=%s，剩余时间: %.0f分钟",
+			part.ID, part.UploadErrorType, remaining.Minutes())
+		return &UploadCooldownActiveError{
+			PartID:    part.ID,
+			ErrorType: part.UploadErrorType,
+			RetryAt:   *part.RateLimitCooldownAt,
+			Remaining: remaining,
+		}
+	}
+
+	log.Printf("[上传退避] 分P %d 冷却期已过，重置临时失败状态", part.ID)
+	updates := map[string]interface{}{
+		"rate_limit_cooldown_at": nil,
+		"rate_limit_retry_count": 0,
+		"upload_error_msg":       "",
+		"upload_error_type":      "",
+	}
+	if db != nil {
+		if err := db.Model(&models.RecordHistoryPart{}).Where("id = ?", part.ID).Updates(updates).Error; err != nil {
+			log.Printf("[上传退避] 重置分P冷却状态失败: part_id=%d, err=%v", part.ID, err)
+		}
+	}
+	part.RateLimitCooldownAt = nil
+	part.RateLimitRetryCount = 0
+	part.UploadErrorMsg = ""
+	part.UploadErrorType = ""
+	return nil
+}
+
+func persistUploadFailure(db *gorm.DB, part *models.RecordHistoryPart, errorType string, uploadErr error) string {
+	if db == nil || part == nil || uploadErr == nil {
+		return ""
+	}
+
+	var latest models.RecordHistoryPart
+	if err := db.Select("id", "upload_retry_count", "rate_limit_retry_count").First(&latest, part.ID).Error; err == nil {
+		part.UploadRetryCount = latest.UploadRetryCount
+		part.RateLimitRetryCount = latest.RateLimitRetryCount
+	}
+
+	msg := uploadErr.Error()
+	updates := map[string]interface{}{
+		"upload_error_msg":  msg,
+		"upload_error_type": errorType,
+	}
+
+	if errorType == UploadErrorTypeUser {
+		_ = db.Model(&models.RecordHistoryPart{}).Where("id = ?", part.ID).Updates(updates).Error
+		part.UploadErrorMsg = msg
+		part.UploadErrorType = errorType
+		return ""
+	}
+
+	if cooldownDelay, ok := autoTaskCooldownDuration(errorType, part.RateLimitRetryCount+1); ok {
+		retryCount := part.RateLimitRetryCount + 1
+		cooldownTime := time.Now().Add(cooldownDelay)
+		cooldownText := cooldownTime.Format("2006-01-02 15:04:05")
+		label := uploadCooldownLabel(errorType)
+		msg = fmt.Sprintf("%s，已设置%s冷却期至 %s: %v", label, formatDurationForLog(cooldownDelay), cooldownText, uploadErr)
+		updates["upload_error_msg"] = msg
+		updates["rate_limit_cooldown_at"] = &cooldownTime
+		updates["rate_limit_retry_count"] = retryCount
+		_ = db.Model(&models.RecordHistoryPart{}).Where("id = ?", part.ID).Updates(updates).Error
+
+		part.UploadErrorMsg = msg
+		part.UploadErrorType = errorType
+		part.RateLimitCooldownAt = &cooldownTime
+		part.RateLimitRetryCount = retryCount
+		log.Printf("[上传退避] 分P %d 错误类型=%s，第%d次临时失败，冷却至: %s", part.ID, errorType, retryCount, cooldownText)
+		return cooldownText
+	}
+
+	retryCount := part.UploadRetryCount + 1
+	updates["upload_retry_count"] = retryCount
+	_ = db.Model(&models.RecordHistoryPart{}).Where("id = ?", part.ID).Updates(updates).Error
+	part.UploadRetryCount = retryCount
+	part.UploadErrorMsg = msg
+	part.UploadErrorType = errorType
+	return ""
+}
+
+func uploadCooldownLabel(errorType string) string {
+	switch errorType {
+	case UploadErrorTypeRateLimit:
+		return "速率限制"
+	case UploadErrorTypeNetwork:
+		return "网络/Agent出口异常"
+	case UploadErrorTypeAuth:
+		return "账号鉴权异常"
+	case UploadErrorTypeUnknown:
+		return "临时未知异常"
+	default:
+		return "临时上传异常"
+	}
+}
+
+func shouldMarkUploadAgentEndpointError(errorType string) bool {
+	return errorType == UploadErrorTypeNetwork || errorType == UploadErrorTypeUnknown
 }
 
 func (s *Service) checkAndPublish(history *models.RecordHistory, room *models.RecordRoom) {

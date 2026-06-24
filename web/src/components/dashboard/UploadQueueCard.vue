@@ -22,6 +22,10 @@
         <span class="queue-label">上传中</span>
       </div>
       <div class="queue-summary-item">
+        <span class="queue-number">{{ status.counts?.cooldown || 0 }}</span>
+        <span class="queue-label">冷却中</span>
+      </div>
+      <div class="queue-summary-item">
         <span class="queue-number">{{ status.counts?.paused || 0 }}</span>
         <span class="queue-label">已暂停</span>
       </div>
@@ -58,6 +62,33 @@
           <el-table-column label="操作" width="190" fixed="right">
             <template #default="{ row }">
               <el-button size="small" :icon="InfoFilled" title="详情" aria-label="查看任务详情" @click="showDetail(row)" />
+              <el-button size="small" :icon="VideoPause" title="暂停" aria-label="暂停任务" @click="handleAction('pause', row)" />
+              <el-button size="small" type="danger" plain :icon="Close" title="取消" aria-label="取消任务" @click="handleAction('cancel', row)" />
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="冷却中" name="cooldown">
+        <el-table :data="status.cooldown || []" height="260" empty-text="暂无冷却任务">
+          <el-table-column prop="roomId" label="房间" width="100" />
+          <el-table-column prop="fileName" label="文件" min-width="220" show-overflow-tooltip />
+          <el-table-column label="类型" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="row.uploadErrorType" size="small" :type="errorTagType(row.uploadErrorType)">
+                {{ errorTypeLabel(row.uploadErrorType) }}
+              </el-tag>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="冷却至" width="170">
+            <template #default="{ row }">{{ formatQueueTime(row.rateLimitCooldownAt) }}</template>
+          </el-table-column>
+          <el-table-column prop="uploadErrorMsg" label="最近错误" min-width="220" show-overflow-tooltip />
+          <el-table-column label="操作" width="190" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" :icon="InfoFilled" title="详情" aria-label="查看任务详情" @click="showDetail(row)" />
+              <el-button size="small" type="primary" :icon="RefreshRight" title="立即重试" aria-label="立即重试任务" @click="handleAction('retry', row)" />
               <el-button size="small" :icon="VideoPause" title="暂停" aria-label="暂停任务" @click="handleAction('pause', row)" />
               <el-button size="small" type="danger" plain :icon="Close" title="取消" aria-label="取消任务" @click="handleAction('cancel', row)" />
             </template>
@@ -189,9 +220,10 @@ defineProps({
   status: {
     type: Object,
     default: () => ({
-      counts: { pending: 0, running: 0, paused: 0, cancelled: 0, completed: 0 },
+      counts: { pending: 0, running: 0, cooldown: 0, paused: 0, cancelled: 0, completed: 0 },
       pending: [],
       running: [],
+      cooldown: [],
       paused: [],
       cancelled: [],
       completed: []
@@ -371,7 +403,7 @@ const handleBatch = async (action) => {
 
 .queue-summary {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--spacing-md);
   margin-bottom: var(--spacing-md);
 

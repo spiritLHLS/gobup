@@ -17,6 +17,10 @@
         <span class="task-label">上传执行中</span>
       </div>
       <div class="task-summary-item">
+        <span class="task-number">{{ uploadCounts.cooldown || 0 }}</span>
+        <span class="task-label">上传冷却</span>
+      </div>
+      <div class="task-summary-item">
         <span class="task-number">{{ status.parse?.queueLength || 0 }}</span>
         <span class="task-label">弹幕解析队列</span>
       </div>
@@ -127,6 +131,7 @@ const uploadRows = computed(() => {
   const upload = props.status.upload || {}
   return [
     ...(upload.running || []),
+    ...(upload.cooldown || []),
     ...(upload.pending || []),
     ...(upload.paused || []),
     ...(upload.cancelled || [])
@@ -214,7 +219,7 @@ const syncStatusTag = (status) => {
 
 .task-summary {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: var(--spacing-md);
   margin-bottom: var(--spacing-md);
 

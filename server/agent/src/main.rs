@@ -5,15 +5,16 @@ use axum::{
     extract::{Query, State},
     http::{HeaderMap, Method, Request, Response, StatusCode},
     response::IntoResponse,
-    routing::{any, get, post},
+    routing::{get, post},
 };
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
-use hyper::upgrade;
+use hyper::{body::Incoming, server::conn::http1, service::service_fn, upgrade};
 use hyper_util::rt::TokioIo;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
+    convert::Infallible,
     env,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -25,6 +26,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     signal,
 };
+use tower::ServiceExt;
 use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, fmt};
 use walkdir::WalkDir;
@@ -209,7 +211,6 @@ async fn main() -> Result<()> {
             "/agent/v1/files/check",
             get(check_files_get).post(check_files_post),
         )
-        .fallback(any(proxy_entry))
         .with_state(state.clone());
 
     let listener = TcpListener::bind(state.listen)
@@ -222,10 +223,63 @@ async fn main() -> Result<()> {
         "gobup agent started"
     );
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+    serve_agent(listener, state, app)
         .await
         .context("agent server failed")?;
+    Ok(())
+}
+
+async fn serve_agent(listener: TcpListener, state: Arc<AppState>, app: Router) -> Result<()> {
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
+
+    loop {
+        tokio::select! {
+            _ = &mut shutdown => {
+                info!("agent shutdown signal received");
+                break;
+            }
+            accepted = listener.accept() => {
+                let (stream, peer) = match accepted {
+                    Ok(accepted) => accepted,
+                    Err(err) => {
+                        error!(%err, "agent accept failed");
+                        continue;
+                    }
+                };
+                let state = state.clone();
+                let app = app.clone();
+                tokio::spawn(async move {
+                    let service = service_fn(move |req: Request<Incoming>| {
+                        let state = state.clone();
+                        let app = app.clone();
+                        async move {
+                            let response = if req.method() == Method::CONNECT {
+                                proxy_connect(state, req).await
+                            } else {
+                                match app.oneshot(req.map(Body::new)).await {
+                                    Ok(response) => response,
+                                    Err(err) => {
+                                        error!(%err, "agent router request failed");
+                                        text_response(StatusCode::INTERNAL_SERVER_ERROR, "agent router request failed")
+                                    }
+                                }
+                            };
+                            Ok::<_, Infallible>(response)
+                        }
+                    });
+                    let io = TokioIo::new(stream);
+                    if let Err(err) = http1::Builder::new()
+                        .serve_connection(io, service)
+                        .with_upgrades()
+                        .await
+                    {
+                        error!(peer = %peer, %err, "agent connection failed");
+                    }
+                });
+            }
+        }
+    }
     Ok(())
 }
 
@@ -384,12 +438,8 @@ async fn check_files_post(
     check_files_internal(state, headers, payload)
 }
 
-async fn proxy_entry(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    mut req: Request<Body>,
-) -> Response<Body> {
-    if let Err(resp) = authorize_proxy(&state, &headers) {
+async fn proxy_connect(state: Arc<AppState>, mut req: Request<Incoming>) -> Response<Body> {
+    if let Err(resp) = authorize_proxy(&state, req.headers()) {
         return resp;
     }
     if !state.purpose.allows(CAP_UPLOAD) {
@@ -415,11 +465,19 @@ async fn proxy_entry(
             Ok(upgraded) => {
                 let mut client = TokioIo::new(upgraded);
                 match TcpStream::connect(&authority).await {
-                    Ok(mut server) => {
-                        if let Err(err) = copy_bidirectional(&mut client, &mut server).await {
+                    Ok(mut server) => match copy_bidirectional(&mut client, &mut server).await {
+                        Ok((from_client, from_server)) => {
+                            info!(
+                                target = %authority,
+                                bytes_from_controller = from_client,
+                                bytes_from_upstream = from_server,
+                                "agent upload tunnel closed"
+                            );
+                        }
+                        Err(err) => {
                             error!(target = %authority, %err, "agent upload tunnel copy failed");
                         }
-                    }
+                    },
                     Err(err) => {
                         error!(target = %authority, %err, "agent upload tunnel connect failed");
                     }

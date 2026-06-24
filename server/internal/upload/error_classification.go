@@ -25,6 +25,13 @@ func classifyUploadError(err error) string {
 	if errors.As(err, &windowErr) {
 		return UploadErrorTypeWindow
 	}
+	var cooldownErr *UploadCooldownActiveError
+	if errors.As(err, &cooldownErr) {
+		if cooldownErr.ErrorType != "" {
+			return cooldownErr.ErrorType
+		}
+		return UploadErrorTypeRateLimit
+	}
 	return classifyUploadErrorText(err.Error())
 }
 

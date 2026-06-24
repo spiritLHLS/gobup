@@ -133,10 +133,13 @@ func buildUploadQueueSnapshot() gin.H {
 	status := queueManager.GetAllQueuesStatus()
 
 	db := database.GetDB()
-	pending := listQueueParts(db.Where("upload = ? AND recording = ? AND uploading = ? AND file_delete = ? AND upload_paused = ? AND upload_cancelled = ?", false, false, false, false, false, false).
+	now := time.Now()
+	pending := listQueueParts(db.Where("upload = ? AND recording = ? AND uploading = ? AND file_delete = ? AND upload_paused = ? AND upload_cancelled = ? AND (rate_limit_cooldown_at IS NULL OR rate_limit_cooldown_at <= ?)", false, false, false, false, false, false, now).
 		Order("start_time ASC").Limit(50))
-	running := listQueueParts(db.Where("upload = ? AND uploading = ? AND upload_cancelled = ?", false, true, false).
+	running := listQueueParts(db.Where("upload = ? AND uploading = ? AND upload_paused = ? AND upload_cancelled = ?", false, true, false, false).
 		Order("created_at ASC").Limit(50))
+	cooldown := listQueueParts(db.Where("upload = ? AND uploading = ? AND upload_paused = ? AND upload_cancelled = ? AND rate_limit_cooldown_at > ?", false, false, false, false, now).
+		Order("rate_limit_cooldown_at ASC").Limit(50))
 	paused := listQueueParts(db.Where("upload = ? AND upload_paused = ? AND upload_cancelled = ?", false, true, false).
 		Order("created_at DESC").Limit(50))
 	cancelled := listQueueParts(db.Where("upload = ? AND upload_cancelled = ?", false, true).
@@ -146,11 +149,13 @@ func buildUploadQueueSnapshot() gin.H {
 
 	var pendingCount int64
 	var runningCount int64
+	var cooldownCount int64
 	var pausedCount int64
 	var cancelledCount int64
 	var completedCount int64
-	db.Model(&models.RecordHistoryPart{}).Where("upload = ? AND recording = ? AND uploading = ? AND file_delete = ? AND upload_paused = ? AND upload_cancelled = ?", false, false, false, false, false, false).Count(&pendingCount)
-	db.Model(&models.RecordHistoryPart{}).Where("upload = ? AND uploading = ? AND upload_cancelled = ?", false, true, false).Count(&runningCount)
+	db.Model(&models.RecordHistoryPart{}).Where("upload = ? AND recording = ? AND uploading = ? AND file_delete = ? AND upload_paused = ? AND upload_cancelled = ? AND (rate_limit_cooldown_at IS NULL OR rate_limit_cooldown_at <= ?)", false, false, false, false, false, false, now).Count(&pendingCount)
+	db.Model(&models.RecordHistoryPart{}).Where("upload = ? AND uploading = ? AND upload_paused = ? AND upload_cancelled = ?", false, true, false, false).Count(&runningCount)
+	db.Model(&models.RecordHistoryPart{}).Where("upload = ? AND uploading = ? AND upload_paused = ? AND upload_cancelled = ? AND rate_limit_cooldown_at > ?", false, false, false, false, now).Count(&cooldownCount)
 	db.Model(&models.RecordHistoryPart{}).Where("upload = ? AND upload_paused = ? AND upload_cancelled = ?", false, true, false).Count(&pausedCount)
 	db.Model(&models.RecordHistoryPart{}).Where("upload = ? AND upload_cancelled = ?", false, true).Count(&cancelledCount)
 	db.Model(&models.RecordHistoryPart{}).Where("upload = ?", true).Count(&completedCount)
@@ -160,12 +165,14 @@ func buildUploadQueueSnapshot() gin.H {
 		"counts": gin.H{
 			"pending":   pendingCount,
 			"running":   runningCount,
+			"cooldown":  cooldownCount,
 			"paused":    pausedCount,
 			"cancelled": cancelledCount,
 			"completed": completedCount,
 		},
 		"pending":   pending,
 		"running":   running,
+		"cooldown":  cooldown,
 		"paused":    paused,
 		"cancelled": cancelled,
 		"completed": completed,
@@ -205,6 +212,24 @@ func ResumeUploadPart(c *gin.Context) {
 	}
 	if part.Upload {
 		c.JSON(http.StatusOK, gin.H{"type": "warning", "msg": "任务已完成，无需恢复"})
+		return
+	}
+	if part.Uploading {
+		if !part.UploadPaused {
+			c.JSON(http.StatusOK, gin.H{"type": "warning", "msg": "任务正在上传，无需恢复"})
+			return
+		}
+		db := database.GetDB()
+		if err := db.Model(&part).Updates(map[string]interface{}{
+			"upload_paused":     false,
+			"upload_cancelled":  false,
+			"upload_error_msg":  "",
+			"upload_error_type": "",
+		}).Error; err != nil {
+			c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "恢复失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"type": "success", "msg": "任务已恢复，当前上传流程将继续执行"})
 		return
 	}
 
@@ -271,6 +296,10 @@ func RetryUploadPart(c *gin.Context) {
 	}
 	if part.Upload {
 		c.JSON(http.StatusOK, gin.H{"type": "warning", "msg": "任务已完成，无需重试"})
+		return
+	}
+	if part.Uploading {
+		c.JSON(http.StatusOK, gin.H{"type": "warning", "msg": "任务仍在上传中，请先暂停并等待当前分片停止后再重试"})
 		return
 	}
 

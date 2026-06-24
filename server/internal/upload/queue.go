@@ -97,14 +97,19 @@ func (q *UserUploadQueue) process() {
 		// 原来的做法是将任务放回队列尾部并立即 continue，导致忙等死循环（CPU 100%）
 		if task.Part.RateLimitCooldownAt != nil && time.Now().Before(*task.Part.RateLimitCooldownAt) {
 			remainingTime := time.Until(*task.Part.RateLimitCooldownAt)
-			log.Printf("[队列] 用户%d的任务part_id=%d处于速率限制冷却期，剩余%.0f分钟，丢弃任务（调度器将在冷却期结束后重新入队）",
+			log.Printf("[队列] 用户%d的任务part_id=%d处于上传退避冷却期，剩余%.0f分钟，丢弃任务（调度器将在冷却期结束后重新入队）",
 				q.userID, task.Part.ID, remainingTime.Minutes())
-			recordQueuedUploadError(task.Part, fmt.Errorf("速率限制冷却期中，剩余时间: %.0f分钟", remainingTime.Minutes()))
 			continue
 		}
 
 		// 执行上传
 		if err := q.service.uploadPartInternal(task.Part, task.History, task.Room); err != nil {
+			var cooldownErr *UploadCooldownActiveError
+			if errors.As(err, &cooldownErr) {
+				log.Printf("[队列] 用户%d的任务part_id=%d处于上传退避冷却期，冷却至%s，丢弃队列副本",
+					q.userID, task.Part.ID, cooldownErr.RetryAt.Format("2006-01-02 15:04:05"))
+				continue
+			}
 			var windowErr *UploadWindowClosedError
 			if errors.As(err, &windowErr) {
 				log.Printf("[队列] 用户%d的任务part_id=%d上传窗口刚关闭(%s)，约%s后重新入队",

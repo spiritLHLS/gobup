@@ -28,9 +28,12 @@ import TaskManagerCard from '@/components/dashboard/TaskManagerCard.vue'
 const queueLoading = ref(false)
 const taskLoading = ref(false)
 const queueStatus = ref({
-  counts: { pending: 0, running: 0, completed: 0 },
+  counts: { pending: 0, running: 0, cooldown: 0, paused: 0, cancelled: 0, completed: 0 },
   pending: [],
   running: [],
+  cooldown: [],
+  paused: [],
+  cancelled: [],
   completed: [],
   queues: {}
 })
