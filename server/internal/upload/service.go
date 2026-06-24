@@ -258,13 +258,30 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 
 	log.Printf("开始上传: room=%s, file=%s, upload_file=%s, line=%s", room.RoomID, part.FilePath, uploadPath, room.Line)
 
+	uploadRoute, err := resolveUploadRoute(db)
+	if err != nil {
+		return err
+	}
+	if uploadRoute.Mode == "agent" {
+		log.Printf("[Agent Upload] 使用远程 Agent 上传出口: part_id=%d, endpoint=%s, line=%s, file=%s, upload_file=%s",
+			part.ID, uploadRoute.Endpoint, room.Line, part.FilePath, uploadPath)
+	} else {
+		log.Printf("[Agent Upload] 使用本地上传出口: part_id=%d, line=%s, file=%s, upload_file=%s",
+			part.ID, room.Line, part.FilePath, uploadPath)
+	}
+
 	// 推送上传开始通知（使用历史记录中实际的主播名）
 	if room.Wxuid != "" && containsTag(room.PushMsgTags, "分P上传") {
 		s.wxPusher.NotifyUploadStart(room.UploadUserID, room.Wxuid, history.Uname, part.FileName, fileInfo.Size())
 	}
 
 	// 创建客户端
-	client := bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+	var client *bili.BiliClient
+	if uploadRoute.Mode == "agent" {
+		client = bili.NewBiliClientWithProxy(user.AccessKey, user.Cookies, user.UID, uploadRoute.ProxyURL)
+	} else {
+		client = bili.NewBiliClient(user.AccessKey, user.Cookies, user.UID)
+	}
 	client.Line = room.Line // 设置上传线路
 	if room.UploadSpeedLimitMBps > 0 {
 		client.UploadRateLimiter = ratelimit.NewRateLimiter(room.UploadSpeedLimitMBps)
@@ -300,6 +317,21 @@ func (s *Service) uploadPartInternal(part *models.RecordHistoryPart, history *mo
 				int64(part.ID),
 				formatUploadRetryWaitMessage(attempt, maxAttempts, delay, chunkDone, chunkTotal),
 			)
+		})
+	}
+	if abortAware, ok := uploader.(interface{ SetAbortCallback(bili.AbortCallback) }); ok {
+		abortAware.SetAbortCallback(func() error {
+			var state models.RecordHistoryPart
+			if err := db.Select("id", "upload_paused", "upload_cancelled").First(&state, part.ID).Error; err != nil {
+				return nil
+			}
+			if state.UploadCancelled {
+				return fmt.Errorf("用户取消上传")
+			}
+			if state.UploadPaused {
+				return fmt.Errorf("用户暂停上传")
+			}
+			return nil
 		})
 	}
 

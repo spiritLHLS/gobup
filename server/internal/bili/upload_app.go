@@ -13,6 +13,7 @@ import (
 type AppUploader struct {
 	client           *BiliClient
 	progressCallback ProgressCallback
+	abortCallback    AbortCallback
 }
 
 // NewAppUploader 创建APP端上传器
@@ -23,6 +24,10 @@ func NewAppUploader(client *BiliClient) *AppUploader {
 // SetProgressCallback 设置进度回调
 func (u *AppUploader) SetProgressCallback(callback ProgressCallback) {
 	u.progressCallback = callback
+}
+
+func (u *AppUploader) SetAbortCallback(callback AbortCallback) {
+	u.abortCallback = callback
 }
 
 // Upload 上传文件
@@ -56,6 +61,9 @@ func (u *AppUploader) Upload(filePath string) (*UploadResult, error) {
 
 	chunkDone := 0
 	err = readFileChunks(file, chunkSize, func(chunk FileChunk) error {
+		if err := u.checkAbort(); err != nil {
+			return err
+		}
 		err := u.uploadChunk(preResp.Endpoint, chunk.Data, int(chunk.Index), int(totalChunks), fileName)
 		if err != nil {
 			return err
@@ -89,6 +97,13 @@ func (u *AppUploader) Upload(filePath string) (*UploadResult, error) {
 		FileName: resultFileName,
 		BizID:    preResp.BizID,
 	}, nil
+}
+
+func (u *AppUploader) checkAbort() error {
+	if u != nil && u.abortCallback != nil {
+		return u.abortCallback()
+	}
+	return nil
 }
 
 func (u *AppUploader) preUpload(filename string, filesize int64) (*PreUploadResp, error) {

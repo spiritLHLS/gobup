@@ -1,12 +1,16 @@
 use anyhow::{Context, Result, bail};
 use axum::{
     Json, Router,
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{Query, State},
-    http::{HeaderMap, StatusCode},
-    routing::{get, post},
+    http::{HeaderMap, Method, Request, Response, StatusCode},
+    response::IntoResponse,
+    routing::{any, get, post},
 };
+use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, Utc};
+use hyper::upgrade;
+use hyper_util::rt::TokioIo;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -16,7 +20,11 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
-use tokio::{net::TcpListener, signal};
+use tokio::{
+    io::copy_bidirectional,
+    net::{TcpListener, TcpStream},
+    signal,
+};
 use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, fmt};
 use walkdir::WalkDir;
@@ -201,6 +209,7 @@ async fn main() -> Result<()> {
             "/agent/v1/files/check",
             get(check_files_get).post(check_files_post),
         )
+        .fallback(any(proxy_entry))
         .with_state(state.clone());
 
     let listener = TcpListener::bind(state.listen)
@@ -375,6 +384,59 @@ async fn check_files_post(
     check_files_internal(state, headers, payload)
 }
 
+async fn proxy_entry(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    mut req: Request<Body>,
+) -> Response<Body> {
+    if let Err(resp) = authorize_proxy(&state, &headers) {
+        return resp;
+    }
+    if !state.purpose.allows(CAP_UPLOAD) {
+        return text_response(
+            StatusCode::FORBIDDEN,
+            "agent purpose does not allow upload tunnel",
+        );
+    }
+    if req.method() != Method::CONNECT {
+        return text_response(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "agent upload tunnel only supports HTTP CONNECT",
+        );
+    }
+
+    let Some(authority) = req.uri().authority().map(|v| v.as_str().to_string()) else {
+        return text_response(StatusCode::BAD_REQUEST, "CONNECT authority is required");
+    };
+
+    info!(target = %authority, "agent upload tunnel CONNECT");
+    tokio::spawn(async move {
+        match upgrade::on(&mut req).await {
+            Ok(upgraded) => {
+                let mut client = TokioIo::new(upgraded);
+                match TcpStream::connect(&authority).await {
+                    Ok(mut server) => {
+                        if let Err(err) = copy_bidirectional(&mut client, &mut server).await {
+                            error!(target = %authority, %err, "agent upload tunnel copy failed");
+                        }
+                    }
+                    Err(err) => {
+                        error!(target = %authority, %err, "agent upload tunnel connect failed");
+                    }
+                }
+            }
+            Err(err) => {
+                error!(target = %authority, %err, "agent upload tunnel upgrade failed");
+            }
+        }
+    });
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .unwrap_or_else(|_| text_response(StatusCode::OK, ""))
+}
+
 fn check_files_internal(
     state: Arc<AppState>,
     headers: HeaderMap,
@@ -543,6 +605,80 @@ fn authorize<T: Serialize>(
     } else {
         Err(err(StatusCode::FORBIDDEN, "invalid agent token"))
     }
+}
+
+fn authorize_proxy(state: &AppState, headers: &HeaderMap) -> Result<(), Response<Body>> {
+    let token = state.token.trim();
+    if token.is_empty() {
+        return Ok(());
+    }
+    if bearer_or_agent_token(headers, token) || proxy_authorization_matches(headers, token) {
+        return Ok(());
+    }
+    Err(text_response(
+        StatusCode::PROXY_AUTHENTICATION_REQUIRED,
+        "invalid agent proxy token",
+    ))
+}
+
+fn bearer_or_agent_token(headers: &HeaderMap, token: &str) -> bool {
+    headers
+        .get("x-agent-token")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_some_and(|v| v == token)
+        || headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .and_then(|auth| {
+                auth.strip_prefix("Bearer ")
+                    .or_else(|| auth.strip_prefix("bearer "))
+            })
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .is_some_and(|v| v == token)
+}
+
+fn proxy_authorization_matches(headers: &HeaderMap, token: &str) -> bool {
+    let Some(raw) = headers
+        .get("proxy-authorization")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+    else {
+        return false;
+    };
+
+    if let Some(value) = raw
+        .strip_prefix("Bearer ")
+        .or_else(|| raw.strip_prefix("bearer "))
+        .map(str::trim)
+    {
+        return value == token;
+    }
+
+    let Some(encoded) = raw
+        .strip_prefix("Basic ")
+        .or_else(|| raw.strip_prefix("basic "))
+        .map(str::trim)
+    else {
+        return false;
+    };
+    let Ok(decoded) = general_purpose::STANDARD.decode(encoded) else {
+        return false;
+    };
+    let Ok(value) = String::from_utf8(decoded) else {
+        return false;
+    };
+    let mut parts = value.splitn(2, ':');
+    let user = parts.next().unwrap_or_default();
+    let password = parts.next().unwrap_or_default();
+    user == token || password == token || value == token
+}
+
+fn text_response(status: StatusCode, text: &str) -> Response<Body> {
+    (status, text.to_string()).into_response()
 }
 
 fn ok<T: Serialize>(msg: &str, data: T) -> (StatusCode, Json<ApiResponse<T>>) {

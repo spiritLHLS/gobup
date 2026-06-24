@@ -68,3 +68,13 @@ func TestValidatePublishAgentEndpointForUpload(t *testing.T) {
 		t.Fatalf("err=%v, want disabled rejection", err)
 	}
 }
+
+func TestBuildAgentProxyURL(t *testing.T) {
+	proxyURL, err := buildAgentProxyURL("http://127.0.0.1:12381/agent/v1", "secret-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proxyURL != "http://secret-token@127.0.0.1:12381" {
+		t.Fatalf("proxyURL=%q", proxyURL)
+	}
+}

@@ -182,10 +182,6 @@ func PauseUploadPart(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "已完成任务不能暂停"})
 		return
 	}
-	if part.Uploading {
-		c.JSON(http.StatusOK, gin.H{"type": "error", "msg": "正在上传的任务暂不支持立即暂停，请等待当前分片结束"})
-		return
-	}
 
 	db := database.GetDB()
 	if err := db.Model(&part).Updates(map[string]interface{}{

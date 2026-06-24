@@ -17,11 +17,15 @@ type ProgressCallback func(chunkDone, chunkTotal int)
 // RetryCallback 重试等待回调函数
 type RetryCallback func(attempt, maxAttempts int, delay time.Duration, chunkDone, chunkTotal int)
 
+// AbortCallback returns a non-nil error when the caller wants to stop uploading.
+type AbortCallback func() error
+
 // UposUploader UPOS上传器
 type UposUploader struct {
 	client           *BiliClient
 	progressCallback ProgressCallback
 	retryCallback    RetryCallback
+	abortCallback    AbortCallback
 }
 
 // NewUposUploader 创建UPOS上传器
@@ -37,6 +41,10 @@ func (u *UposUploader) SetProgressCallback(callback ProgressCallback) {
 // SetRetryCallback 设置重试等待回调
 func (u *UposUploader) SetRetryCallback(callback RetryCallback) {
 	u.retryCallback = callback
+}
+
+func (u *UposUploader) SetAbortCallback(callback AbortCallback) {
+	u.abortCallback = callback
 }
 
 // Upload 上传文件
@@ -91,6 +99,9 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 	// 分片上传最多重试5次整个流程（如果某个分片持续失败）
 	maxUploadRetries := 5
 	for uploadRetry := 0; uploadRetry < maxUploadRetries; uploadRetry++ {
+		if err := u.checkAbort(); err != nil {
+			return nil, err
+		}
 		if uploadRetry > 0 {
 			// 重试前等待，避免立即重试
 			retryDelay := time.Duration(uploadRetry*5) * time.Second
@@ -102,6 +113,9 @@ func (u *UposUploader) Upload(filePath string) (*UploadResult, error) {
 		}
 
 		err = readFileChunks(file, chunkSize, func(chunk FileChunk) error {
+			if err := u.checkAbort(); err != nil {
+				return err
+			}
 			// 如果是重试，跳过已上传的分片
 			if int(chunk.Index) < chunkDone {
 				// 静默跳过已上传的分片，避免日志过多
@@ -363,6 +377,9 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 	var lastErr error
 	var retryAfterDelay time.Duration
 	for attempt := 0; attempt <= DefaultRetryConfig.MaxRetries; attempt++ {
+		if err := u.checkAbort(); err != nil {
+			return err
+		}
 		if attempt > 0 {
 			// 网络错误重试前等待
 			delay := retryAfterDelay
@@ -444,6 +461,13 @@ func (u *UposUploader) uploadChunk(pre *PreUploadResp, line *LineUploadResp, chu
 		return lastErr
 	}
 	return fmt.Errorf("上传分片%d失败: 未知错误", partNum)
+}
+
+func (u *UposUploader) checkAbort() error {
+	if u != nil && u.abortCallback != nil {
+		return u.abortCallback()
+	}
+	return nil
 }
 
 func (u *UposUploader) uploadRateLimiter() *ratelimit.RateLimiter {

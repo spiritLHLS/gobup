@@ -76,9 +76,10 @@
           <el-table-column label="重试" width="80">
             <template #default="{ row }">{{ row.uploadRetryCount || 0 }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="90" fixed="right">
+          <el-table-column label="操作" width="140" fixed="right">
             <template #default="{ row }">
               <el-button size="small" :icon="InfoFilled" title="详情" aria-label="查看任务详情" @click="showDetail(row)" />
+              <el-button size="small" :icon="VideoPause" title="暂停" aria-label="暂停任务" @click="handleAction('pause', row)" />
             </template>
           </el-table-column>
         </el-table>
