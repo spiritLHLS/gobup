@@ -208,8 +208,9 @@
             <el-option
               v-for="season in seasons"
               :key="season.id"
-              :label="season.name + ' (' + season.count + '个视频)'"
-              :value="season.sectionId > 0 ? season.sectionId : season.id"
+              :label="formatSeasonLabel(season)"
+              :value="seasonOptionValue(season)"
+              :disabled="!season.sectionId"
             />
           </el-select>
           <el-button
@@ -327,19 +328,70 @@ const seasonForm = ref({
   desc: '',
   cover: ''
 })
+let seasonRequestSeq = 0
+
+const normalizeSeason = (season) => ({
+  ...season,
+  id: Number(season?.id) || 0,
+  sectionId: Number(season?.sectionId) || 0,
+  count: Number(season?.count) || 0,
+  name: season?.name || '未命名合集'
+})
+
+const seasonOptionValue = (season) => {
+  const sectionId = Number(season?.sectionId) || 0
+  if (sectionId > 0) return sectionId
+  return -Math.abs(Number(season?.id) || 1)
+}
+
+const formatSeasonLabel = (season) => {
+  const count = Number(season?.count) || 0
+  const suffix = season?.sectionId ? `${count}个视频` : '缺少小节ID，请刷新'
+  return `${season?.name || '未命名合集'} (${suffix})`
+}
+
+const normalizeSelectedSeasonId = () => {
+  const current = Number(localForm.value.seasonId) || 0
+  if (!current) return
+  if (seasons.value.some(season => season.sectionId === current)) return
+  const matchedBySeasonId = seasons.value.find(season => season.id === current && season.sectionId > 0)
+  if (matchedBySeasonId) {
+    localForm.value.seasonId = matchedBySeasonId.sectionId
+  }
+}
 
 const fetchSeasons = async () => {
   const userId = localForm.value.uploadUserId
-  if (!userId) return
+  const requestSeq = ++seasonRequestSeq
+  if (!userId) {
+    seasons.value = []
+    loadingSeasons.value = false
+    return []
+  }
   loadingSeasons.value = true
   try {
     const data = await roomAPI.getSeasons(userId)
-    seasons.value = Array.isArray(data) ? data : []
+    if (requestSeq !== seasonRequestSeq || userId !== localForm.value.uploadUserId) {
+      return seasons.value
+    }
+    const unique = new Map()
+    for (const item of Array.isArray(data) ? data : []) {
+      const season = normalizeSeason(item)
+      if (!season.id || unique.has(season.id)) continue
+      unique.set(season.id, season)
+    }
+    seasons.value = Array.from(unique.values())
+    normalizeSelectedSeasonId()
+    return seasons.value
   } catch (e) {
+    if (requestSeq !== seasonRequestSeq) return seasons.value
     ElMessage.warning('获取合集列表失败: ' + (e?.message || e))
     seasons.value = []
+    return []
   } finally {
-    loadingSeasons.value = false
+    if (requestSeq === seasonRequestSeq) {
+      loadingSeasons.value = false
+    }
   }
 }
 
@@ -354,6 +406,11 @@ const openCreateSeasonDialog = () => {
 }
 
 const createSeason = async () => {
+  const userId = localForm.value.uploadUserId
+  if (!userId) {
+    ElMessage.warning('请先选择上传用户')
+    return
+  }
   const title = seasonForm.value.title?.trim()
   if (!title) {
     ElMessage.warning('请输入合集标题')
@@ -362,7 +419,7 @@ const createSeason = async () => {
   creatingSeason.value = true
   try {
     const season = await roomAPI.createSeason({
-      userId: localForm.value.uploadUserId,
+      userId,
       title,
       desc: seasonForm.value.desc || '',
       cover: seasonForm.value.cover || ''
@@ -370,10 +427,23 @@ const createSeason = async () => {
     if (season?.type === 'error' || season?.ok === false) {
       throw new Error(season.msg || '创建合集失败')
     }
-    await fetchSeasons()
-    const selectedId = season?.sectionId > 0 ? season.sectionId : season?.id
+    const createdSeasonId = Number(season?.id) || 0
+    let selectedId = Number(season?.sectionId) || 0
+    if (userId !== localForm.value.uploadUserId) {
+      createSeasonVisible.value = false
+      ElMessage.success('合集已创建')
+      return
+    }
+    const latestSeasons = await fetchSeasons()
+    if (!selectedId && createdSeasonId) {
+      const matched = latestSeasons.find(item => item.id === createdSeasonId && item.sectionId > 0)
+      selectedId = matched?.sectionId || 0
+    }
     if (selectedId) {
       localForm.value.seasonId = selectedId
+    } else {
+      normalizeSelectedSeasonId()
+      ElMessage.warning('合集已创建，但暂未获取到可投稿的小节ID，请稍后刷新合集列表')
     }
     createSeasonVisible.value = false
     ElMessage.success('合集已创建')
@@ -388,13 +458,21 @@ const createSeason = async () => {
 watch(
   () => localForm.value.uploadUserId,
   (newId, oldId) => {
-    if (newId && newId !== oldId) {
-      // 切换用户时清除已选合集（不同用户的合集不互通）
-      if (oldId) {
-        localForm.value.seasonId = 0
-      }
-      fetchSeasons()
+    if (!newId) {
+      seasonRequestSeq++
+      seasons.value = []
+      loadingSeasons.value = false
+      localForm.value.seasonId = 0
+      return
     }
+    if (newId === oldId) {
+      return
+    }
+    // 切换用户时清除已选合集（不同用户的合集不互通）
+    if (oldId) {
+      localForm.value.seasonId = 0
+    }
+    fetchSeasons()
   },
   { immediate: true }
 )

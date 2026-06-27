@@ -9,6 +9,18 @@
   --primary-color-dark: #15803d;
   --primary-color-shadow: rgba(22, 163, 74, 0.2);
   --primary-gradient: linear-gradient(135deg, #16a34a, #22c55e);
+  --button-primary-bg: #15803d;
+  --button-primary-hover-bg: #166534;
+  --button-primary-text: #ffffff;
+  --button-primary-plain-bg: #f0fdf4;
+  --button-primary-plain-text: #166534;
+  --button-primary-plain-border: #86efac;
+  --button-success-bg: #2e7d32;
+  --button-success-hover-bg: #1b5e20;
+  --button-success-text: #ffffff;
+  --button-success-plain-bg: #f0fdf4;
+  --button-success-plain-text: #1b5e20;
+  --button-success-plain-border: #a5d6a7;
   
   /* 功能色 */
   --success-color: #67c23a;
@@ -257,6 +269,18 @@ body {
   --primary-color-dark: #16a34a;
   --primary-color-shadow: rgba(34, 197, 94, 0.25);
   --primary-gradient: linear-gradient(135deg, #16a34a, #22c55e);
+  --button-primary-bg: #22c55e;
+  --button-primary-hover-bg: #4ade80;
+  --button-primary-text: #052e16;
+  --button-primary-plain-bg: rgba(34, 197, 94, 0.12);
+  --button-primary-plain-text: #86efac;
+  --button-primary-plain-border: rgba(134, 239, 172, 0.5);
+  --button-success-bg: #4ade80;
+  --button-success-hover-bg: #86efac;
+  --button-success-text: #052e16;
+  --button-success-plain-bg: rgba(74, 222, 128, 0.12);
+  --button-success-plain-text: #bbf7d0;
+  --button-success-plain-border: rgba(187, 247, 208, 0.5);
 
   /* 背景色 */
   --bg-color-primary: #0f172a;

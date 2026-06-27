@@ -233,18 +233,79 @@ html, body {
   font-weight: var(--font-weight-medium);
   transition: var(--transition-normal);
   
-  &.el-button--primary {
-    background: var(--primary-gradient);
-    border: none;
+  &.el-button--primary:not(.is-plain):not(.is-text):not(.is-link) {
+    background: var(--button-primary-bg);
+    border-color: var(--button-primary-bg);
+    color: var(--button-primary-text);
     box-shadow: 0 2px 8px var(--primary-color-shadow);
     
-    &:hover {
+    &:not(.is-disabled):hover {
+      background: var(--button-primary-hover-bg);
+      border-color: var(--button-primary-hover-bg);
+      color: var(--button-primary-text);
       transform: translateY(-2px);
       box-shadow: 0 4px 12px var(--primary-color-shadow);
     }
     
     &:active {
       transform: translateY(0);
+    }
+
+    &.is-disabled,
+    &.is-disabled:hover,
+    &.is-disabled:focus {
+      background: var(--el-fill-color-light);
+      border-color: var(--el-border-color-light);
+      color: var(--el-text-color-disabled);
+      box-shadow: none;
+      transform: none;
+    }
+  }
+
+  &.el-button--primary.is-plain {
+    background: var(--button-primary-plain-bg);
+    border-color: var(--button-primary-plain-border);
+    color: var(--button-primary-plain-text);
+
+    &:not(.is-disabled):hover,
+    &:not(.is-disabled):focus {
+      background: var(--button-primary-bg);
+      border-color: var(--button-primary-bg);
+      color: var(--button-primary-text);
+    }
+  }
+
+  &.el-button--success:not(.is-plain):not(.is-text):not(.is-link) {
+    background: var(--button-success-bg);
+    border-color: var(--button-success-bg);
+    color: var(--button-success-text);
+
+    &:not(.is-disabled):hover,
+    &:not(.is-disabled):focus {
+      background: var(--button-success-hover-bg);
+      border-color: var(--button-success-hover-bg);
+      color: var(--button-success-text);
+    }
+
+    &.is-disabled,
+    &.is-disabled:hover,
+    &.is-disabled:focus {
+      background: var(--el-fill-color-light);
+      border-color: var(--el-border-color-light);
+      color: var(--el-text-color-disabled);
+    }
+  }
+
+  &.el-button--success.is-plain {
+    background: var(--button-success-plain-bg);
+    border-color: var(--button-success-plain-border);
+    color: var(--button-success-plain-text);
+
+    &:not(.is-disabled):hover,
+    &:not(.is-disabled):focus {
+      background: var(--button-success-bg);
+      border-color: var(--button-success-bg);
+      color: var(--button-success-text);
     }
   }
 }

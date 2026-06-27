@@ -583,12 +583,25 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 
 	// 加入合集
 	if room.SeasonID > 0 && len(videoParts) > 0 {
+		sectionID := room.SeasonID
 		// 使用第一个分P的CID
 		cid := videoParts[0].Cid
-		if err := client.AddToSeason(room.SeasonID, avID, cid, normalizeBiliPublishTitle("合集视频标题", title)); err != nil {
-			log.Printf("加入合集失败: %v", err)
+		seasonTitle := normalizeBiliPublishTitle("合集视频标题", title)
+		if err := client.AddToSeason(sectionID, avID, cid, seasonTitle); err != nil {
+			log.Printf("加入合集失败，尝试解析已保存ID=%d 是否为合集ID: %v", room.SeasonID, err)
+			if resolvedSectionID, resolveErr := client.ResolveSeasonSectionID(room.SeasonID); resolveErr != nil {
+				log.Printf("解析合集小节ID失败，已保存ID=%d: %v", room.SeasonID, resolveErr)
+			} else if resolvedSectionID <= 0 {
+				log.Printf("跳过加入合集：已保存ID=%d 未解析到可用小节ID", room.SeasonID)
+			} else if resolvedSectionID == sectionID {
+				log.Printf("加入合集失败：已保存ID=%d 已是解析后的小节ID", room.SeasonID)
+			} else if retryErr := client.AddToSeason(resolvedSectionID, avID, cid, seasonTitle); retryErr != nil {
+				log.Printf("使用解析后小节ID加入合集仍失败: SectionID=%d, AID=%d, err=%v", resolvedSectionID, avID, retryErr)
+			} else {
+				log.Printf("加入合集成功: SectionID=%d, AID=%d", resolvedSectionID, avID)
+			}
 		} else {
-			log.Printf("加入合集成功: SeasonID=%d, AID=%d", room.SeasonID, avID)
+			log.Printf("加入合集成功: SectionID=%d, AID=%d", sectionID, avID)
 		}
 	}
 

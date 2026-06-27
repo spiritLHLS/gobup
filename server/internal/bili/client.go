@@ -233,29 +233,13 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 
 	var resp PublishResponse
 
-	// 获取buvid（参考biliupforjava的实现）
-	buvResp, err := c.GetBuvId()
-	if err != nil {
-		// buvid获取失败不阻塞，记录日志继续
-		fmt.Printf("警告: 获取buvid失败: %v\n", err)
-	}
-
-	// 构建完整的Cookie（包含buvid3和buvid4）
-	fullCookie := c.Cookies
-	if buvResp != nil && buvResp.Data.B3 != "" && buvResp.Data.B4 != "" {
-		if !strings.Contains(c.Cookies, "buvid3=") {
-			fullCookie += fmt.Sprintf("; buvid3=%s", buvResp.Data.B3)
-		}
-		if !strings.Contains(c.Cookies, "buvid4=") {
-			fullCookie += fmt.Sprintf("; buvid4=%s", buvResp.Data.B4)
-		}
-	}
+	fullCookie := c.cookieWithBuvID()
 
 	// 使用限流器和重试机制
 	limiter := GetAPILimiter()
 	apiURL := ""
 	var lastResp *req.Response
-	err = WithRetry(DefaultRetryConfig, func() error {
+	err := WithRetry(DefaultRetryConfig, func() error {
 		// 等待限流器允许
 		if err := limiter.WaitPublish(); err != nil {
 			return err
@@ -333,74 +317,245 @@ func (c *BiliClient) PublishVideo(title, desc, tags string, tid, copyright int, 
 	return resp.Data.Aid, resp.Data.Bvid, nil
 }
 
+const (
+	creativeSeasonListURL  = "https://member.bilibili.com/x2/creative/web/seasons"
+	seasonListPageSize     = 50
+	seasonListMaxPageCount = 20
+)
+
+type creativeSeasonListResult struct {
+	Code   int    `json:"code"`
+	Msg    string `json:"message"`
+	AltMsg string `json:"msg"`
+	Data   struct {
+		Seasons []creativeSeasonListItem `json:"seasons"`
+		Total   int                      `json:"total"`
+		Items   []legacySeasonListItem   `json:"items"`
+	} `json:"data"`
+}
+
+type creativeSeasonListItem struct {
+	Season struct {
+		ID     int64  `json:"id"`
+		Title  string `json:"title"`
+		Name   string `json:"name"`
+		EpNum  int    `json:"ep_num"`
+		State  int    `json:"state"`
+		Forbid int    `json:"forbid"`
+	} `json:"season"`
+	Sections struct {
+		Sections []creativeSeasonSection `json:"sections"`
+	} `json:"sections"`
+	PartEpisodes []struct{} `json:"part_episodes"`
+}
+
+type creativeSeasonSection struct {
+	ID        int64  `json:"id"`
+	Title     string `json:"title"`
+	State     int    `json:"state"`
+	PartState int    `json:"partState"`
+	EpCount   int    `json:"epCount"`
+}
+
+type legacySeasonListItem struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Total int    `json:"total"`
+	Meta  struct {
+		Name  string `json:"name"`
+		Total int    `json:"total"`
+	} `json:"meta"`
+	Sections []struct {
+		ID    int64  `json:"id"`
+		Title string `json:"title"`
+	} `json:"sections"`
+}
+
 // GetSeasons 获取合集列表（使用创作中心 API，需要登录态）
 func (c *BiliClient) GetSeasons() ([]Season, error) {
-	apiURL := "https://member.bilibili.com/x2/creative/web/season/list?pn=1&ps=100"
+	fullCookie := c.cookieWithBuvID()
+	var seasons []Season
+	seen := make(map[int64]struct{})
+	total := 0
 
-	// B站 /season/list 接口有两种响应格式：
-	// 旧格式：name/total 直接位于 item 顶层
-	// 新格式：name/total 嵌套在 item.meta 中
-	var result struct {
-		Code int    `json:"code"`
-		Msg  string `json:"message"`
-		Data struct {
-			Items []struct {
-				ID    int64  `json:"id"`
-				Name  string `json:"name"`  // 旧格式
-				Total int    `json:"total"` // 旧格式
-				Meta  struct {
-					Name  string `json:"name"`  // 新格式
-					Total int    `json:"total"` // 新格式
-				} `json:"meta"`
-				Sections []struct {
-					ID    int64  `json:"id"`
-					Title string `json:"title"`
-				} `json:"sections"`
-			} `json:"items"`
-		} `json:"data"`
+	for page := 1; page <= seasonListMaxPageCount; page++ {
+		pageItems, pageTotal, err := c.getSeasonPage(page, seasonListPageSize, fullCookie)
+		if err != nil {
+			return nil, err
+		}
+		if pageTotal > 0 {
+			total = pageTotal
+		}
+		before := len(seasons)
+		for _, item := range pageItems {
+			if item.ID == 0 {
+				continue
+			}
+			if _, ok := seen[item.ID]; ok {
+				continue
+			}
+			seen[item.ID] = struct{}{}
+			seasons = append(seasons, item)
+		}
+		if len(pageItems) == 0 || len(seasons) == before {
+			break
+		}
+		if total > 0 && len(seasons) >= total {
+			break
+		}
+		if len(pageItems) < seasonListPageSize {
+			break
+		}
 	}
+	return seasons, nil
+}
 
+func (c *BiliClient) getSeasonPage(page, pageSize int, fullCookie string) ([]Season, int, error) {
+	apiURL := fmt.Sprintf("%s?pn=%d&ps=%d&order=mtime&sort=desc", creativeSeasonListURL, page, pageSize)
 	resp, err := c.ReqClient.R().
-		SetHeader("Referer", "https://member.bilibili.com/platform/home").
-		SetSuccessResult(&result).
+		SetHeader("Cookie", fullCookie).
+		SetHeader("Accept", "application/json, text/plain, */*").
+		SetHeader("Origin", "https://member.bilibili.com").
+		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame?page_from=creative_home_top_upload").
+		SetHeader("X-Requested-With", "XMLHttpRequest").
 		Get(apiURL)
 	if err != nil {
 		logBiliRequestError("获取合集", "GET", apiURL, err)
-		return nil, err
+		return nil, 0, err
 	}
 	if !resp.IsSuccessState() {
 		logBiliHTTPError("获取合集", "GET", apiURL, resp)
-		return nil, fmt.Errorf("获取合集失败: HTTP %d", resp.GetStatusCode())
+		return nil, 0, fmt.Errorf("获取合集失败: HTTP %d", resp.GetStatusCode())
 	}
+	seasons, total, err := parseSeasonList(resp.Bytes())
+	if err != nil {
+		log.Printf("[B站接口] 获取合集响应解析失败: %v", err)
+		return nil, 0, err
+	}
+	return seasons, total, nil
+}
 
+func parseSeasonList(body []byte) ([]Season, int, error) {
+	var result creativeSeasonListResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, 0, fmt.Errorf("获取合集失败: 响应不是有效JSON: %w", err)
+	}
 	if result.Code != 0 {
-		logBiliAPIError("获取合集", "GET", apiURL, result.Code, result.Msg, resp)
-		return nil, fmt.Errorf("获取合集失败: %s", result.Msg)
+		msg := result.Msg
+		if msg == "" {
+			msg = result.AltMsg
+		}
+		if msg == "" {
+			msg = "请求错误"
+		}
+		return nil, 0, fmt.Errorf("获取合集失败: code=%d, msg=%s", result.Code, msg)
 	}
 
-	var seasons []Season
-	for _, item := range result.Data.Items {
-		// 优先使用 meta 中的字段（新格式），若为空则回退到顶层字段（旧格式）
-		name := item.Meta.Name
+	seasons := parseCreativeSeasons(result.Data.Seasons)
+	if len(seasons) == 0 && len(result.Data.Items) > 0 {
+		seasons = parseLegacySeasons(result.Data.Items)
+	}
+	return seasons, result.Data.Total, nil
+}
+
+func parseCreativeSeasons(items []creativeSeasonListItem) []Season {
+	seasons := make([]Season, 0, len(items))
+	for _, item := range items {
+		id := item.Season.ID
+		name := strings.TrimSpace(item.Season.Title)
 		if name == "" {
-			name = item.Name
+			name = strings.TrimSpace(item.Season.Name)
+		}
+		if id == 0 || name == "" {
+			continue
+		}
+
+		count := item.Season.EpNum
+		if count == 0 {
+			for _, section := range item.Sections.Sections {
+				count += section.EpCount
+			}
+		}
+		if count == 0 && item.PartEpisodes != nil {
+			count = len(item.PartEpisodes)
+		}
+
+		seasons = append(seasons, Season{
+			ID:        id,
+			Name:      name,
+			Count:     count,
+			SectionID: preferredSeasonSectionID(item.Sections.Sections),
+		})
+	}
+	return seasons
+}
+
+func parseLegacySeasons(items []legacySeasonListItem) []Season {
+	seasons := make([]Season, 0, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item.Meta.Name)
+		if name == "" {
+			name = strings.TrimSpace(item.Name)
 		}
 		total := item.Meta.Total
 		if total == 0 {
 			total = item.Total
 		}
-		s := Season{
+		if item.ID == 0 || name == "" {
+			continue
+		}
+		season := Season{
 			ID:    item.ID,
 			Name:  name,
 			Count: total,
 		}
-		// 取第一个节的 ID 作为 SectionID（投稿时使用）
-		if len(item.Sections) > 0 {
-			s.SectionID = item.Sections[0].ID
+		for _, section := range item.Sections {
+			if section.ID > 0 {
+				season.SectionID = section.ID
+				break
+			}
 		}
-		seasons = append(seasons, s)
+		seasons = append(seasons, season)
 	}
-	return seasons, nil
+	return seasons
+}
+
+func preferredSeasonSectionID(sections []creativeSeasonSection) int64 {
+	var fallback int64
+	for _, section := range sections {
+		if section.ID <= 0 {
+			continue
+		}
+		if fallback == 0 {
+			fallback = section.ID
+		}
+		if section.State == 0 && section.PartState == 0 {
+			return section.ID
+		}
+	}
+	return fallback
+}
+
+func (c *BiliClient) ResolveSeasonSectionID(rawID int64) (int64, error) {
+	if rawID <= 0 {
+		return 0, nil
+	}
+	seasons, err := c.GetSeasons()
+	if err != nil {
+		return rawID, err
+	}
+	for _, season := range seasons {
+		if season.SectionID == rawID {
+			return rawID, nil
+		}
+		if season.ID == rawID {
+			if season.SectionID <= 0 {
+				return 0, fmt.Errorf("合集 %d 未返回可用小节ID", rawID)
+			}
+			return season.SectionID, nil
+		}
+	}
+	return rawID, nil
 }
 
 // CreateSeason 创建合集，并返回可用于后续加入投稿的小节信息。
@@ -450,6 +605,8 @@ func (c *BiliClient) CreateSeason(title, desc, cover string) (*Season, error) {
 
 	apiURL := "https://member.bilibili.com/x2/creative/web/season/add"
 	resp, err := c.ReqClient.R().
+		SetHeader("Cookie", c.cookieWithBuvID()).
+		SetHeader("Accept", "application/json, text/plain, */*").
 		SetHeader("Origin", "https://member.bilibili.com").
 		SetHeader("Referer", "https://member.bilibili.com/platform/upload-manager/collection").
 		SetHeader("Content-Type", "application/x-www-form-urlencoded").
@@ -502,14 +659,19 @@ func (c *BiliClient) CreateSeason(title, desc, cover string) (*Season, error) {
 	}
 
 	// 创建接口只返回合集ID；再拉取一次列表，补齐小节ID，供 AddToSeason 使用。
-	seasons, err := c.GetSeasons()
-	if err != nil {
-		return season, nil
-	}
-	for _, item := range seasons {
-		if item.ID == seasonID {
-			season = &item
-			break
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+		seasons, err := c.GetSeasons()
+		if err != nil {
+			continue
+		}
+		for _, item := range seasons {
+			if item.ID == seasonID {
+				season = &item
+				return season, nil
+			}
 		}
 	}
 	return season, nil
@@ -557,6 +719,9 @@ func (c *BiliClient) AddToSeason(sectionID int64, aid, cid int64, title string) 
 	if csrf == "" {
 		return fmt.Errorf("未找到CSRF token")
 	}
+	if sectionID <= 0 {
+		return fmt.Errorf("合集小节ID不能为空")
+	}
 
 	// 构建 episode 数据
 	episode := map[string]interface{}{
@@ -576,16 +741,21 @@ func (c *BiliClient) AddToSeason(sectionID int64, aid, cid int64, title string) 
 	}
 
 	var result struct {
-		Code int    `json:"code"`
-		Msg  string `json:"message"`
+		Code   int    `json:"code"`
+		Msg    string `json:"message"`
+		AltMsg string `json:"msg"`
 	}
 
 	apiURL := fmt.Sprintf("https://member.bilibili.com/x2/creative/web/season/section/episodes/add?t=%d&csrf=%s",
 		time.Now().UnixMilli(), csrf)
 
 	resp, err := c.ReqClient.R().
+		SetHeader("Cookie", c.cookieWithBuvID()).
+		SetHeader("Accept", "application/json, text/plain, */*").
+		SetHeader("Origin", "https://member.bilibili.com").
 		SetHeader("Referer", "https://member.bilibili.com/platform/upload/video/frame?page_from=creative_home_top_upload").
 		SetHeader("Content-Type", "application/json").
+		SetHeader("X-Requested-With", "XMLHttpRequest").
 		SetBodyJsonMarshal(requestBody).
 		SetSuccessResult(&result).
 		Post(apiURL)
@@ -600,8 +770,15 @@ func (c *BiliClient) AddToSeason(sectionID int64, aid, cid int64, title string) 
 	}
 
 	if result.Code != 0 {
-		logBiliAPIError("加入合集", "POST", apiURL, result.Code, result.Msg, resp)
-		return fmt.Errorf("加入合集失败: %s", result.Msg)
+		msg := result.Msg
+		if msg == "" {
+			msg = result.AltMsg
+		}
+		if msg == "" {
+			msg = "请求错误"
+		}
+		logBiliAPIError("加入合集", "POST", apiURL, result.Code, msg, resp)
+		return fmt.Errorf("加入合集失败: %s", msg)
 	}
 
 	return nil
@@ -696,6 +873,41 @@ func (c *BiliClient) GetBuvId() (*BuvIdResponse, error) {
 		return nil, fmt.Errorf("获取buvid失败: %s", result.Msg)
 	}
 	return &result, nil
+}
+
+func (c *BiliClient) cookieWithBuvID() string {
+	fullCookie := strings.TrimSpace(c.Cookies)
+	buvResp, err := c.GetBuvId()
+	if err != nil {
+		log.Printf("[B站接口] 获取buvid失败，继续使用原Cookie: %v", err)
+		return fullCookie
+	}
+	if buvResp == nil || buvResp.Data.B3 == "" || buvResp.Data.B4 == "" {
+		return fullCookie
+	}
+	fullCookie = appendCookieValueIfMissing(fullCookie, "buvid3", buvResp.Data.B3)
+	fullCookie = appendCookieValueIfMissing(fullCookie, "buvid4", buvResp.Data.B4)
+	return fullCookie
+}
+
+func appendCookieValueIfMissing(cookie, name, value string) string {
+	if strings.TrimSpace(value) == "" || cookieHasKey(cookie, name) {
+		return cookie
+	}
+	if strings.TrimSpace(cookie) == "" {
+		return fmt.Sprintf("%s=%s", name, value)
+	}
+	return cookie + fmt.Sprintf("; %s=%s", name, value)
+}
+
+func cookieHasKey(cookie, name string) bool {
+	for _, part := range strings.Split(cookie, ";") {
+		key, _, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), name) {
+			return true
+		}
+	}
+	return false
 }
 
 // SendDynamic 发送动态
