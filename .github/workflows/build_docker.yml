@@ -118,7 +118,7 @@ jobs:
           printf '%s\n' "$DIGEST" > "/tmp/digests-dockerhub/${{ matrix.arch }}.digest"
 
       - name: Upload Docker Hub digest
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: digests-dockerhub-${{ matrix.arch }}
           path: /tmp/digests-dockerhub/*.digest
@@ -191,7 +191,7 @@ jobs:
           printf '%s\n' "$DIGEST" > "/tmp/digests-ghcr/${{ matrix.arch }}.digest"
 
       - name: Upload GHCR digest
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: digests-ghcr-${{ matrix.arch }}
           path: /tmp/digests-ghcr/*.digest
