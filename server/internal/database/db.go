@@ -60,6 +60,8 @@ func InitDB(dbPath string) error {
 	// 为 RecordHistory 添加组合索引
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_history_room_time ON record_histories(room_id, end_time DESC)")
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_history_session_room ON record_histories(session_id, room_id)")
+	DB.Exec("CREATE INDEX IF NOT EXISTS idx_history_room_session_time ON record_histories(room_id, session_id, start_time)")
+	DB.Exec("CREATE INDEX IF NOT EXISTS idx_history_room_title_time ON record_histories(room_id, title, start_time)")
 	DB.Exec("CREATE INDEX IF NOT EXISTS idx_room_priority_upload ON record_rooms(upload, auto_upload, priority DESC)")
 
 	// 为 RecordHistoryPart 添加组合索引

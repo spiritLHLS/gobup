@@ -20,10 +20,9 @@ import (
 var allowedAgentReleaseName = regexp.MustCompile(`^gobup-agent-linux-(amd64|arm64)\.tar\.gz$`)
 
 const (
-	defaultAgentGitHubRepo       = "spiritlhls/gobup"
-	defaultAgentInstallerRawURL  = "https://raw.githubusercontent.com/spiritLHLS/gobup/main/scripts/install_agent.sh"
-	defaultAgentReleaseBaseURL   = "https://github.com/spiritLHLS/gobup/releases/latest/download"
-	defaultAgentLocalUpstreamURL = "http://127.0.0.1:12380"
+	defaultAgentGitHubRepo      = "spiritlhls/gobup"
+	defaultAgentInstallerRawURL = "https://raw.githubusercontent.com/spiritLHLS/gobup/main/scripts/install_agent.sh"
+	defaultAgentReleaseBaseURL  = "https://github.com/spiritLHLS/gobup/releases/latest/download"
 )
 
 func AgentHealth(c *gin.Context) {
@@ -237,7 +236,7 @@ func buildAgentInstallCommand(c *gin.Context, config *models.SystemConfig, purpo
 		"--token", token,
 		"--source", source,
 		"--controller-base-url", baseURL,
-		"--upstream-base-url", defaultAgentLocalUpstreamURL,
+		"--upstream-base-url", baseURL,
 		"--upstream-token", token,
 		"--repo", repo,
 	}

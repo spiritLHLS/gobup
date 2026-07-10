@@ -54,13 +54,13 @@ Mounts:
 
 ## Rust Agent
 
-The Dashboard's "Publish and Agent" section can choose the Agent purpose:
+Use the left-side "Agent Management" page to add a remote Agent. In the common case you only fill in the remote host IP/domain, then the panel generates the install command. All Agents use the same controller panel token by default.
 
 - `upload`: receive controller `/agent/v1/publish` requests and forward them to the local GoBup service on the Agent machine.
 - `filescan`: scan the Agent machine's recording directory and return file counts, total size, and sample files.
 - `both`: enable both upload publishing and recording-file checking.
 
-After saving the Agent token, purpose, and source, generate the install command in the Dashboard. The controller source downloads `/agent/install-agent.sh` and `/agent/releases/gobup-agent-linux-*.tar.gz` from the current GoBup server; if release archives are not embedded, the controller redirects to GitHub Releases. The CDN source prefers `agentCdnBaseUrl` or built-in CDN mirrors for GitHub release assets.
+After saving the Agent, generate the install command on the "Agent Management" page. The controller source downloads `/agent/install-agent.sh` and `/agent/releases/gobup-agent-linux-*.tar.gz` from the current GoBup server; if release archives are not embedded, the controller redirects to GitHub Releases. The CDN source prefers `agentCdnBaseUrl` or built-in CDN mirrors for GitHub release assets.
 
 ## Build From Source
 
@@ -138,7 +138,7 @@ GOBUP_AGENT_TOKEN=replace_with_agent_token
 GOBUP_AGENT_PURPOSE=both
 GOBUP_AGENT_LISTEN=0.0.0.0:12381
 GOBUP_AGENT_WORK_PATH=/rec
-GOBUP_AGENT_UPSTREAM_BASE_URL=http://127.0.0.1:12380
+GOBUP_AGENT_UPSTREAM_BASE_URL=https://panel.example.com
 DANMAKU_FACTORY_PATH=/usr/local/bin/danmakufactory/DanmakuFactory
 DANMAKU_FONT_NAME="WenQuanYi Zen Hei"
 DANMAKU_FONTS_DIR=/usr/share/fonts

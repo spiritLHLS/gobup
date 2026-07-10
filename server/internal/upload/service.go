@@ -830,34 +830,20 @@ func (s *Service) checkAndAppendPendingHistories(publishedHistory *models.Record
 
 	log.Printf("[投稿后检查] 发现 %d 个可能需要追加的历史记录", len(pendingHistories))
 
+	pendingIDs := make([]uint, 0, len(pendingHistories))
+	for _, pendingHistory := range pendingHistories {
+		pendingIDs = append(pendingIDs, pendingHistory.ID)
+	}
+	countsByHistory := services.LoadPublishablePartCounts(db, pendingIDs)
+
 	for _, pendingHistory := range pendingHistories {
 		// 检查是否有已上传的分P（与 checkAndPublish 保持完全一致的计数逻辑）
-		var uploadedCount int64
-		var totalCount int64
-		var recordingCount int64
-
-		db.Model(&models.RecordHistoryPart{}).Where(
-			"history_id = ? AND upload = ? AND is_temp_file = ?",
-			pendingHistory.ID, true, false).Count(&uploadedCount)
-		db.Model(&models.RecordHistoryPart{}).Where(
-			"history_id = ? AND is_temp_file = ? AND NOT (file_delete = true AND upload = false)",
-			pendingHistory.ID, false).Count(&totalCount)
-		// 大文件切分兼容：原始分P退役后 totalCount==0，改用切分子分P统计
-		if totalCount == 0 {
-			db.Model(&models.RecordHistoryPart{}).Where(
-				"history_id = ? AND is_temp_file = ? AND temp_file_type = ?",
-				pendingHistory.ID, true, "split").Count(&totalCount)
-			db.Model(&models.RecordHistoryPart{}).Where(
-				"history_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ?",
-				pendingHistory.ID, true, "split", true).Count(&uploadedCount)
-		}
-		db.Model(&models.RecordHistoryPart{}).Where(
-			"history_id = ? AND recording = ?", pendingHistory.ID, true).Count(&recordingCount)
+		counts := countsByHistory[pendingHistory.ID]
 
 		// 只追加已全部上传完成且没有正在录制的历史记录
-		if uploadedCount > 0 && totalCount == uploadedCount && recordingCount == 0 {
+		if counts.Uploaded > 0 && counts.Total == counts.Uploaded && counts.Recording == 0 {
 			log.Printf("[投稿后检查] 发现可追加记录: history_id=%d, 已上传分P=%d, 将触发追加",
-				pendingHistory.ID, uploadedCount)
+				pendingHistory.ID, counts.Uploaded)
 
 			// 触发投稿（会自动检测到同SessionID已有投稿并追加）
 			if err := s.PublishHistory(pendingHistory.ID, room.UploadUserID); err != nil {

@@ -628,16 +628,16 @@ func (s *FileScanService) importFile(filePath string, info os.FileInfo) error {
 	var history *models.RecordHistory
 	var createErr error
 
-	// 重试机制：防止并发导致的SessionID冲突
+	// 重试机制：防止并发创建时触发数据库唯一约束（例如文件路径或房间记录冲突）
 	for retry := 0; retry < 3; retry++ {
 		history, createErr = s.getOrCreateHistory(db, metadata, &room)
 		if createErr == nil {
 			break
 		}
-		// 如果是SessionID冲突，修改SessionID后重试（使用小写比较兼容 SQLite 的 "UNIQUE" 和 MySQL 的 "Duplicate"）
+		// 使用小写比较兼容 SQLite 的 "UNIQUE" 和 MySQL 的 "Duplicate"
 		errMsgLower := strings.ToLower(createErr.Error())
 		if strings.Contains(errMsgLower, "duplicate") || strings.Contains(errMsgLower, "unique") {
-			log.Printf("[FileScan] 检测到SessionID冲突，修改后重试 (第%d次)", retry+1)
+			log.Printf("[FileScan] 检测到唯一约束冲突，修改SessionID后重试 (第%d次)", retry+1)
 			metadata.SessionID = fmt.Sprintf("%s_%d_%d", metadata.SessionID, time.Now().Unix(), retry)
 			time.Sleep(time.Millisecond * 100) // 短暂等待
 			continue

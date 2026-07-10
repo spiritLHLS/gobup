@@ -423,17 +423,6 @@ func (s *FileScanService) getOrCreateHistory(db *gorm.DB, metadata *FileMetadata
 		}
 	}
 
-	// 创建前清理同 session_id 的软删除记录（避免 UNIQUE 约束冲突）
-	// 用户从 UI 删除历史记录时 GORM 只做软删除（设置 deleted_at），session_id 仍占用唯一索引
-	var softDeletedHistory models.RecordHistory
-	if err := db.Unscoped().Where("session_id = ? AND deleted_at IS NOT NULL", metadata.SessionID).First(&softDeletedHistory).Error; err == nil {
-		log.Printf("[FileScan] 发现被软删除的历史记录占用了 session_id，永久删除以释放: SessionID=%s, ID=%d",
-			metadata.SessionID, softDeletedHistory.ID)
-		if err := db.Unscoped().Delete(&softDeletedHistory).Error; err != nil {
-			log.Printf("[FileScan] 永久删除软删除记录失败: %v", err)
-		}
-	}
-
 	if err := db.Create(&history).Error; err != nil {
 		return nil, fmt.Errorf("创建历史记录失败: %w", err)
 	}

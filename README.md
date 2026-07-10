@@ -54,13 +54,13 @@ docker compose up -d
 
 ## Rust Agent
 
-控制面板的「投稿与 Agent」区域可以选择 Agent 用途：
+控制面板左侧「Agent 管理」页面可以新增远程 Agent，通常只需要填写远程机器 IP/域名，然后由面板生成安装命令。所有 Agent 默认使用同一个主控面板 Token。
 
 - `upload`：作为远程投稿端，接收控制端 `/agent/v1/publish` 请求，并转发给 Agent 所在机器的本地 GoBup 服务执行投稿。
 - `filescan`：作为录制文件检查端，扫描 Agent 所在机器的录制目录并返回文件数量、总大小和样本列表。
 - `both`：同时启用上传投稿和录制文件检查能力。
 
-保存 Agent Token、用途和来源后，在面板生成安装命令。控制端来源会下载当前 GoBup 服务托管的 `/agent/install-agent.sh` 和 `/agent/releases/gobup-agent-linux-*.tar.gz`；如果控制端未内嵌 release 包，会回退到 GitHub Releases。CDN 来源会优先按 `agentCdnBaseUrl` 或内置 CDN 镜像下载 GitHub release 资源。
+保存 Agent 后，在「Agent 管理」页面生成安装命令。控制端来源会下载当前 GoBup 服务托管的 `/agent/install-agent.sh` 和 `/agent/releases/gobup-agent-linux-*.tar.gz`；如果控制端未内嵌 release 包，会回退到 GitHub Releases。CDN 来源会优先按 `agentCdnBaseUrl` 或内置 CDN 镜像下载 GitHub release 资源。
 
 ## 源码运行
 
@@ -138,7 +138,7 @@ GOBUP_AGENT_TOKEN=replace_with_agent_token
 GOBUP_AGENT_PURPOSE=both
 GOBUP_AGENT_LISTEN=0.0.0.0:12381
 GOBUP_AGENT_WORK_PATH=/rec
-GOBUP_AGENT_UPSTREAM_BASE_URL=http://127.0.0.1:12380
+GOBUP_AGENT_UPSTREAM_BASE_URL=https://panel.example.com
 DANMAKU_FACTORY_PATH=/usr/local/bin/danmakufactory/DanmakuFactory
 DANMAKU_FONT_NAME="WenQuanYi Zen Hei"
 DANMAKU_FONTS_DIR=/usr/share/fonts

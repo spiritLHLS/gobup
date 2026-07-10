@@ -248,20 +248,22 @@ func (s *VideoSyncService) SyncVideoInfo(historyID uint) error {
 
 				log.Printf("[审核通过] 发现 %d 个同SessionID的未投稿记录，检查是否有已上传分P", len(pendingHistories))
 
-				// 检查这些历史记录是否有已上传的分P（需要追加）
+				pendingIDs := make([]uint, 0, len(pendingHistories))
 				for _, pendingHistory := range pendingHistories {
-					var uploadedPartsCount int64
+					pendingIDs = append(pendingIDs, pendingHistory.ID)
+				}
+				countsByHistory := LoadPublishablePartCounts(db, pendingIDs)
+
+				// 检查这些历史记录是否已经完整可追加，避免半场直播被提前追加。
+				for _, pendingHistory := range pendingHistories {
+					counts := countsByHistory[pendingHistory.ID]
 					// file_delete 不过滤：CleanSplitTempFilesBySessionID（步骤1.5）已将同 session 内所有
 					// 已上传的 split 子分P 的 file_delete 置为 true，若继续过滤 file_delete=false，
 					// 会导致 pendingHistory 的 split 子分P 被漏检，TriggerPublish 永远不触发。
 					// CID/FileName 仍保存在 DB 中，file_delete=true 不影响 B 站侧追加投稿。
-					db.Model(&models.RecordHistoryPart{}).Where(
-						"history_id = ? AND upload = ?",
-						pendingHistory.ID, true).Count(&uploadedPartsCount)
-
-					if uploadedPartsCount > 0 {
+					if counts.Uploaded > 0 && counts.Total == counts.Uploaded && counts.Recording == 0 {
 						log.Printf("[审核通过] 发现待追加的历史记录: history_id=%d, 已上传分P数=%d, 将触发自动追加",
-							pendingHistory.ID, uploadedPartsCount)
+							pendingHistory.ID, counts.Uploaded)
 
 						// 通过注入的 TriggerPublish 回调实际触发追加投稿，延迟5秒确保视频状态已稳定
 						go func(hid uint, uploadUserID uint) {

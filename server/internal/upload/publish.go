@@ -14,7 +14,6 @@ import (
 	"github.com/gobup/server/internal/database"
 	"github.com/gobup/server/internal/models"
 	"github.com/gobup/server/internal/services"
-	"gorm.io/gorm"
 )
 
 func (s *Service) PublishHistory(historyID uint, userID uint) error {
@@ -647,132 +646,8 @@ func (s *Service) publishHistory(historyID uint, userID uint, allowRemote bool) 
 	return nil
 }
 
-func selectPreferredPublishAgentEndpoint(db *gorm.DB) (string, bool) {
-	if db == nil {
-		return "", false
-	}
-	var node models.AgentNode
-	err := db.Where("enabled = ? AND blocked = ?", true, false).
-		Where("purpose IN ?", []string{models.AgentPurposeUpload, models.AgentPurposeBoth, ""}).
-		Order("CASE WHEN last_health_status = 'success' THEN 0 ELSE 1 END, priority DESC, updated_at DESC").
-		First(&node).Error
-	if err != nil {
-		return "", false
-	}
-	endpoint := models.NormalizeAgentEndpoint(node.Endpoint)
-	return endpoint, endpoint != ""
-}
-
-func validatePublishAgentEndpointForUpload(db *gorm.DB, endpoint string) error {
-	if db == nil {
-		return nil
-	}
-	endpoint = models.NormalizeAgentEndpoint(endpoint)
-	var node models.AgentNode
-	if err := db.Where("endpoint = ?", endpoint).First(&node).Error; err != nil {
-		return nil
-	}
-	if node.Blocked {
-		if strings.TrimSpace(node.BlockReason) != "" {
-			return fmt.Errorf("当前远程 Agent 已屏蔽: %s", strings.TrimSpace(node.BlockReason))
-		}
-		return fmt.Errorf("当前远程 Agent 已屏蔽")
-	}
-	if !node.Enabled {
-		return fmt.Errorf("当前远程 Agent 已停用")
-	}
-	if !models.AgentPurposeAllows(node.Purpose, models.AgentPurposeUpload) {
-		return fmt.Errorf("当前远程 Agent 用途为 %s，不允许上传投稿", models.NormalizeAgentPurpose(node.Purpose))
-	}
-	return nil
-}
-
-func markPublishAgentEndpointError(endpoint string, err error) {
-	if err == nil {
-		return
-	}
-	endpoint = models.NormalizeAgentEndpoint(endpoint)
-	if endpoint == "" {
-		return
-	}
-	_ = database.GetDB().Model(&models.AgentNode{}).
-		Where("endpoint = ?", endpoint).
-		Updates(map[string]interface{}{
-			"last_health_status":  "error",
-			"last_health_message": err.Error(),
-		}).Error
-}
-
-func markPublishAgentEndpointSuccess(endpoint string) {
-	endpoint = models.NormalizeAgentEndpoint(endpoint)
-	if endpoint == "" {
-		return
-	}
-	now := time.Now()
-	_ = database.GetDB().Model(&models.AgentNode{}).
-		Where("endpoint = ?", endpoint).
-		Updates(map[string]interface{}{
-			"last_seen_at":        &now,
-			"last_health_status":  "success",
-			"last_health_message": "最近投稿请求成功",
-		}).Error
-}
-
 func normalizePublishTitle(title string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(title)), " ")
-}
-
-// bv2avLocal 将 BV 号转换为 AV 号（upload 包内部使用，避免跨包循环导入）
-func bv2avLocal(bv string) int64 {
-	const (
-		xorCode  = int64(23442827791579)
-		maskCode = int64(2251799813685247)
-		base     = 58
-		alphabet = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf"
-	)
-	if len(bv) != 12 || bv[:2] != "BV" {
-		return 0
-	}
-	charMap := make(map[byte]int64)
-	for i, c := range alphabet {
-		charMap[byte(c)] = int64(i)
-	}
-	bytes := []byte(bv)
-	bytes[3], bytes[9] = bytes[9], bytes[3]
-	bytes[4], bytes[7] = bytes[7], bytes[4]
-	var tmp int64
-	for i := 2; i < len(bytes); i++ {
-		tmp = tmp*base + charMap[bytes[i]]
-	}
-	return (tmp ^ xorCode) & maskCode
-}
-
-// Av2Bv 将AV号转换为BV号
-// 算法参考: https://github.com/SocialSisterYi/bilibili-API-collect
-func Av2Bv(av int64) string {
-	const (
-		xorCode  = int64(23442827791579)
-		maskCode = int64(2251799813685247)
-		maxAid   = int64(1) << 51
-		base     = 58
-		alphabet = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf"
-	)
-
-	bytes := []byte{'B', 'V', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0'}
-	bvIndex := len(bytes) - 1
-	tmp := (maxAid | av) ^ xorCode
-
-	for tmp > 0 {
-		bytes[bvIndex] = alphabet[tmp%base]
-		tmp /= base
-		bvIndex--
-	}
-
-	// 交换特定位置的字符
-	bytes[3], bytes[9] = bytes[9], bytes[3]
-	bytes[4], bytes[7] = bytes[7], bytes[4]
-
-	return string(bytes)
 }
 
 // GetSeasons 获取合集列表

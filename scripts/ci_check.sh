@@ -269,9 +269,9 @@ check_agent_distribution() {
     && log_pass "controller exposes public agent installer and release routes" \
     || log_fail "controller agent distribution routes are missing"
 
-  grep -q 'AgentPurpose' server/internal/models/models.go && grep -q 'FileCheckMode' server/internal/models/models.go && grep -q 'agentPurpose' web/src/components/dashboard/PublishAgentConfig.vue \
-    && log_pass "agent purpose and file-check mode are wired across backend/frontend" \
-    || log_fail "agent purpose/file-check wiring is incomplete"
+  grep -q 'AgentPurpose' server/internal/models/models.go && grep -q 'FileCheckMode' server/internal/models/models.go && grep -q 'purpose' web/src/views/Agents.vue && grep -q 'upload-targets' web/src/api/index.js \
+    && log_pass "agent purpose, file-check mode, and upload-target management are wired across backend/frontend" \
+    || log_fail "agent purpose/file-check/upload-target wiring is incomplete"
 
   grep -q 'gobup-agent-linux-amd64.tar.gz' .github/workflows/main.yml && grep -q 'AGENT_TARGETS=' .github/workflows/main.yml \
     && log_pass "release workflow builds and uploads Rust agent packages" \

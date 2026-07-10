@@ -121,13 +121,26 @@ func (s *Service) UpdatePublishedVideoWithBurnedParts(burnedPartID uint) error {
 
 	// 构建更新后的分P列表：以B站API返回的当前分P列表为基础，追加弹幕版
 	// 这样可以确保与B站实际状态严格一致，避免遗漏或重复
+	dbPartByCID := make(map[int64]models.RecordHistoryPart, len(archiveDetail.Videos))
+	if room.PartTitleTemplate != "" && len(archiveDetail.Videos) > 0 {
+		cids := make([]int64, 0, len(archiveDetail.Videos))
+		for _, v := range archiveDetail.Videos {
+			cids = append(cids, v.CID)
+		}
+		var dbParts []models.RecordHistoryPart
+		if err := db.Where("c_id IN ? AND file_delete = ?", cids, false).Find(&dbParts).Error; err == nil {
+			for _, part := range dbParts {
+				dbPartByCID[part.CID] = part
+			}
+		}
+	}
+
 	var allVideoParts []bili.PublishVideoPartRequest
 	for i, v := range archiveDetail.Videos {
 		// 尝试从DB查找对应记录以获取 PartTitle 模板所需元数据，找不到则使用B站返回的 part 名
 		partTitle := v.Part
 		if room.PartTitleTemplate != "" {
-			var dbPart models.RecordHistoryPart
-			if dbErr := db.Where("c_id = ? AND file_delete = ?", v.CID, false).First(&dbPart).Error; dbErr == nil {
+			if dbPart, ok := dbPartByCID[v.CID]; ok {
 				partTemplateData := map[string]interface{}{
 					"index":     i + 1,
 					"startTime": dbPart.StartTime,
@@ -329,25 +342,44 @@ func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHist
 		return true
 	}
 
+	sourceIDs := make([]uint, 0, len(originalParts))
+	for _, part := range originalParts {
+		sourceIDs = append(sourceIDs, part.ID)
+	}
+	anyBurnedSourceSet := make(map[uint]struct{}, len(originalParts))
+	appendedSourceSet := make(map[uint]struct{}, len(originalParts))
+	pendingAppendBySource := make(map[uint]models.RecordHistoryPart, len(originalParts))
+	var burnedParts []models.RecordHistoryPart
+	if err := db.Where(
+		"source_part_id IN ? AND is_temp_file = ? AND temp_file_type = ?",
+		sourceIDs, true, "danmaku_burn",
+	).Order("created_at ASC").Find(&burnedParts).Error; err != nil {
+		log.Printf("[弹幕回补] 查询历史记录 %d 的烧录分P失败: %v", history.ID, err)
+		return true
+	}
+	for _, burned := range burnedParts {
+		anyBurnedSourceSet[burned.SourcePartID] = struct{}{}
+		if burned.AppendedToVideo {
+			appendedSourceSet[burned.SourcePartID] = struct{}{}
+			continue
+		}
+		if burned.Upload && burned.CID > 0 {
+			if _, exists := pendingAppendBySource[burned.SourcePartID]; !exists {
+				pendingAppendBySource[burned.SourcePartID] = burned
+			}
+		}
+	}
+
 	burnService := services.NewDanmakuBurnService()
 
 	for _, part := range originalParts {
 		// 1. 检查是否已有追加成功的弹幕烧录版
-		var appendedCount int64
-		db.Model(&models.RecordHistoryPart{}).Where(
-			"source_part_id = ? AND is_temp_file = ? AND temp_file_type = ? AND appended_to_video = ?",
-			part.ID, true, "danmaku_burn", true,
-		).Count(&appendedCount)
-		if appendedCount > 0 {
+		if _, ok := appendedSourceSet[part.ID]; ok {
 			continue // 已追加，跳过
 		}
 
 		// 2. 检查是否已有上传完成但 appended_to_video=false 的烧录版（可能 EditVideo 失败需重试）
-		var pendingAppend models.RecordHistoryPart
-		if err := db.Where(
-			"source_part_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ? AND c_id > 0 AND appended_to_video = ?",
-			part.ID, true, "danmaku_burn", true, false,
-		).First(&pendingAppend).Error; err == nil {
+		if pendingAppend, ok := pendingAppendBySource[part.ID]; ok {
 			if pendingAppend.RateLimitCooldownAt != nil && pendingAppend.RateLimitCooldownAt.After(time.Now()) {
 				stats.appendCooldownSkips++
 				continue
@@ -370,12 +402,7 @@ func (s *Service) appendBurnedPartsForApprovedHistory(history *models.RecordHist
 		}
 
 		// 3. 检查是否已有正在烧录/上传中的记录（任意状态，避免重复触发）
-		var anyBurnedCount int64
-		db.Model(&models.RecordHistoryPart{}).Where(
-			"source_part_id = ? AND is_temp_file = ? AND temp_file_type = ?",
-			part.ID, true, "danmaku_burn",
-		).Count(&anyBurnedCount)
-		if anyBurnedCount > 0 {
+		if _, ok := anyBurnedSourceSet[part.ID]; ok {
 			// 已有烧录记录（upload=false：正在上传中，或文件不存在待重试等），跳过避免重复
 			continue
 		}

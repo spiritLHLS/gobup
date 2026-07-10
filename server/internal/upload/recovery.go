@@ -136,21 +136,59 @@ func (s *Service) RequeueInterruptedBurns() {
 			log.Printf("[启动恢复-烧录] 查询房间 %s 的上传分P失败: %v", room.RoomID, err)
 			continue
 		}
+		if len(uploadedParts) == 0 {
+			continue
+		}
+
+		partIDs := make([]uint, 0, len(uploadedParts))
+		historyIDs := make([]uint, 0, len(uploadedParts))
+		historyIDSet := make(map[uint]struct{}, len(uploadedParts))
+		for _, part := range uploadedParts {
+			partIDs = append(partIDs, part.ID)
+			if part.HistoryID == 0 {
+				continue
+			}
+			if _, ok := historyIDSet[part.HistoryID]; ok {
+				continue
+			}
+			historyIDSet[part.HistoryID] = struct{}{}
+			historyIDs = append(historyIDs, part.HistoryID)
+		}
+
+		burnedSourceSet := make(map[uint]struct{}, len(uploadedParts))
+		var burnedSourceIDs []uint
+		if err := db.Model(&models.RecordHistoryPart{}).Where(
+			"source_part_id IN ? AND is_temp_file = ? AND temp_file_type = ?",
+			partIDs, true, "danmaku_burn",
+		).Pluck("source_part_id", &burnedSourceIDs).Error; err != nil {
+			log.Printf("[启动恢复-烧录] 查询房间 %s 的烧录记录失败: %v", room.RoomID, err)
+			continue
+		}
+		for _, sourceID := range burnedSourceIDs {
+			burnedSourceSet[sourceID] = struct{}{}
+		}
+
+		historyByID := make(map[uint]models.RecordHistory, len(historyIDs))
+		if len(historyIDs) > 0 {
+			var histories []models.RecordHistory
+			if err := db.Where("id IN ?", historyIDs).Find(&histories).Error; err != nil {
+				log.Printf("[启动恢复-烧录] 查询房间 %s 的历史记录失败: %v", room.RoomID, err)
+				continue
+			}
+			for _, history := range histories {
+				historyByID[history.ID] = history
+			}
+		}
 
 		for _, part := range uploadedParts {
 			// 检查是否已存在对应的烧录 Part 记录（任意状态均算，包括上传失败待重试）
-			var burnedCount int64
-			db.Model(&models.RecordHistoryPart{}).Where(
-				"source_part_id = ? AND is_temp_file = ? AND temp_file_type = ?",
-				part.ID, true, "danmaku_burn",
-			).Count(&burnedCount)
-			if burnedCount > 0 {
+			if _, ok := burnedSourceSet[part.ID]; ok {
 				continue // 烧录记录已存在，由 RequeueStuckTempParts 负责重传
 			}
 
 			// 检查对应历史记录是否已投稿（已投稿则通过 UpdatePublishedVideoWithBurnedParts 回补）
-			var history models.RecordHistory
-			if err := db.First(&history, part.HistoryID).Error; err != nil {
+			history, ok := historyByID[part.HistoryID]
+			if !ok {
 				continue
 			}
 
@@ -281,36 +319,25 @@ func (s *Service) RecoverUnpublishedHistories() {
 			continue
 		}
 
+		historyIDs := make([]uint, 0, len(histories))
+		for _, hist := range histories {
+			if hist.Upload {
+				historyIDs = append(historyIDs, hist.ID)
+			}
+		}
+		countsByHistory := services.LoadPublishablePartCounts(db, historyIDs)
+
 		for _, hist := range histories {
 			if !hist.Upload {
 				continue
 			}
-			// 检查是否有已上传的原始分P
-			var uploadedCount, totalCount int64
-			db.Model(&models.RecordHistoryPart{}).Where(
-				"history_id = ? AND is_temp_file = ? AND NOT (file_delete = true AND upload = false)",
-				hist.ID, false,
-			).Count(&totalCount)
-			db.Model(&models.RecordHistoryPart{}).Where(
-				"history_id = ? AND upload = ? AND is_temp_file = ?",
-				hist.ID, true, false,
-			).Count(&uploadedCount)
-			// 大文件切分兼容：原始分P退役后 totalCount==0，改用切分子分P统计
-			if totalCount == 0 {
-				db.Model(&models.RecordHistoryPart{}).Where(
-					"history_id = ? AND is_temp_file = ? AND temp_file_type = ?",
-					hist.ID, true, "split").Count(&totalCount)
-				db.Model(&models.RecordHistoryPart{}).Where(
-					"history_id = ? AND is_temp_file = ? AND temp_file_type = ? AND upload = ?",
-					hist.ID, true, "split", true).Count(&uploadedCount)
-			}
-
-			if totalCount == 0 || uploadedCount < totalCount {
+			counts := countsByHistory[hist.ID]
+			if counts.Total == 0 || counts.Uploaded < counts.Total {
 				continue // 还有未上传的原始/子分P，不尝试恢复投稿
 			}
 
 			log.Printf("[启动恢复-投稿] 发现已全部上传但未投稿的历史记录，重新检查: history_id=%d, 总分P=%d, 已上传=%d",
-				hist.ID, totalCount, uploadedCount)
+				hist.ID, counts.Total, counts.Uploaded)
 			// 复用 checkAndPublish 逻辑（含10分钟冷却检查），在单独 goroutine 中执行
 			go func(h models.RecordHistory, r models.RecordRoom) {
 				s.checkAndPublish(&h, &r)

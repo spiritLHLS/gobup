@@ -39,9 +39,7 @@ jobs:
         cache-dependency-path: web/package-lock.json
 
     - name: Set up Zig
-      run: |
-        sudo snap install zig --classic --edge
-        zig version
+      uses: mlugg/setup-zig@v2
 
     - name: Get current date
       id: date

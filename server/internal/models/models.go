@@ -214,7 +214,7 @@ type RecordHistory struct {
 	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
 	EventID            string         `gorm:"index" json:"eventId"`
 	RoomID             string         `gorm:"index;not null" json:"roomId"`
-	SessionID          string         `gorm:"uniqueIndex:idx_session" json:"sessionId"`
+	SessionID          string         `gorm:"index" json:"sessionId"`
 	Uname              string         `json:"uname"`
 	Title              string         `json:"title"`
 	AreaName           string         `json:"areaName"`
